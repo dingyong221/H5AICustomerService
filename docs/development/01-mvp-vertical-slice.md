@@ -796,21 +796,21 @@ A3 至少提交以下自动化证据：
 
 ## 15. 本批WorkBuddy联调契约与验收门禁
 
-> 基线commit：`171f93f`。本节是对现有纵向切片的增量，不替代第1—14节，也不代表OAuth、远程MCP、Connector或生产部署已经完成。
+> 基线commit：`708e095`。本节记录上一批本地MCP适配层结果，不替代第1—14节，也不代表OAuth、远程MCP、Connector或生产部署已经完成。
 
 ### 15.1 基线事实
 
-| 能力                 | `171f93f`已有证据                                                                                             | 当前结论                                                              |
-| -------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| Onboarding领域状态机 | `industry → materials → policy → confirmation → generating → manageable`，并包含`cancel/resume`和生成失败回退 | 可作为本批工具调用的领域基础                                          |
-| MySQL仓储            | 外部身份、商家绑定、workflow、乐观版本和客服列表仓储已存在                                                    | 只有配置真实MySQL后才可宣称持久化可用                                 |
-| 应用服务             | `execute`支持创建入口、后台入口和帮助；`advance`支持状态事件                                                  | 已由HTTP与本地MCP适配层暴露；受保护路径仍受鉴权/数据库门禁            |
-| 身份派生             | 已有长度前缀HMAC派生函数与单元测试                                                                            | 不是OAuth验证器；运行时仍使用不可用认证器                             |
-| 0/1/多个客服         | 应用服务测试覆盖空列表、单客服和多客服返回                                                                    | 多客服明确选择后的对应链接仍无契约                                    |
-| Skill源稿            | 有双入口、字段、确认和错误说明                                                                                | 已对齐四个`allowed-tools`及非秘密配置；仍不可打包发布                 |
-| MCP传输              | 无                                                                                                            | 本地`POST /mcp`及官方SDK协议测试已完成；远程部署和WorkBuddy实机未完成 |
+| 能力                 | `708e095`已有证据                                                                                             | 当前结论                                                   |
+| -------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Onboarding领域状态机 | `industry → materials → policy → confirmation → generating → manageable`，并包含`cancel/resume`和生成失败回退 | 可作为本批工具调用的领域基础                               |
+| MySQL仓储            | 外部身份、商家绑定、workflow、乐观版本和客服列表仓储已存在                                                    | 只有配置真实MySQL后才可宣称持久化可用                      |
+| 应用服务             | `execute`支持创建入口、后台入口和帮助；`advance`支持状态事件                                                  | 已由HTTP与本地MCP适配层暴露；受保护路径仍受鉴权/数据库门禁 |
+| 身份派生             | 已有长度前缀HMAC派生函数与单元测试                                                                            | 不是OAuth验证器；运行时仍使用不可用认证器                  |
+| 0/1/多个客服         | 应用服务测试覆盖空列表、单客服和多客服返回                                                                    | 多客服明确选择后的对应链接仍无契约                         |
+| Skill源稿            | 有双入口、字段、确认和错误说明                                                                                | 已对齐四个`allowed-tools`及非秘密配置；仍不可打包发布      |
+| MCP传输              | 本地`POST /mcp`、四工具和官方SDK协议测试                                                                      | 本地适配已完成；远程部署和WorkBuddy实机未完成              |
 
-因此，本批首先闭合“协议可发现/可调用”，再验证身份和业务状态；不能把领域单测通过等同于WorkBuddy联调通过。
+上一批已闭合本地“协议可发现/可调用”；身份、数据库、生成和远程状态仍按各自门禁判断，不能把协议测试通过等同于WorkBuddy业务联调通过。
 
 ### 15.2 本批MCP门面工具
 
@@ -858,7 +858,7 @@ A3 至少提交以下自动化证据：
 
 `BINDING_REQUIRED`不是第四种认证结果，而是`authorized`后的业务子状态：外部身份已验证，但未绑定可管理商家。此时不得列出客服或创建草稿，只能返回安全绑定动作。
 
-commit `171f93f`的真实运行时只能到达`identity_unconfigured`；`authorized`目前只存在测试替身。关闭本批自动化门禁不等于OAuth完成，更不等于生产授权可用。
+commit `708e095`的真实运行时只能到达`identity_unconfigured`；`authorized`目前只存在测试替身。关闭本批自动化门禁不等于OAuth完成，更不等于生产授权可用。
 
 ### 15.4 0/1/多个客服管理入口契约
 
@@ -911,7 +911,7 @@ structuredContent: {
 
 ### 15.7 剩余阻断与退出条件
 
-| 阻断                | `171f93f`现状                                                                                          | 关闭证据                                                                                   |
+| 阻断                | `708e095`现状                                                                                          | 关闭证据                                                                                   |
 | ------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
 | 远程MCP入口         | 本地`POST /mcp`已实现无会话Streamable HTTP；正式HTTPS域名尚未部署                                      | 目标WorkBuddy客户端完成远程MCP-01，保留工具列表与调用trace                                 |
 | 工具适配器          | 四个门面工具已暴露并有官方SDK协议测试                                                                  | 当前本地适配层已关闭；后续变更继续保持四工具、Skill和测试一致                              |
@@ -926,3 +926,143 @@ structuredContent: {
 | 生产                | 未验证                                                                                                 | 不属于本批完成条件；OAuth、TLS、Secret、撤销轮换、监控和正式审核另设生产门禁               |
 
 本批可以在OAuth和生产尚未完成的前提下关闭“本地适配层联调契约”，但报告必须写明：已授权态使用何种测试替身、哪些调用来自真实MCP传输、哪些仍是模拟。只有MCP-01至MCP-05都有可复查证据且未关闭阻断被如实列出，才能称为“本地MCP适配层联调完成”；不得称为“WorkBuddy正式接入完成”“完整业务联调闭环”或“生产可用”。
+
+## 16. OAuth 2.1 + PKCE与平台账号身份桥接的本地边界
+
+> 阶段起点commit：`708e095`。起点已有本地Streamable HTTP MCP和四工具协议测试，但没有OAuth Authorization Server、真实Token验证器或WorkBuddy第三方应用换票实现。本节定义本阶段可编码、可自动化验证的边界，不授权写入真实client secret或部署生产OAuth。
+
+### 16.1 不可混用的两个Token域
+
+实现必须拆分为两个独立安全组件，不能继续用一个含糊的“WorkBuddy Bearer认证器”同时解释两类Token：
+
+| 组件                      | 输入                                           | 输出                                                      | 可调用目标                                               |
+| ------------------------- | ---------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------- |
+| `McpAccessTokenVerifier`  | MCP HTTP transport中的平台MCP访问Token         | 平台`AccountContext`、授权商家候选、scopes、Token状态     | 只为本平台四个MCP工具建立调用上下文                      |
+| `WorkBuddyIdentityBridge` | 平台后端收到的WorkBuddy第三方应用OAuth回调code | 服务端换票结果中的`open_id`，随后立即转换为外部身份查找键 | 只调用WorkBuddy授权/Token/Open API端点并建立平台账号绑定 |
+
+平台MCP访问Token由本平台Authorization Server签发，其`iss`、`aud/resource`、client、scope和撤销域都属于本平台MCP。WorkBuddy Open API/第三方应用Token由WorkBuddy签发给本项目第三方应用，只能保留在平台后端用于获批Open API。两者满足以下硬约束：
+
+- `McpAccessTokenVerifier`拒绝WorkBuddy Open API Token，即使它格式正确或包含`open_id`。
+- `WorkBuddyIdentityBridge`不接受平台MCP Token调用WorkBuddy Token/Open API端点。
+- 不实现两类Token的隐式交换、fallback重试、共用缓存键、共用数据库列或“哪个能用就用哪个”的兼容逻辑。
+- MCP Token claims不包含`open_id`、WorkBuddy Open API Token、手机号或第三方应用secret；平台业务服务只接收验证后的`AccountContext`。
+- WorkBuddy Open API Token、Refresh Token和换票授权码不进入MCP `structuredContent`、Skill上下文、浏览器URL、普通日志或业务表明文字段。
+
+### 16.2 本地端点与协议责任
+
+本地验证实现至少划分以下端点；路径可在实现ADR中调整，但职责不得合并：
+
+| 端点/能力                             | 责任                                                                                             | 不负责                                                        |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| MCP Protected Resource Metadata       | 声明本地MCP resource及其平台Authorization Server                                                 | 不返回client secret、Token或用户身份                          |
+| 平台Authorization Server Metadata     | 声明authorization、token、revoke、PKCE S256及支持的scope                                         | 不声明尚未实现的生产能力或真实WorkBuddy配置                   |
+| 平台`/oauth/authorize`                | 校验client、精确redirect URI、resource、scope、state和S256 challenge；要求平台登录/绑定/授权确认 | 不接收密码、OTP或`open_id`查询参数                            |
+| 平台`/oauth/token`                    | 校验一次性code、PKCE verifier、client、redirect URI与resource，签发平台MCP Token                 | 不接收/返回WorkBuddy Open API Token；不调用WorkBuddy Open API |
+| 平台`/oauth/revoke`或等价本地撤销能力 | 撤销本地测试MCP Token并使后续工具调用失败                                                        | 不冒充WorkBuddy第三方应用Token撤销完成                        |
+| WorkBuddy绑定开始/回调                | 使用独立state发起第三方应用OAuth；回调后只由后端换票并读取`open_id`                              | 不签发平台MCP Token；不把WorkBuddy Token交给MCP客户端         |
+| `/mcp`                                | 仅验证平台MCP Token并执行白名单工具                                                              | 不直接解析用户自报`open_id`，不接收工具参数中的Token/密码/OTP |
+
+本地阶段允许使用预注册的测试public client、回环redirect URI、测试issuer和进程内/本地测试签名密钥；这些值必须显式标记test且不能成为生产默认值。动态客户端注册、真实WorkBuddy client和生产redirect不在本阶段承诺内。
+
+### 16.3 OAuth 2.1 + PKCE授权时序
+
+```text
+MCP client → /mcp（无平台MCP Token）
+  → 授权挑战 / Protected Resource Metadata
+  → 平台 /oauth/authorize
+       ├─ 校验 client + exact redirect_uri + resource + scope
+       ├─ 校验 state 存在，由client负责回调关联
+       ├─ 要求 code_challenge_method=S256
+       ├─ 平台账号登录
+       ├─ 若未绑定：进入独立 WorkBuddy 第三方应用 OAuth
+       │    → 平台后端换票 → open_id
+       │    → HMAC(issuer, client_id, open_id) → Account绑定
+       └─ 选择商家并确认scope → 一次性平台授权码
+MCP client → 平台 /oauth/token（code + code_verifier）
+  → 平台MCP访问Token
+MCP client → /mcp Authorization: Bearer <平台MCP Token>
+  → Token验证 → AccountContext → scope/Membership/对象归属 → 工具
+```
+
+安全规则：
+
+- PKCE只允许`S256`；不支持`plain`或缺失challenge。
+- 授权码短时、一次性，并绑定client、精确redirect URI、resource、scope集合、Account和PKCE challenge。
+- 平台OAuth state与WorkBuddy第三方应用OAuth state使用不同命名空间、Cookie/会话关联和一次性记录，任一流程的state不能在另一流程复用。
+- `open_id`唯一可信来源是`WorkBuddyIdentityBridge`执行的第三方应用OAuth服务端换票响应。授权请求参数、MCP Token claims、聊天、工具参数、浏览器表单或测试Header中的`open_id`全部拒绝。
+- 外部身份查找键按产品契约计算：`HMAC(server_key, encode(issuer, client_id, open_id))`。当前代码中的`provider + issuer + audience + open_id`输入是待修正/迁移阻断，不能用文档把`audience`静默解释成`client_id`。
+- 同一查找键已绑定其他Account时返回安全冲突并停止；不得自动迁移、合并或覆盖。
+
+### 16.4 身份三态与fail-closed配置矩阵
+
+| 状态                      | 最小服务端条件                                                                                                                                 | MCP行为                                                                                          | 禁止降级                                                                      |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| `identity_unconfigured`   | Authorization Server签名/加密密钥、issuer、MCP resource、client/redirect allowlist、Token存储/撤销、身份HMAC key或WorkBuddy bridge必需配置缺失 | `tools/list`与`h5cs_help`可用；所有受保护工具返回`SERVICE_UNAVAILABLE`、`isError=true`和trace ID | 不接受任意Bearer、不启用固定Account、不生成临时万能Token、不返回猜测的授权URL |
+| `authentication_required` | 必需配置就绪，但请求无平台MCP Token，或Token无效/过期/撤销/issuer/aud/resource不符                                                             | 返回`UNAUTHORIZED`和标准授权挑战；不进入Repository或业务服务                                     | 不尝试把Bearer当WorkBuddy Open API Token；不从工具参数补Token                 |
+| `authorized`              | 平台MCP Token通过全部验证并映射到有效Account/scopes                                                                                            | 继续校验Membership、merchant选择和workflow/assistant归属                                         | 不因Token有效而跳过商家或对象授权；不表示真实WorkBuddy/生产已经验证           |
+
+`BINDING_REQUIRED`仍是授权/账号上下文中的业务子状态。更安全的签发顺序是先完成平台账号登录和必要外部身份绑定，再签发平台OAuth授权码；若已有Token对应Account后来失去商家绑定，工具返回`BINDING_REQUIRED`而非重新解释Token。
+
+测试替身只能在显式test环境注入。开发/预发布/生产若无真实配置必须与当前`UnavailableWorkBuddyAuthenticator`一样fail closed；禁止读取示例值、自动生成持久签名密钥或使用首个数据库用户兜底。
+
+### 16.5 最小数据与Secret边界
+
+| 数据                    | 本地边界                                                                                             |
+| ----------------------- | ---------------------------------------------------------------------------------------------------- |
+| OAuth client            | 测试client ID、精确redirect URI、允许resource/scope；public client不存client secret                  |
+| 授权请求/code           | state关联、PKCE challenge、Account、merchant选择、scope、resource、过期/消费状态；code只存摘要       |
+| 平台MCP Token           | 优先短期签名Token + `jti`撤销状态或不透明Token摘要；不得包含`open_id`和第三方Token                   |
+| WorkBuddy第三方应用凭据 | 仅服务端受控配置；client secret不得进入仓库、前端、MCP配置或测试快照                                 |
+| WorkBuddy Token响应     | 后端最小处理；`open_id`转HMAC后丢弃原值；其他Token仅在确有Open API用途时加密保存，否则换票后不持久化 |
+| 外部身份绑定            | Account、`subject_lookup_key`、HMAC key版本、绑定状态和审计；不保存`open_id`明文                     |
+
+日志与审计可以记录issuer配置ID、client配置ID、scope、结果、失败分类、Account内部ID、`jti`摘要和trace ID；不得记录Authorization头、code、verifier、challenge原值、Token、`open_id`、HMAC原料、密码或OTP。
+
+### 16.6 本地自动化验收
+
+| 编号     | 测试                               | 结构化断言                                                                                                              |
+| -------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| OAUTH-01 | 获取Resource/AS Metadata并发起授权 | 只声明本地已实现能力；authorize/token/revoke地址同issuer；PKCE仅S256                                                    |
+| OAUTH-02 | 正常授权码+PKCE流程                | 一次性code换得aud/resource为本地MCP的短期平台Token；Token可调用受保护工具                                               |
+| OAUTH-03 | PKCE与redirect负向矩阵             | 缺/错verifier、plain、challenge不匹配、redirect不一致、code重复/过期全部拒绝且不签Token                                 |
+| OAUTH-04 | state隔离                          | 平台state和WorkBuddy bridge state缺失、错配、重放、跨流程替换全部拒绝                                                   |
+| OAUTH-05 | Token类型混用                      | WorkBuddy Token调用`/mcp`得到`UNAUTHORIZED`；平台MCP Token不会被发送到WorkBuddy适配器；无fallback                       |
+| OAUTH-06 | `open_id`来源                      | 只有WorkBuddy服务端换票测试适配器可调用身份HMAC；聊天、工具、claims、Header自报均在进入绑定前拒绝                       |
+| OAUTH-07 | 首次/重复/冲突绑定                 | 首次创建绑定；相同回调幂等；已绑定其他Account返回冲突且两边数据不变                                                     |
+| OAUTH-08 | 三态                               | 缺配置、配置齐但无Token、有效测试平台Token依次得到`SERVICE_UNAVAILABLE`、`UNAUTHORIZED`、受保护工具业务结果             |
+| OAUTH-09 | scope/Membership/租户              | 缺scope、商家未选、Membership撤销、替换workflow/assistant ID均拒绝且不泄露存在性                                        |
+| OAUTH-10 | Token过期与撤销                    | 过期或本地撤销后立即/在测试规定缓存上限内拒绝；帮助与发现仍可用                                                         |
+| OAUTH-11 | 输入和输出脱敏                     | 四个工具Schema无`token/password/otp/open_id/authorization/code/code_verifier`；日志、错误、URL和审计扫描零泄漏          |
+| OAUTH-12 | fail-closed矩阵                    | 逐项移除issuer、签名key、resource、client、redirect、HMAC key、bridge配置或数据库；受保护路径均安全失败且无测试身份兜底 |
+
+测试应使用进程内/本地测试Authorization Server配置和可编程WorkBuddy换票适配器，不访问真实WorkBuddy、不使用真实用户或真实client secret。测试报告必须区分“真实本地HTTP/MCP/OAuth协议调用”和“WorkBuddy端点模拟”。
+
+### 16.7 本阶段退出条件
+
+满足以下全部条件，才可声明“OAuth/账号桥接本地可验证边界完成”：
+
+1. OAUTH-01至OAUTH-12全部通过，证据包含请求关联ID、Token claims脱敏摘要、数据库状态与安全日志扫描。
+2. 有效测试平台Token可经真实本地`POST /mcp`调用受保护工具；无Token、错类型Token、过期/撤销Token均失败。
+3. WorkBuddy换票适配器是`open_id`进入身份桥的唯一代码入口；HMAC使用`issuer + client_id + open_id`且有key版本/冲突测试。
+4. MCP OAuth Token与WorkBuddy Open API/第三方应用Token使用不同类型、验证器、audience/resource、存储和调用客户端，并有双向混用负向测试。
+5. 所有工具Schema、聊天流程和浏览器非安全页面都不采集Token、password、OTP或`open_id`。
+6. 任一真实配置缺失时fail closed；测试替身不能在非test环境装配。
+7. 文档、错误文案和测试报告继续标明真实OAuth、远程部署、目标客户端和生产尚未完成。
+
+### 16.8 明确未完成与后续阻断
+
+- WorkBuddy真实第三方应用client/secret、真实授权回调、Open API scope及真实`open_id`换票未配置或验证。
+- 目标WorkBuddy客户端对本平台OAuth 2.1 + PKCE、Protected Resource Metadata、resource、刷新/撤销和重连的行为未实机验证。
+- 生产Authorization Server选型、密钥托管/JWKS轮换、Refresh Token策略、撤销传播、会话/MFA和账号恢复未定稿。
+- 生产HTTPS OAuth/MCP路由、CORS/CSRF/Cookie、反向代理、限流、监控、告警和应急撤销未验证。
+- 当前HMAC实现仍含`provider`并使用`audience`字段，尚未与`HMAC(issuer, client_id, open_id)`契约完成代码/迁移统一。
+- 真实账号冲突绑定、解绑/换绑、离职/商家转移、账号合并和申诉流程未完成。
+- Connector图标、隐私/授权说明、审核材料、正式打包、目标客户端实机和市场发布未完成。
+
+本阶段禁止写入仓库任何真实Token、client secret、签名/HMAC私钥或用户`open_id`。即使本地验收全部通过，状态也只能是“本地OAuth安全边界验证完成”，不得写成“WorkBuddy OAuth已接入”“真实账号已打通”或“生产可用”。
+
+### 16.7 本轮实现结果与剩余项
+
+本轮已实现并自动化验证：MCP HTTP 401 challenge、RFC 9728标准路径与根路径兼容metadata、RFC 8414 metadata、公共客户端注册、仅S256的PKCE授权码、一次性code、精确resource/client/redirect校验、短期MCP JWT、refresh token原子轮换/重放撤销契约、两类token用途隔离，以及缺少真实适配器时的503/fail-closed行为。动态注册只接受配置的WorkBuddy私有回调或`127.0.0.1`动态端口`/oauth/callback`，拒绝任意HTTPS、`localhost`和未知source。
+
+仍未达到16.6完整退出条件：生产MySQL OAuth仓储、正式签名密钥/KMS、平台登录/同意会话、WorkBuddy第三方应用服务端换票与`open_id`身份桥接、撤销端点/传播、正式HTTPS部署和目标客户端实机证据均未完成。当前真实运行时刻意使用不可用适配器，不能签发可用生产Token。

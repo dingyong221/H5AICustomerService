@@ -8,21 +8,31 @@ import { AppController } from './app.controller.js';
 import { HealthService } from './health.service.js';
 import { WorkBuddyMcpAdapter } from './mcp/workbuddy-mcp.adapter.js';
 import { WorkBuddyMcpMiddleware } from './mcp/workbuddy-mcp.middleware.js';
+import { OAuthController } from './oauth/oauth.controller.js';
+import { createRuntimeOAuth, OAuthRuntime } from './oauth/oauth-runtime.js';
+import { McpBearerAuthMiddleware } from './oauth/mcp-bearer-auth.middleware.js';
 import { RequestIdMiddleware } from './request-id.js';
 import { SkillOnboardingApplicationService } from './skill/skill-onboarding.service.js';
 import { createRuntimeSkillOnboardingService } from './skill/runtime.js';
 import { SkillController } from './skill/skill.controller.js';
 
 @Module({
-  controllers: [AppController, SkillController],
+  controllers: [AppController, SkillController, OAuthController],
   providers: [
     HealthService,
     {
+      provide: OAuthRuntime,
+      useFactory: () => createRuntimeOAuth(),
+    },
+    {
       provide: SkillOnboardingApplicationService,
-      useFactory: () => createRuntimeSkillOnboardingService(),
+      inject: [OAuthRuntime],
+      useFactory: (oauth: OAuthRuntime) =>
+        createRuntimeSkillOnboardingService(process.env, oauth.authenticator),
     },
     WorkBuddyMcpAdapter,
     WorkBuddyMcpMiddleware,
+    McpBearerAuthMiddleware,
     { provide: APP_INTERCEPTOR, useClass: ApiEnvelopeInterceptor },
     { provide: APP_FILTER, useClass: ApiExceptionFilter },
   ],
@@ -30,6 +40,7 @@ import { SkillController } from './skill/skill.controller.js';
 export class AppModule implements NestModule {
   public configure(consumer: MiddlewareConsumer): void {
     consumer.apply(RequestIdMiddleware).forRoutes('*');
+    consumer.apply(McpBearerAuthMiddleware).forRoutes('mcp');
     consumer.apply(WorkBuddyMcpMiddleware).forRoutes('mcp');
   }
 }

@@ -83,23 +83,30 @@ afterEach(async () => {
 });
 
 describe('WorkBuddy MCP adapter', () => {
-  it('mounts the raw Streamable HTTP protocol at POST /mcp in the Nest application', async () => {
+  it('protects POST /mcp with OAuth discovery before entering the raw transport', async () => {
     const application = await NestFactory.create(AppModule, { logger: false });
     await application.listen(0, '127.0.0.1');
-    const client = new Client({ name: 'h5cs-nest-mcp-test', version: '0.1.0' });
-    const transport = new StreamableHTTPClientTransport(
-      new URL(`${await application.getUrl()}/mcp`),
-    );
 
     try {
-      await client.connect(transport as Parameters<Client['connect']>[0]);
-      const listed = await client.listTools();
-      expect(listed.tools.map((tool) => tool.name)).toEqual(WORKBUDDY_MCP_TOOL_NAMES);
-      const help = await client.callTool({ name: 'h5cs_help', arguments: {} });
-      expect(structuredContent(help)).toMatchObject({ ok: true, result: { action: 'help' } });
-      expect(structuredContent(help).request_id).toMatch(/^req_[0-9a-f-]+$/u);
+      const response = await fetch(`${await application.getUrl()}/mcp`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
+      });
+      expect(response.status).toBe(401);
+      expect(response.headers.get('www-authenticate')).toContain(
+        'resource_metadata="http://localhost:3000/.well-known/oauth-protected-resource/mcp"',
+      );
+
+      const metadata = await fetch(
+        `${await application.getUrl()}/.well-known/oauth-protected-resource/mcp`,
+      );
+      expect(metadata.status).toBe(200);
+      await expect(metadata.json()).resolves.toMatchObject({
+        resource: 'http://localhost:3000/mcp',
+        scopes_supported: ['mcp:tools'],
+      });
     } finally {
-      await client.close();
       await application.close();
     }
   });

@@ -1104,6 +1104,30 @@ a {
   padding-top: 1.2rem;
 }
 
+.secure-auth-link {
+  align-items: center;
+  background: var(--ui-brand);
+  border: 1px solid var(--ui-brand);
+  border-radius: 999px;
+  color: #ffffff;
+  display: inline-flex;
+  font-size: 0.76rem;
+  font-weight: 800;
+  justify-content: center;
+  min-height: 2.55rem;
+  padding: 0.65rem 1rem;
+  text-decoration: none;
+}
+
+.secure-auth-link:hover {
+  background: var(--ui-brand-strong);
+}
+
+.secure-auth-link:focus-visible {
+  outline: 2px solid var(--ui-focus);
+  outline-offset: 3px;
+}
+
 .login-gate {
   display: flex;
   gap: 2rem;

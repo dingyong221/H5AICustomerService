@@ -4,6 +4,9 @@ import {
   apiErrorEnvelopeSchema,
   apiSuccessEnvelopeSchema,
   livenessDataSchema,
+  oauthAuthorizationRequestSchema,
+  oauthClientRegistrationRequestSchema,
+  oauthTokenRequestSchema,
   onboardingEventRequestSchema,
   skillIntentRequestSchema,
   skillIntentResultSchema,
@@ -99,6 +102,47 @@ describe('shared contracts', () => {
     expect(() =>
       onboardingEventRequestSchema.parse({
         event: { type: 'generation_succeeded', assistantId: 'caller-controlled' },
+      }),
+    ).toThrow();
+  });
+
+  it('requires public OAuth clients, PKCE S256, and an explicit MCP resource', () => {
+    expect(
+      oauthClientRegistrationRequestSchema.parse({
+        redirect_uris: ['http://127.0.0.1:43123/callback'],
+        token_endpoint_auth_method: 'none',
+      }).token_endpoint_auth_method,
+    ).toBe('none');
+    expect(
+      oauthClientRegistrationRequestSchema.parse({
+        redirect_uris: [
+          'workbuddy://workbuddy/mcp/connector%3Ah5-ai-customer-service/oauth/callback',
+        ],
+      }).redirect_uris,
+    ).toHaveLength(1);
+
+    expect(
+      oauthAuthorizationRequestSchema.parse({
+        response_type: 'code',
+        client_id: 'public-client-identifier',
+        redirect_uri: 'http://127.0.0.1:43123/callback',
+        scope: 'mcp:tools',
+        state: 'opaque-csrf-state',
+        code_challenge: 'A'.repeat(43),
+        code_challenge_method: 'S256',
+        resource: 'https://h5cs.example.test/mcp',
+      }).code_challenge_method,
+    ).toBe('S256');
+
+    expect(() =>
+      oauthTokenRequestSchema.parse({
+        grant_type: 'authorization_code',
+        client_id: 'public-client-identifier',
+        client_secret: 'must-not-be-accepted',
+        code: 'c'.repeat(32),
+        redirect_uri: 'http://127.0.0.1:43123/callback',
+        code_verifier: 'v'.repeat(43),
+        resource: 'https://h5cs.example.test/mcp',
       }),
     ).toThrow();
   });

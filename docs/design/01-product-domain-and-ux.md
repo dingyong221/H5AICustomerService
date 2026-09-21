@@ -655,7 +655,7 @@ Skill每次回复应尽量包含：当前步骤、已完成进度、一个主要
 
 ## 12. 本批WorkBuddy联调验收清单与剩余阻断
 
-> 基线：commit `171f93f`。本节只定义本批联调的退出条件，不表示OAuth、MCP生产部署、正式Connector或目标WorkBuddy客户端已经完成。
+> 基线：commit `708e095`。本节记录上一批本地MCP适配层验收；不表示OAuth、MCP生产部署、正式Connector或目标WorkBuddy客户端已经完成。
 
 ### 12.1 本批目标
 
@@ -677,7 +677,7 @@ Skill每次回复应尽量包含：当前步骤、已完成进度、一个主要
 | 未授权 | 身份能力已就绪，但当前MCP会话没有有效授权、Token缺失/无效/过期 | “需要先授权”，只使用服务端返回且经过允许域校验的HTTPS入口 | 不在对话中索取密码、验证码、Token或`open_id`；不把未授权混写成未配置 |
 | 已授权 | 服务端已经验证授权并解析到受控Account上下文 | 显示已授权身份的安全标签；再按商家绑定和scope决定是否可创建/打开后台 | 不表示OAuth生产已完成；未绑定商家仍返回`BINDING_REQUIRED`，不能猜测商家 |
 
-“已授权”描述的是一次受控联调状态。commit `171f93f`的运行时认证器仍为未配置实现，已授权路径目前只有测试替身证据；在真实验证器和目标客户端打通前，不得在产品状态中标为已交付。
+“已授权”描述的是一次受控联调状态。commit `708e095`的运行时认证器仍为未配置实现，已授权路径目前只有测试替身证据；在真实验证器和目标客户端打通前，不得在产品状态中标为已交付。
 
 ### 12.3 产品验收清单
 
@@ -700,7 +700,7 @@ Skill每次回复应尽量包含：当前步骤、已完成进度、一个主要
 
 ### 12.4 本批剩余阻断
 
-以下是基于commit `171f93f`的现状，不是已完成功能：
+以下是基于commit `708e095`的现状，不是已完成功能：
 
 - **远程MCP仍未部署。** 本地已实现无会话Streamable HTTP `POST /mcp`和四工具协议测试，但正式HTTPS入口尚未部署，也没有目标WorkBuddy客户端实机证据。
 - **运行时身份固定为未配置。** `UnavailableWorkBuddyAuthenticator`使受保护意图只能失败；已授权路径仅由自动化测试替身覆盖。
@@ -714,3 +714,79 @@ Skill每次回复应尽量包含：当前步骤、已完成进度、一个主要
 - **生产未完成。** 本批不证明生产OAuth、生产域名/TLS下的MCP、生产Secret、撤销/轮换、审计告警或正式发布审核可用。
 
 任何一项剩余阻断未关闭时，只能报告对应基础能力或自动化测试已存在，不能报告“WorkBuddy联调完成”“OAuth完成”或“可生产发布”。
+
+## 13. WorkBuddy OAuth 2.1 + PKCE与平台账号桥接
+
+> 本阶段基线：commit `708e095`。目标是定义并本地验证安全边界，不是接通真实WorkBuddy OAuth、配置生产凭据或完成生产发布。
+
+### 13.1 两套授权域与Token不得混用
+
+| 授权域/凭据 | 签发方与受众 | 唯一用途 | 明确禁止 |
+| --- | --- | --- | --- |
+| 平台MCP授权码 | 本平台Authorization Server签发给WorkBuddy/MCP客户端，绑定精确redirect URI、resource和PKCE challenge | 客户端在平台Token端点用`code_verifier`一次性换取MCP访问Token | 不发送给WorkBuddy Open API；不用于取得`open_id`；不放入聊天或工具参数 |
+| 平台MCP访问Token | 本平台签发，受众/resource为本平台MCP | 仅作为`Authorization: Bearer`访问本平台`/mcp`；MCP服务端验证issuer、audience/resource、scope、有效期和撤销状态 | 不作为WorkBuddy Open API Token；不交给模型；不写入管理链接或业务数据库 |
+| WorkBuddy第三方应用授权码/Token | WorkBuddy授权服务签发给本项目第三方应用 | 只在平台后端完成服务端换票，并按获批scope调用WorkBuddy Open API；`open_id`只能来自该服务端换票结果 | 不作为`/mcp` Bearer；不返回给Skill/Connector、浏览器脚本或模型；不交换成平台MCP Token的捷径 |
+| `open_id` | WorkBuddy第三方应用OAuth服务端换票结果中的身份字段 | 与受信`issuer`、`client_id`组成输入，经服务端HMAC生成平台外部身份查找键 | 不接受用户、聊天、工具参数、MCP Token声明或前端表单自报；不明文持久化/记录 |
+
+任何Token通过了签名校验，也必须通过其专属issuer、audience/resource、client与scope校验。平台MCP Token送到WorkBuddy Open API、WorkBuddy Open API Token送到`/mcp`、或任一Token出现在工具参数中，都必须拒绝并留下脱敏安全事件；不得尝试兼容或自动换用另一套Token。
+
+### 13.2 授权与绑定用户流程
+
+1. 用户从WorkBuddy调用受保护MCP工具；没有有效平台MCP Token时，服务端返回标准授权挑战和平台官方HTTPS授权入口，不在Skill对话中收集凭据。
+2. MCP客户端生成高熵`state`和`code_verifier`，使用`S256`形成`code_challenge`；授权请求同时绑定已登记client、精确redirect URI、MCP resource和最小scope。
+3. 用户在平台浏览器页面完成平台账号登录。密码、OTP、验证码或通行密钥只进入平台受控认证页面，不经过WorkBuddy聊天、Skill或MCP工具参数。
+4. 若当前平台Account尚未绑定WorkBuddy外部身份，平台在独立的服务端流程中发起本项目第三方应用OAuth。回调校验其独立`state`后，由平台后端用授权码换取WorkBuddy Open API/第三方应用Token；只有该换票响应中的`open_id`可信。
+5. 平台计算`subject_lookup_key = HMAC(server_key, encode(issuer, client_id, open_id))`，处理“未绑定、已绑定当前Account、已绑定其他Account”三种结果。冲突时停止并进入人工/受控恢复，不能静默合并或抢占账号。
+6. 用户选择其有权访问的商家并确认本次MCP scopes。平台授权码只能在绑定完成、Membership有效且授权确认成功后签发。
+7. MCP客户端在平台Token端点提交平台授权码与原`code_verifier`；服务端校验PKCE、client、redirect URI、resource、一次性和有效期后，签发平台MCP访问Token。
+8. MCP客户端只把平台MCP Token放入`/mcp`的HTTP Authorization头。工具读取平台Token映射出的Account、商家和scopes，不读取或接受`open_id`、`merchant_id`或Token工具参数。
+9. Token到期、撤销、用户退出商家、外部身份解绑或Account停用后，受保护调用立即/在已定义缓存上限内失效。重新授权不得复用旧state、授权码或PKCE verifier。
+
+### 13.3 身份三态与绑定子状态
+
+| 状态 | 产品判定 | 行为 |
+| --- | --- | --- |
+| 未配置 `identity_unconfigured` | 平台Authorization Server、签名/加密密钥、MCP client、redirect allowlist、WorkBuddy第三方应用或身份桥接的必需配置任一缺失 | fail closed：公开metadata和站内静态帮助可用；`/mcp`在工具发现/执行前进入401授权挑战，后续写操作返回503；不生成临时Token、不启用万能测试用户、不返回伪造授权地址 |
+| 未授权 `authentication_required` | 必需配置就绪，但MCP请求没有有效平台MCP Token，或Token无效、过期、aud/resource/scope不符 | 返回标准授权挑战；不创建workflow、不查询客服、不泄露绑定或资源存在性 |
+| 已授权 `authorized` | 平台MCP Token通过全部校验并映射到可用Account与授权上下文 | 再校验Membership、merchant scope和对象归属后执行工具；该状态不代表真实WorkBuddy Open API或生产环境已接通 |
+
+`binding_required`是授权流程或已授权Account的业务子状态，不是用WorkBuddy Open API Token直接访问MCP的理由。若外部身份尚未绑定，必须进入浏览器绑定流程；聊天中输入手机号、邮箱、Token或`open_id`不能解除该状态。
+
+### 13.4 本地验收用例
+
+| 编号 | 场景 | 通过条件 |
+| --- | --- | --- |
+| OA-01 | PKCE正常流程 | 本地测试客户端使用S256完成授权码交换，获得仅面向本地MCP resource的短期平台Token，并可调用一个受保护工具 |
+| OA-02 | PKCE负向 | 缺少/错误`code_verifier`、plain challenge、redirect URI不一致、code重复或过期均被拒绝，且不签发Token |
+| OA-03 | state与回调 | 平台OAuth和WorkBuddy第三方应用OAuth分别使用独立state；缺失、错误、重复回调均失败，不建立身份绑定 |
+| OA-04 | Token混用 | WorkBuddy Open API Token调用`/mcp`、平台MCP Token调用WorkBuddy Open API适配器均被拒绝；系统不自动重试另一Token |
+| OA-05 | `open_id`来源 | 只有第三方应用OAuth服务端换票夹具的响应能进入HMAC函数；聊天、工具参数、MCP claims和浏览器输入的同名字段全部拒绝 |
+| OA-06 | 首次绑定 | 未绑定外部身份完成服务端换票后只创建一条Account绑定；数据库不保存`open_id`、OAuth Token或授权码明文 |
+| OA-07 | 重复与冲突绑定 | 同一查找键重复回调幂等返回当前绑定；已绑定其他Account时停止并返回安全冲突，不自动合并 |
+| OA-08 | 三态 | 缺配置、无MCP Token、有效本地测试MCP Token分别得到未配置、未授权、已授权结果；三态不因错误文案或前端缓存串用 |
+| OA-09 | scope与商家 | Token缺scope、Membership失效、选择未授权商家或替换资源ID均拒绝；有效scope也不能跨商家 |
+| OA-10 | 撤销与过期 | 撤销/过期平台MCP Token、Account停用或Membership撤销后工具失败；帮助与发现仍可用 |
+| OA-11 | 敏感输入 | 对话和所有MCP工具Schema拒绝`token/password/otp/open_id/authorization/code/code_verifier`等字段；响应、URL、日志和审计不回显 |
+| OA-12 | 无真实配置 | 删除任一真实运行必需配置后服务拒绝启动对应OAuth能力或受保护调用fail closed；测试替身仅在显式test环境可用 |
+
+### 13.5 本阶段退出条件
+
+本阶段只能在以下条件全部满足后声明“OAuth/身份桥接本地边界已验证”：
+
+- 平台OAuth元数据、授权、Token、撤销/失效检查和MCP资源验证能在本地测试配置下运行。
+- 授权码一次性、PKCE S256、state、精确redirect URI、resource/audience与最小scope均有正负自动化证据。
+- 第三方应用OAuth服务端换票使用独立测试适配器；`open_id`来源与HMAC绑定、重复绑定和冲突绑定均有数据库/服务断言。
+- 两类Token混用、聊天/工具敏感字段、跨账号/跨商家和无配置场景全部fail closed。
+- 本地MCP工具在有效测试平台Token下可调用；无Token、错Token、过期Token和撤销Token的结果真实可见。
+- 测试报告明确标注测试issuer、测试client、测试密钥/适配器及其非生产属性，不输出任何秘密。
+
+### 13.6 明确未完成项
+
+- 未配置真实WorkBuddy第三方应用client、secret、redirect URI或Open API scope，未执行真实服务端换票。
+- 未证明目标WorkBuddy客户端支持并正确执行本平台OAuth 2.1 + PKCE、resource参数、Token刷新/撤销和重新连接。
+- 未部署生产Authorization Server、正式HTTPS OAuth/MCP端点、生产签名/HMAC密钥或KMS轮换。
+- 未完成真实平台账号登录方式、账号恢复、冲突绑定人工处置、解绑/换绑和账号合并策略。
+- 未完成生产Token生命周期、Refresh Token轮换、撤销传播、缓存失效、审计告警、速率限制和事故响应。
+- 未完成隐私/授权说明、Connector审核材料、图标、目标客户端实机及正式发布。
+
+上述任一项不得用本地测试issuer、硬编码身份、测试Token或模拟`open_id`冒充完成。对外状态仍应是“本地安全边界验证中”，而不是“OAuth已接入”或“生产可用”。

@@ -7,9 +7,11 @@ import {
 import { SkillOnboardingApplicationService } from './skill-onboarding.service.js';
 import { UnavailableGenerationCoordinator } from './generation-coordinator.js';
 import { UnavailableWorkBuddyAuthenticator } from './workbuddy-authenticator.js';
+import type { WorkBuddyAuthenticator } from './workbuddy-authenticator.js';
 
 export const createRuntimeSkillOnboardingService = (
   environment: NodeJS.ProcessEnv = process.env,
+  authenticator: WorkBuddyAuthenticator = new UnavailableWorkBuddyAuthenticator(),
 ): SkillOnboardingApplicationService => {
   const database = loadDatabaseConfig(environment);
   const repository = database.configured
@@ -17,7 +19,7 @@ export const createRuntimeSkillOnboardingService = (
     : new UnavailableOnboardingRepository(database.reason);
 
   return new SkillOnboardingApplicationService(
-    new UnavailableWorkBuddyAuthenticator(),
+    authenticator,
     repository,
     new UnavailableGenerationCoordinator(),
     environment['MANAGEMENT_CONSOLE_URL'],
