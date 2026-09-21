@@ -644,6 +644,13 @@ a {
   padding: clamp(1.25rem, 3vw, 1.75rem);
 }
 
+.local-progress-note {
+  color: var(--ui-muted);
+  font-size: 0.72rem;
+  margin: 1rem 0 0;
+  text-align: right;
+}
+
 .section-title-row {
   align-items: flex-start;
   display: flex;
@@ -662,6 +669,44 @@ a {
 
 .onboarding-form {
   min-width: 0;
+}
+
+.submission-notice {
+  background: #eef3f0;
+  border: 1px solid #d5dfd9;
+  border-radius: 12px;
+  color: #435149;
+  display: flex;
+  flex-direction: column;
+  font-size: 0.76rem;
+  gap: 0.25rem;
+  line-height: 1.5;
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+}
+
+.submission-notice--info {
+  background: #edf4ff;
+  border-color: #cbdcff;
+  color: #285392;
+}
+
+.submission-notice--success {
+  background: #eaf6ef;
+  border-color: #baddc9;
+  color: #155f40;
+}
+
+.submission-notice--warning {
+  background: #fff7e1;
+  border-color: #ead89d;
+  color: #725812;
+}
+
+.submission-notice--danger {
+  background: #fff0ee;
+  border-color: #edc3be;
+  color: #8e2c24;
 }
 
 .onboarding-form fieldset {
@@ -764,6 +809,13 @@ a {
   opacity: 1;
 }
 
+.field-error {
+  color: var(--ui-danger);
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
 .material-placeholder {
   align-items: center;
   background: #f7f9f8;
@@ -833,6 +885,32 @@ a {
   padding: 1rem;
 }
 
+.confirmation-summary {
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 1.25rem 0 0;
+}
+
+.confirmation-summary div {
+  background: #f7f9f8;
+  border: 1px solid var(--ui-line);
+  border-radius: 10px;
+  padding: 0.75rem;
+}
+
+.confirmation-summary dt {
+  color: var(--ui-muted);
+  font-size: 0.68rem;
+}
+
+.confirmation-summary dd {
+  font-size: 0.82rem;
+  font-weight: 700;
+  margin: 0.35rem 0 0;
+  overflow-wrap: anywhere;
+}
+
 .confirmation-note > p {
   color: var(--ui-muted);
   font-size: 0.8rem;
@@ -895,6 +973,26 @@ a {
   list-style: none;
   margin: 1rem 0 0;
   padding: 0;
+}
+
+.requirements-list li {
+  color: var(--ui-muted);
+  font-size: 0.75rem;
+  padding-left: 1.25rem;
+  position: relative;
+}
+
+.requirements-list li::before {
+  color: #a12820;
+  content: '×';
+  font-weight: 900;
+  left: 0;
+  position: absolute;
+}
+
+.requirements-list li[data-ready='true']::before {
+  color: var(--ui-brand);
+  content: '✓';
 }
 
 .missing-panel li {
@@ -1218,5 +1316,9 @@ a {
 
   .onboarding-actions > .ui-button {
     width: 100%;
+  }
+
+  .confirmation-summary {
+    grid-template-columns: 1fr;
   }
 }

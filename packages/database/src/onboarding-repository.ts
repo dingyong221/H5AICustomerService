@@ -12,6 +12,7 @@ import type {
 } from '@h5cs/domain';
 import {
   getOnboardingMissingItems,
+  MerchantSelectionRequiredError,
   onboardingStates,
   toAssistantId,
   toMerchantId,
@@ -262,9 +263,10 @@ export class MySqlOnboardingRepository implements OnboardingRepository {
            FROM merchant_membership
           WHERE merchant_user_id = ? AND status = 'active'
           ORDER BY created_at ASC, merchant_id ASC
-          LIMIT 1`,
+          LIMIT 2`,
         [stringToId(merchantUserId)],
       );
+      if (rows.length > 1) throw new MerchantSelectionRequiredError();
       const row = rows[0];
       return row === undefined ? null : toMerchantId(idToString(row.merchant_id));
     });

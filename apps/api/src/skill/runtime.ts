@@ -5,6 +5,7 @@ import {
 } from '@h5cs/database';
 
 import { SkillOnboardingApplicationService } from './skill-onboarding.service.js';
+import { UnavailableGenerationCoordinator } from './generation-coordinator.js';
 import { UnavailableWorkBuddyAuthenticator } from './workbuddy-authenticator.js';
 
 export const createRuntimeSkillOnboardingService = (
@@ -18,6 +19,7 @@ export const createRuntimeSkillOnboardingService = (
   return new SkillOnboardingApplicationService(
     new UnavailableWorkBuddyAuthenticator(),
     repository,
+    new UnavailableGenerationCoordinator(),
     environment['MANAGEMENT_CONSOLE_URL'],
   );
 };

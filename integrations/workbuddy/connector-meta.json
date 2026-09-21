@@ -1,0 +1,18 @@
+{
+  "name": "H5 AI Customer Service",
+  "name_zh": "H5 AI 客服",
+  "name_en": "H5 AI Customer Service",
+  "description": "通过自然语言创建或恢复 AI 客服草稿，并安全打开已授权客服的管理入口。",
+  "description_zh": "通过自然语言创建或恢复 AI 客服草稿，并安全打开已授权客服的管理入口。",
+  "description_en": "Create or resume an AI customer-service draft and open an authorized management entry.",
+  "source": "h5-ai-customer-service",
+  "type": "mcp",
+  "version": "0.1.0",
+  "examples_zh": ["帮我创建一个 AI 客服草稿", "继续上次的客服创建", "打开我的 AI 客服后台"],
+  "examples_en": [
+    "Create an AI customer-service draft",
+    "Resume my previous customer-service setup",
+    "Open my AI customer-service admin page"
+  ],
+  "minWorkbuddyVersion": "4.24.0"
+}

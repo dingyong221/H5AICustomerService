@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "h5-ai-customer-service": {
+      "type": "streamableHttp",
+      "url": "https://h5cs.1rying.com/mcp",
+      "timeout": 25000
+    }
+  }
+}

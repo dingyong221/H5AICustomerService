@@ -337,7 +337,7 @@ failureCode?, traceId, changeSummary
 
 ### 5.5 WorkBuddy MCP工具契约
 
-远程连接采用官方推荐的MCP+Skill。外部身份绑定由项目第三方应用OAuth在服务端换票取得`open_id`后完成；平台以服务端密钥对长度明确编码的`(issuer, client_id, open_id)`整体做HMAC，将结果映射为`AccountExternalIdentity`。普通Skill/Connector不被假设自动取得`open_id`，MCP业务工具也不接收该参数。MCP会话与已绑定Account的安全衔接属于目标版本实机验证门禁；验证前不得声明身份自动贯通。通过后，MCP只暴露下列最小白名单工具：
+远程连接采用官方推荐的MCP+Skill。外部身份绑定由项目第三方应用OAuth在服务端换票取得`open_id`后完成；平台以服务端密钥对长度明确编码的`(issuer, client_id, open_id)`整体做HMAC，将结果映射为`AccountExternalIdentity`。普通Skill/Connector不被假设自动取得`open_id`，MCP业务工具也不接收该参数。MCP会话与已绑定Account的安全衔接属于目标版本实机验证门禁；验证前不得声明身份自动贯通。下表是后续细粒度工具目标；本批联调实际且仅暴露第15.2节的四个门面工具：`h5cs_help`、`h5cs_onboarding_create_or_resume`、`h5cs_management_open`、`h5cs_onboarding_advance`。四者直接映射现有`SkillOnboardingApplicationService`，验收通过后再决定是否拆分：
 
 | 工具                      | 输入                                                                          | 输出与约束                                                                                                 |
 | ------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -348,9 +348,9 @@ failureCode?, traceId, changeSummary
 | `assistant_generate`      | `workflowId`、`expectedRevision`、`confirmationToken`、幂等键                 | 只创建AssistantDraft及确定性初始FAQ，不发布；成功返回`assistantId`、草稿状态、缺失项和`managementUrl`      |
 | `assistants_list`         | 可选状态游标                                                                  | 只列当前授权商家的客服名称、状态和受保护`managementUrl`；无客服返回空列表                                  |
 
-手机号辅助绑定不作为MCP工具。若当前MCP会话尚未衔接已绑定Account，MCP只返回安全的`binding_required`和官方HTTPS绑定页；平台页面内部完成第三方应用OAuth服务端换票，并可调用`POST /user/phoneverification`只消费`matched`结果。
+手机号辅助绑定不作为MCP工具。若当前MCP会话尚未衔接已绑定Account，MCP只返回安全的`BINDING_REQUIRED`和官方HTTPS绑定页；平台页面内部完成第三方应用OAuth服务端换票，并可调用`POST /user/phoneverification`只消费`matched`结果。
 
-工具级稳定错误至少包括：`identity_bridge_unverified`、`authentication_required`、`binding_required`、`merchant_selection_required`、`forbidden`、`workflow_not_found`、`workflow_expired`、`workflow_cancelled`、`revision_conflict`、`missing_required_fields`、`confirmation_required`、`confirmation_expired`、`idempotency_key_reused`、`operation_failed`和`service_unavailable`。响应未知时必须使用原幂等键读取/重试，不得另建客服；目标版本尚未验证MCP会话与Account衔接时返回`identity_bridge_unverified`，不能注入万能身份继续执行。
+工具级稳定错误复用共享HTTP `ErrorCode`，本批至少覆盖`BAD_REQUEST`、`UNAUTHORIZED`、`BINDING_REQUIRED`、`NOT_FOUND`、`CONFLICT`、`VERSION_CONFLICT`、`MERCHANT_SELECTION_REQUIRED`、`GENERATION_UNAVAILABLE`、`SERVICE_UNAVAILABLE`、`DATABASE_UNAVAILABLE`和`INTERNAL_ERROR`。响应未知时不得另建客服；目标版本尚未验证MCP会话与Account衔接时必须安全失败，不能注入万能身份继续执行。后续细粒度工具需要的幂等和过期语义应先扩充共享契约，不能只在MCP层另造小写错误码。
 
 ## 6. 确定性规则回答
 
@@ -793,3 +793,136 @@ A3 至少提交以下自动化证据：
 13. **后台链接门禁**：`managementUrl`携带可复用凭据，或无平台登录/Membership仍能访问后台。
 
 当上述门禁全部通过时，只能声明“首个纵向切片完成”；不得据此声明完整 MVP、完整 A01/A05/A12、WorkBuddy身份自动贯通、AI/RAG、Session 恢复、额度或生产就绪。
+
+## 15. 本批WorkBuddy联调契约与验收门禁
+
+> 基线commit：`171f93f`。本节是对现有纵向切片的增量，不替代第1—14节，也不代表OAuth、远程MCP、Connector或生产部署已经完成。
+
+### 15.1 基线事实
+
+| 能力                 | `171f93f`已有证据                                                                                             | 当前结论                                                              |
+| -------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Onboarding领域状态机 | `industry → materials → policy → confirmation → generating → manageable`，并包含`cancel/resume`和生成失败回退 | 可作为本批工具调用的领域基础                                          |
+| MySQL仓储            | 外部身份、商家绑定、workflow、乐观版本和客服列表仓储已存在                                                    | 只有配置真实MySQL后才可宣称持久化可用                                 |
+| 应用服务             | `execute`支持创建入口、后台入口和帮助；`advance`支持状态事件                                                  | 已由HTTP与本地MCP适配层暴露；受保护路径仍受鉴权/数据库门禁            |
+| 身份派生             | 已有长度前缀HMAC派生函数与单元测试                                                                            | 不是OAuth验证器；运行时仍使用不可用认证器                             |
+| 0/1/多个客服         | 应用服务测试覆盖空列表、单客服和多客服返回                                                                    | 多客服明确选择后的对应链接仍无契约                                    |
+| Skill源稿            | 有双入口、字段、确认和错误说明                                                                                | 已对齐四个`allowed-tools`及非秘密配置；仍不可打包发布                 |
+| MCP传输              | 无                                                                                                            | 本地`POST /mcp`及官方SDK协议测试已完成；远程部署和WorkBuddy实机未完成 |
+
+因此，本批首先闭合“协议可发现/可调用”，再验证身份和业务状态；不能把领域单测通过等同于WorkBuddy联调通过。
+
+### 15.2 本批MCP门面工具
+
+为直接复用当前应用服务，本批只对外暴露四个门面工具。第5.5节的细粒度工具继续作为后续拆分目标，本批不得同时暴露两套含义重叠的写工具。
+
+| 工具名                             | 输入                                                                    | 输出                               | 身份要求                                  |
+| ---------------------------------- | ----------------------------------------------------------------------- | ---------------------------------- | ----------------------------------------- |
+| `h5cs_help`                        | 可选`topic`                                                             | 现有help结果                       | 无需授权，不写数据                        |
+| `h5cs_onboarding_create_or_resume` | 可选`resume_session_id`                                                 | 创建或恢复后的workflow状态和缺失项 | 必须已授权                                |
+| `h5cs_management_open`             | 严格空对象                                                              | 0/1/多个客服对应的现有管理入口结果 | 必须已授权                                |
+| `h5cs_onboarding_advance`          | `onboarding_session_id`和共享`onboardingEventRequestSchema`中的外部事件 | 推进后的workflow状态和缺失项       | 必须已授权且只能访问当前Account的workflow |
+
+认证材料来自MCP HTTP transport的`Authorization: Bearer ...`请求头，不属于工具参数。四个工具的JSON Schema都是严格对象，并拒绝额外的`authorization`、`token`、`password`、`otp`、`open_id`和`merchant_id`。MCP推进工具直接组合HTTP入口使用的共享事件Schema，不复制字段长度、金额、币种或事实数组规则。
+
+#### 发现与调用协议
+
+1. 客户端完成MCP初始化后，`tools/list`恰好返回本批四个工具及稳定Schema；列表可在身份未配置或未授权时读取，因为发现不等于授权。
+2. `tools/call(h5cs_help, {})`在数据库和身份未配置时仍返回两个受支持入口，用于证明真实协议调用链；它不得返回示例管理链接。
+3. 未知工具、Schema额外字段或无效枚举属于协议/参数错误，不进入领域服务，不创建workflow。
+4. 每次调用的`structuredContent`都带由服务端生成或校验的`trace_id`和`request_id`。业务失败使用可机器判断的结构化结果，不只返回自然语言或异常堆栈。
+5. 工具发现成功只证明MCP协议入口可用，不证明身份、数据库、创建或管理入口可用。
+
+#### 外部可调用的Onboarding事件
+
+| 外部事件            | 允许状态                                            | 期望结果                                                                         |
+| ------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `provide_industry`  | `industry/materials/policy/confirmation`            | 行业有效则进入`materials`；从后续收集步骤修改时清除旧确认并重走后续校验          |
+| `provide_materials` | `materials/policy/confirmation`                     | 必填资料完整才进入`policy`；修改时清除旧确认                                     |
+| `provide_policy`    | `policy/confirmation`                               | 价格、优惠和资料不足策略都有明确值后进入`confirmation`；修改时清除旧确认         |
+| `cancel`            | `industry/materials/policy/confirmation/generating` | 保存可恢复安全步骤；若从`generating`取消，恢复点必须为`confirmation`且清除旧确认 |
+| `resume`            | 可恢复的`cancelled`                                 | 恢复到记录步骤，不创建资源                                                       |
+| `confirm`           | `confirmation`                                      | 缺失项为零且本轮明确确认后进入`generating`                                       |
+
+`generation_succeeded`和`generation_failed`是服务端内部事件，禁止出现在MCP工具输入Schema。确认后只能由受控生成用例写入结果；客户端、Skill文本或模型不能自报Assistant ID或生成成功。
+
+当前四工具门面没有`expected_version`和`idempotency_key`输入；显式并发控制和请求幂等仍是后续细粒度契约的阻断项，不能把仓储内部乐观锁等同于完整客户端幂等。
+
+### 15.3 身份三态契约
+
+| 状态                      | 服务端条件                                             | 受保护工具结果                                                                                | 本批证据要求                                                            |
+| ------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `identity_unconfigured`   | Authenticator、验证密钥、身份衔接或必要运行配置未就绪  | `isError=true`，code=`SERVICE_UNAVAILABLE`，retryable=false；文案明确鉴权未配置且不返回假成功 | 使用当前`UnavailableWorkBuddyAuthenticator`的协议用例；帮助和发现仍成功 |
+| `authentication_required` | MCP HTTP transport没有Bearer，或未来验证器判定凭据无效 | code=`UNAUTHORIZED`；不能通过工具参数收集聊天密码、OTP或Token                                 | 缺失Bearer负向用例；无效、过期凭据须在真实验证器完成后补测              |
+| `authorized`              | 服务端验证授权并解析为受控Account上下文                | 继续校验scope、Membership和workflow所有权                                                     | 自动化可使用明确标注的测试验证器；真实WorkBuddy通过必须另有实机证据     |
+
+`BINDING_REQUIRED`不是第四种认证结果，而是`authorized`后的业务子状态：外部身份已验证，但未绑定可管理商家。此时不得列出客服或创建草稿，只能返回安全绑定动作。
+
+commit `171f93f`的真实运行时只能到达`identity_unconfigured`；`authorized`目前只存在测试替身。关闭本批自动化门禁不等于OAuth完成，更不等于生产授权可用。
+
+### 15.4 0/1/多个客服管理入口契约
+
+| 数量 | 首次调用结果                                                              | 后续行为                                                                                    |
+| ---- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| 0    | `start_first_onboarding`、`reason=no_assistant`                           | 允许用户明确切换首次生成；不返回管理URL                                                     |
+| 1    | `open_management_console`，包含唯一`assistant_ref`、状态和受保护HTTPS URL | URL无凭据，打开后平台再次鉴权                                                               |
+| 多个 | `select_assistant`、`selection_required=true`及仅限当前商家的列表         | 用户提交所选`assistant_ref`后，服务端重新校验归属并返回对应入口；不默认选第一个或最近使用项 |
+
+当前`open_management_console`输入没有`assistant_ref`，只能完成“多客服列表”而不能完成选择后的对应入口。本批完成前必须补齐该请求契约及跨商家负向测试，或由产品明确降级为只返回管理首页；在决策前不得把多客服场景标为通过。
+
+### 15.5 失败结果契约
+
+业务失败的MCP结果至少提供：
+
+```text
+isError: true
+structuredContent: {
+  ok: false,
+  code,
+  message,
+  retryable,
+  trace_id,
+  request_id
+}
+```
+
+当前适配器不另建一套大小写不同的错误命名，稳定code直接复用共享HTTP `ErrorCode`：`BAD_REQUEST`、`UNAUTHORIZED`、`BINDING_REQUIRED`、`NOT_FOUND`、`CONFLICT`、`VERSION_CONFLICT`、`MERCHANT_SELECTION_REQUIRED`、`GENERATION_UNAVAILABLE`、`SERVICE_UNAVAILABLE`、`DATABASE_UNAVAILABLE`和`INTERNAL_ERROR`。成功结果为`{ ok: true, result, trace_id, request_id }`。文本`content`保留同一JSON以兼容只读取文本的客户端，不能与`structuredContent`表达不同状态。
+
+错误展示规则：
+
+- 未配置、未授权、未绑定必须使用可区分的code或稳定文案，不能统一显示“请登录”。
+- 0个客服是成功空状态；数据库查询失败不是0个客服。
+- `generation_failed`回到可修改/重新确认状态并保留安全进度，不能显示“草稿已创建”。
+- 管理地址未配置时不自行拼接URL；返回`SERVICE_UNAVAILABLE`和明确的安全文案。
+- 响应未知先按相同幂等键查询，不能重放确认并创建第二个客服。
+- 错误结果不包含堆栈、SQL、Token、`open_id`、身份HMAC查找键、完整业务资料或其他租户标识。
+
+### 15.6 本批可执行验收
+
+| 编号   | 自动化/联调步骤                                                   | 通过条件                                                                                            |
+| ------ | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| MCP-01 | 官方TypeScript SDK客户端初始化→`tools/list`→调用`h5cs_help`       | 从真实Streamable HTTP MCP传输恰好取得四个工具并收到含`trace_id/request_id`的help结构化结果          |
+| MCP-02 | 依次调用create/resume、management open和advance                   | Bearer仅从HTTP transport传入应用服务；help不转发Bearer；四个门面均可真实协议调用                    |
+| MCP-03 | 向create/resume增加`token`等额外字段，并向advance提交内部生成事件 | 严格Schema在进入应用服务前拒绝；工具输入Schema中不存在敏感身份或凭据字段                            |
+| MCP-04 | 分别模拟缺失Bearer、鉴权未配置和数据库未配置                      | 依次得到`UNAUTHORIZED`、`SERVICE_UNAVAILABLE`和`DATABASE_UNAVAILABLE`，均为`isError=true`且不假成功 |
+| MCP-05 | 注入商家多选错误和未知内部异常                                    | 共享code映射为`MERCHANT_SELECTION_REQUIRED`；未知错误仅返回`INTERNAL_ERROR`，不泄漏堆栈或原消息     |
+
+以上是第一版适配层自动化范围。跨Account恢复、完整状态推进、重复确认幂等、真实生成、0/1/多个客服选择后跳转及真实OAuth仍须由对应应用服务、OAuth和端到端阶段另行关闭，不能用MCP-01至MCP-05替代。
+
+### 15.7 剩余阻断与退出条件
+
+| 阻断                | `171f93f`现状                                                                                          | 关闭证据                                                                                   |
+| ------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| 远程MCP入口         | 本地`POST /mcp`已实现无会话Streamable HTTP；正式HTTPS域名尚未部署                                      | 目标WorkBuddy客户端完成远程MCP-01，保留工具列表与调用trace                                 |
+| 工具适配器          | 四个门面工具已暴露并有官方SDK协议测试                                                                  | 当前本地适配层已关闭；后续变更继续保持四工具、Skill和测试一致                              |
+| 运行时认证          | 固定使用Unavailable实现                                                                                | 三态集成测试；真实验证器配置缺失时仍fail closed                                            |
+| OAuth/身份衔接      | 未实现且未实机验证                                                                                     | 仅在后续阶段由第三方应用服务端换票、HMAC绑定和目标客户端证据关闭；本批不得口头关闭         |
+| 身份HMAC口径        | 当前函数输入包含`provider + issuer + audience + open_id`，产品契约要求`issuer + client_id + open_id`   | 证明`audience`与受信`client_id`的来源/等价关系并统一命名和迁移；或按产品契约修正实现与测试 |
+| Workflow并发        | MCP输入尚无`expected_version`和幂等键                                                                  | 并发/响应丢失测试证明不覆盖、不重复推进                                                    |
+| 确认到生成          | 只有状态与结果记录，没有受控生成编排                                                                   | 确认后由服务端创建唯一草稿；内部结果事件不暴露给客户端                                     |
+| 多客服选择          | 能列出但不能提交选择                                                                                   | 选择请求契约、归属复核及跨商家负向测试                                                     |
+| 错误映射            | MCP已复用共享HTTP `ErrorCode`并返回安全`structuredContent`；页面客户端已有单元映射，浏览器端到端未完成 | 补齐真实验证器、状态冲突和UI/Skill浏览器端到端测试                                         |
+| Skill/Connector制品 | 已有`allowed-tools`、非秘密元信息和单Server配置；缺图标、OAuth、审核资料与实机验证                     | 补齐图标与审核字段并通过安全/客户端验证前继续标记不可打包、不可安装、不可发布              |
+| 生产                | 未验证                                                                                                 | 不属于本批完成条件；OAuth、TLS、Secret、撤销轮换、监控和正式审核另设生产门禁               |
+
+本批可以在OAuth和生产尚未完成的前提下关闭“本地适配层联调契约”，但报告必须写明：已授权态使用何种测试替身、哪些调用来自真实MCP传输、哪些仍是模拟。只有MCP-01至MCP-05都有可复查证据且未关闭阻断被如实列出，才能称为“本地MCP适配层联调完成”；不得称为“WorkBuddy正式接入完成”“完整业务联调闭环”或“生产可用”。

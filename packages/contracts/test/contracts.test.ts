@@ -4,6 +4,7 @@ import {
   apiErrorEnvelopeSchema,
   apiSuccessEnvelopeSchema,
   livenessDataSchema,
+  onboardingEventRequestSchema,
   skillIntentRequestSchema,
   skillIntentResultSchema,
   tenantContextSchema,
@@ -76,6 +77,28 @@ describe('shared contracts', () => {
       skillIntentRequestSchema.parse({
         intent: 'create_customer_service',
         resume_session_id: 'not-a-binary-id',
+      }),
+    ).toThrow();
+  });
+
+  it('accepts structured merchant onboarding events and rejects internal generation events', () => {
+    expect(
+      onboardingEventRequestSchema.parse({
+        event: {
+          type: 'provide_policy',
+          pricingPolicy: {
+            availability: 'provided',
+            facts: [{ offeringName: '空调清洗', amount: '100.00', currency: 'CNY' }],
+          },
+          promotionPolicy: { availability: 'unknown', facts: [] },
+          insufficientFactPolicy: 'say_unconfirmed',
+        },
+      }).event.type,
+    ).toBe('provide_policy');
+
+    expect(() =>
+      onboardingEventRequestSchema.parse({
+        event: { type: 'generation_succeeded', assistantId: 'caller-controlled' },
       }),
     ).toThrow();
   });

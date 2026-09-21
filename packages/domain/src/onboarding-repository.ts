@@ -29,6 +29,13 @@ export type OnboardingSessionRecord = Readonly<{
   version: number;
 }>;
 
+export class MerchantSelectionRequiredError extends Error {
+  public constructor() {
+    super('Multiple active merchant memberships require an explicit secure selection');
+    this.name = 'MerchantSelectionRequiredError';
+  }
+}
+
 export interface OnboardingRepository {
   assertReady(): Promise<void>;
   resolveOrCreateMerchantUser(identity: VerifiedExternalIdentity): Promise<MerchantUserRecord>;

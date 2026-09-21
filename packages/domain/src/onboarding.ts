@@ -209,25 +209,42 @@ const requireState = (
     throw new InvalidOnboardingTransitionError(snapshot.state, event);
 };
 
+const requireOneOfStates = (
+  snapshot: OnboardingSnapshot,
+  event: OnboardingEvent['type'],
+  expected: readonly OnboardingState[],
+): void => {
+  if (!expected.includes(snapshot.state)) {
+    throw new InvalidOnboardingTransitionError(snapshot.state, event);
+  }
+};
+
 export const transitionOnboarding = (
   snapshot: OnboardingSnapshot,
   event: OnboardingEvent,
 ): OnboardingSnapshot => {
   switch (event.type) {
     case 'provide_industry': {
-      requireState(snapshot, event.type, 'industry');
-      const updated = {
-        ...snapshot,
-        answers: { ...snapshot.answers, industryCode: event.industryCode.trim() },
-      };
-      return hasText(updated.answers.industryCode) ? { ...updated, state: 'materials' } : updated;
-    }
-    case 'provide_materials': {
-      requireState(snapshot, event.type, 'materials');
+      requireOneOfStates(snapshot, event.type, ['industry', 'materials', 'policy', 'confirmation']);
       const updated: OnboardingSnapshot = {
         ...snapshot,
+        state: 'materials',
         answers: {
           ...snapshot.answers,
+          industryCode: event.industryCode.trim(),
+          merchantConfirmed: false,
+        },
+      };
+      return hasText(updated.answers.industryCode) ? updated : { ...updated, state: 'industry' };
+    }
+    case 'provide_materials': {
+      requireOneOfStates(snapshot, event.type, ['materials', 'policy', 'confirmation']);
+      const updated: OnboardingSnapshot = {
+        ...snapshot,
+        state: 'materials',
+        answers: {
+          ...snapshot.answers,
+          merchantConfirmed: false,
           ...(event.businessName === undefined ? {} : { businessName: event.businessName.trim() }),
           ...(event.businessDescription === undefined
             ? {}
@@ -237,18 +254,24 @@ export const transitionOnboarding = (
         },
       };
       const materialMissing = getOnboardingMissingItems(updated).filter((item) =>
-        ['business_name', 'business_description', 'offering', 'material_reference'].includes(
-          item.code,
-        ),
+        [
+          'industry_code',
+          'business_name',
+          'business_description',
+          'offering',
+          'material_reference',
+        ].includes(item.code),
       );
       return materialMissing.length === 0 ? { ...updated, state: 'policy' } : updated;
     }
     case 'provide_policy': {
-      requireState(snapshot, event.type, 'policy');
+      requireOneOfStates(snapshot, event.type, ['policy', 'confirmation']);
       const updated: OnboardingSnapshot = {
         ...snapshot,
+        state: 'policy',
         answers: {
           ...snapshot.answers,
+          merchantConfirmed: false,
           ...(event.pricingPolicy === undefined ? {} : { pricingPolicy: event.pricingPolicy }),
           ...(event.promotionPolicy === undefined
             ? {}
@@ -258,8 +281,8 @@ export const transitionOnboarding = (
             : { insufficientFactPolicy: event.insufficientFactPolicy }),
         },
       };
-      const policyMissing = getOnboardingMissingItems(updated).filter((item) =>
-        ['pricing_policy', 'promotion_policy', 'insufficient_fact_policy'].includes(item.code),
+      const policyMissing = getOnboardingMissingItems(updated).filter(
+        (item) => item.code !== 'merchant_confirmation',
       );
       return policyMissing.length === 0 ? { ...updated, state: 'confirmation' } : updated;
     }

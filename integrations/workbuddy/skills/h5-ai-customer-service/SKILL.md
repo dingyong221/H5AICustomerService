@@ -7,6 +7,7 @@ version: 0.1.0
 disable-model-invocation: false
 user-invocable: true
 author: H5 AI Customer Service
+allowed-tools: h5cs_help, h5cs_onboarding_create_or_resume, h5cs_management_open, h5cs_onboarding_advance
 ---
 
 # H5 AI 客服
@@ -28,7 +29,14 @@ author: H5 AI Customer Service
 
 ## 运行前提
 
-本源稿尚未绑定真实业务工具。只有宿主提供了已经评审并实机验证的 H5 AI 客服工具和安全账号上下文时，才能执行读取或写入。
+当前本地联调版绑定以下四个工具；它们只是现有入驻应用服务的最小门面，不代表 OAuth、数据库、生成服务或生产部署已经就绪：
+
+- `h5cs_help`：查看支持的入口；无需鉴权，不写数据。
+- `h5cs_onboarding_create_or_resume`：创建或恢复入驻会话。
+- `h5cs_management_open`：打开已有客服的管理入口。
+- `h5cs_onboarding_advance`：提交入驻资料，或执行确认、取消、恢复。
+
+后三个工具的 Bearer 只来自 MCP HTTP transport，绝不作为工具参数。`h5cs_onboarding_advance` 只能提交外部用户事件，不能提交服务端内部的 `generation_succeeded` 或 `generation_failed`，也没有发布能力。
 
 若工具、连接状态或可信账号上下文不可用：
 
@@ -44,6 +52,14 @@ author: H5 AI Customer Service
 3. 按 @references/safety-and-confirmation.md 处理身份、链接、敏感信息和明确确认。
 4. 按 @references/errors-and-recovery.md 返回真实错误和恢复动作。
 5. 每次回复尽量只聚焦一个主要问题，同时说明当前步骤、已完成进度和可用操作。
+
+## 工具路由
+
+1. 用户询问能力、字段用途或下一步时，调用 `h5cs_help`。
+2. 用户明确要创建、继续或恢复客服入驻时，调用 `h5cs_onboarding_create_or_resume`；只有恢复已知会话时才传 `resume_session_id`。
+3. 用户明确要打开已有客服后台时，调用 `h5cs_management_open`。
+4. 已取得入驻会话且用户提供当前步骤资料、确认、取消或恢复时，调用 `h5cs_onboarding_advance`。
+5. 工具返回 `isError=true` 时，使用结构化 `code`、`message`、`retryable`、`trace_id` 和 `request_id` 说明真实状态；不得把失败改写成成功。
 
 ## 不可违反的结果边界
 

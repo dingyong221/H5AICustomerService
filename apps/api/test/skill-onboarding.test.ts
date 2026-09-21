@@ -23,6 +23,11 @@ import {
 
 import { SkillOnboardingApplicationService } from '../src/skill/skill-onboarding.service.js';
 import { createRuntimeSkillOnboardingService } from '../src/skill/runtime.js';
+import type { GenerationCoordinator } from '../src/skill/generation-coordinator.js';
+import {
+  GenerationUnavailableError,
+  UnavailableGenerationCoordinator,
+} from '../src/skill/generation-coordinator.js';
 import type { WorkBuddyAuthenticator } from '../src/skill/workbuddy-authenticator.js';
 import {
   WorkBuddyAuthenticationUnavailableError,
@@ -49,6 +54,10 @@ class TestAuthenticator implements WorkBuddyAuthenticator {
     return identity;
   }
 }
+
+const readyGenerationCoordinator: GenerationCoordinator = {
+  assertReady: async () => Promise.resolve(),
+};
 
 class TestRepository implements OnboardingRepository {
   readonly userId = toMerchantUserId('11111111111111111111111111111111');
@@ -134,11 +143,71 @@ class TestRepository implements OnboardingRepository {
 }
 
 describe('Skill onboarding application service', () => {
+  it('authenticates the bearer token before probing or resolving persistence', async () => {
+    const calls: string[] = [];
+    const repository = new TestRepository();
+    repository.assertReady = async () => {
+      calls.push('repository.assertReady');
+    };
+    repository.resolveOrCreateMerchantUser = async () => {
+      calls.push('repository.resolveOrCreateMerchantUser');
+      return { id: repository.userId };
+    };
+    const authenticator: WorkBuddyAuthenticator = {
+      assertReady: async () => {
+        calls.push('authenticator.assertReady');
+      },
+      authenticateAccessToken: async () => {
+        calls.push('authenticator.authenticateAccessToken');
+        return identity;
+      },
+    };
+    const service = new SkillOnboardingApplicationService(
+      authenticator,
+      repository,
+      readyGenerationCoordinator,
+    );
+
+    await service.execute('Bearer verified-token', { intent: 'create_customer_service' });
+
+    expect(calls).toEqual([
+      'authenticator.assertReady',
+      'authenticator.authenticateAccessToken',
+      'repository.assertReady',
+      'repository.resolveOrCreateMerchantUser',
+    ]);
+  });
+
+  it('does not touch persistence when bearer token authentication fails', async () => {
+    let repositoryTouched = false;
+    const repository = new TestRepository();
+    repository.assertReady = async () => {
+      repositoryTouched = true;
+    };
+    const authenticator: WorkBuddyAuthenticator = {
+      assertReady: async () => undefined,
+      authenticateAccessToken: async () => {
+        throw new Error('invalid token');
+      },
+    };
+    const service = new SkillOnboardingApplicationService(
+      authenticator,
+      repository,
+      readyGenerationCoordinator,
+    );
+
+    await expect(
+      service.execute('Bearer invalid-token', { intent: 'create_customer_service' }),
+    ).rejects.toThrow('invalid token');
+    expect(repositoryTouched).toBe(false);
+  });
+
   it('starts a persisted onboarding session without requiring a phone match', async () => {
     const repository = new TestRepository();
     const service = new SkillOnboardingApplicationService(
       new TestAuthenticator(),
       repository,
+      readyGenerationCoordinator,
       'https://console.example.test/',
     );
 
@@ -169,6 +238,7 @@ describe('Skill onboarding application service', () => {
     const service = new SkillOnboardingApplicationService(
       new TestAuthenticator(),
       repository,
+      readyGenerationCoordinator,
       'https://console.example.test/',
     );
 
@@ -185,6 +255,42 @@ describe('Skill onboarding application service', () => {
       merchantId: repository.merchantId,
       assistantId: '44444444444444444444444444444444',
     });
+  });
+
+  it('fails closed before transition or persistence when generation is unavailable', async () => {
+    const repository = new TestRepository();
+    repository.session = {
+      id: toOnboardingSessionId('33333333333333333333333333333333'),
+      merchantUserId: repository.userId,
+      merchantId: repository.merchantId,
+      assistantId: null,
+      snapshot: {
+        state: 'confirmation',
+        answers: {},
+      },
+      version: 7,
+    };
+    let saveCalled = false;
+    repository.saveSession = async (session, nextSnapshot) => {
+      saveCalled = true;
+      return { ...session, snapshot: nextSnapshot };
+    };
+    const service = new SkillOnboardingApplicationService(
+      new TestAuthenticator(),
+      repository,
+      new UnavailableGenerationCoordinator('generation dispatcher is not configured'),
+    );
+
+    await expect(
+      service.advance({
+        authorizationHeader: 'Bearer verified-token',
+        sessionId: '33333333333333333333333333333333',
+        event: { type: 'confirm' },
+      }),
+    ).rejects.toThrow(GenerationUnavailableError);
+    expect(saveCalled).toBe(false);
+    expect(repository.session.snapshot.state).toBe('confirmation');
+    expect(repository.session.version).toBe(7);
   });
 
   it('returns generic help safely without authentication or database configuration', async () => {
@@ -206,6 +312,7 @@ describe('Skill onboarding application service', () => {
     const service = new SkillOnboardingApplicationService(
       new TestAuthenticator(),
       new UnavailableOnboardingRepository('MYSQL_DATABASE_URL is not set'),
+      readyGenerationCoordinator,
     );
     await expect(
       service.execute('Bearer token', { intent: 'create_customer_service' }),
@@ -217,6 +324,7 @@ describe('Skill onboarding application service', () => {
     const service = new SkillOnboardingApplicationService(
       new TestAuthenticator(),
       repository,
+      readyGenerationCoordinator,
       'https://console.example.test/manage',
     );
 

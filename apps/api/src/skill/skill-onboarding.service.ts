@@ -9,6 +9,7 @@ import {
 
 import type { WorkBuddyAuthenticator } from './workbuddy-authenticator.js';
 import { WorkBuddyAuthenticationRequiredError } from './workbuddy-authenticator.js';
+import type { GenerationCoordinator } from './generation-coordinator.js';
 
 export class MerchantBindingRequiredError extends Error {
   public constructor() {
@@ -40,15 +41,18 @@ export type AdvanceOnboardingCommand = Readonly<{
 export class SkillOnboardingApplicationService {
   readonly #authenticator: WorkBuddyAuthenticator;
   readonly #repository: OnboardingRepository;
+  readonly #generationCoordinator: GenerationCoordinator;
   readonly #managementConsoleUrl: string | undefined;
 
   public constructor(
     authenticator: WorkBuddyAuthenticator,
     repository: OnboardingRepository,
+    generationCoordinator: GenerationCoordinator,
     managementConsoleUrl?: string,
   ) {
     this.#authenticator = authenticator;
     this.#repository = repository;
+    this.#generationCoordinator = generationCoordinator;
     this.#managementConsoleUrl = managementConsoleUrl;
   }
 
@@ -111,6 +115,10 @@ export class SkillOnboardingApplicationService {
     );
     if (session === null) throw new OnboardingSessionNotFoundError();
 
+    if (command.event.type === 'confirm') {
+      await this.#generationCoordinator.assertReady();
+    }
+
     const nextSnapshot = transitionOnboarding(session.snapshot, command.event);
     let saved: OnboardingSessionRecord;
     if (command.event.type === 'generation_succeeded') {
@@ -137,8 +145,8 @@ export class SkillOnboardingApplicationService {
     }
 
     await this.#authenticator.assertReady();
-    await this.#repository.assertReady();
     const identity = await this.#authenticator.authenticateAccessToken(authorizationHeader);
+    await this.#repository.assertReady();
     const merchantUser = await this.#repository.resolveOrCreateMerchantUser(identity);
     return { merchantUserId: merchantUser.id };
   }
