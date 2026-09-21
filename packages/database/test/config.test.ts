@@ -4,9 +4,22 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { loadDatabaseConfig } from '../src/index.js';
+import { binaryIdFromString, loadDatabaseConfig } from '../src/index.js';
+import { assistants, onboardingSessions } from '../src/schema/index.js';
 
 describe('database connection configuration', () => {
+  it('imports the complete Drizzle schema without ESM initialization errors', () => {
+    expect(assistants).toBeDefined();
+    expect(onboardingSessions).toBeDefined();
+  });
+
+  it('rejects malformed values at the BINARY(16) persistence boundary', () => {
+    expect(binaryIdFromString('0123456789abcdef0123456789abcdef')).toHaveLength(16);
+    expect(() => binaryIdFromString('not-a-binary-id')).toThrow(
+      'exactly 32 hexadecimal characters',
+    );
+    expect(() => binaryIdFromString('')).toThrow('exactly 32 hexadecimal characters');
+  });
   it('reports an unconfigured database without guessing a connection', () => {
     expect(loadDatabaseConfig({})).toEqual({
       configured: false,
@@ -51,5 +64,20 @@ describe('database connection configuration', () => {
     expect(migration).toContain('fk_assistant_active_release');
     expect(migration).toContain('uq_idempotency_scope_key');
     expect(migration).toContain('idx_job_claim');
+  });
+
+  it('migrates scoped WorkBuddy identity and assistant-owned onboarding results', () => {
+    const migrationsDirectory = fileURLToPath(new URL('../migrations/', import.meta.url));
+    const migrations = readdirSync(migrationsDirectory)
+      .filter((name) => name.endsWith('.sql'))
+      .sort()
+      .map((name) => readFileSync(`${migrationsDirectory}/${name}`, 'utf8'))
+      .join('\n');
+
+    expect(migrations).toContain('`phone_match_verified_at` datetime(6),');
+    expect(migrations).toContain('UNIQUE(`provider`,`issuer`,`audience`,`subject_lookup_key`)');
+    expect(migrations).toContain('fk_onboarding_session_assistant');
+    expect(migrations).toContain('`subject_lookup_key_version` int unsigned NOT NULL');
+    expect(migrations).not.toContain('`open_id`');
   });
 });

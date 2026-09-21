@@ -233,6 +233,92 @@
   margin: 0;
 }
 
+.ui-progress-steps {
+  display: grid;
+  gap: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ui-progress-steps__item {
+  align-items: flex-start;
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: auto 1fr;
+  min-width: 0;
+  padding-right: 1rem;
+  position: relative;
+}
+
+.ui-progress-steps__item:not(:last-child)::after {
+  background: var(--ui-line);
+  content: '';
+  height: 2px;
+  left: 2.25rem;
+  position: absolute;
+  right: 0.5rem;
+  top: 1rem;
+}
+
+.ui-progress-steps__marker {
+  align-items: center;
+  background: var(--ui-soft);
+  border: 1px solid var(--ui-line);
+  border-radius: 50%;
+  color: var(--ui-muted);
+  display: flex;
+  font-size: 0.75rem;
+  font-weight: 800;
+  height: 2rem;
+  justify-content: center;
+  position: relative;
+  width: 2rem;
+  z-index: 1;
+}
+
+.ui-progress-steps__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  padding-top: 0.25rem;
+}
+
+.ui-progress-steps__copy strong {
+  color: var(--ui-ink);
+  font-size: 0.84rem;
+}
+
+.ui-progress-steps__copy small {
+  color: var(--ui-muted);
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.ui-progress-steps__item--complete .ui-progress-steps__marker,
+.ui-progress-steps__item--current .ui-progress-steps__marker {
+  background: var(--ui-brand);
+  border-color: var(--ui-brand);
+  color: #ffffff;
+}
+
+.ui-progress-steps__item--complete:not(:last-child)::after {
+  background: var(--ui-brand);
+}
+
+.ui-progress-steps__item--current .ui-progress-steps__marker {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ui-brand) 16%, transparent);
+}
+
+.ui-progress-steps__item--paused .ui-progress-steps__marker,
+.ui-progress-steps__item--blocked .ui-progress-steps__marker {
+  background: #fff4d6;
+  border-color: #e5c468;
+  color: #815700;
+}
+
 @keyframes ui-spin {
   to {
     transform: rotate(360deg);
@@ -251,6 +337,24 @@
 
   .ui-page-shell__aside {
     width: 100%;
+  }
+
+  .ui-progress-steps {
+    grid-template-columns: 1fr;
+  }
+
+  .ui-progress-steps__item {
+    min-height: 4.2rem;
+    padding: 0 0 0.75rem;
+  }
+
+  .ui-progress-steps__item:not(:last-child)::after {
+    bottom: 0;
+    height: auto;
+    left: 0.95rem;
+    right: auto;
+    top: 2rem;
+    width: 2px;
   }
 }
 

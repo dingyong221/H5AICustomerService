@@ -3,6 +3,9 @@
   "compilerOptions": {
     "incremental": true,
     "jsx": "preserve",
+    "paths": {
+      "@h5cs/contracts": ["../../packages/contracts/src/index.ts"]
+    },
     "plugins": [{ "name": "next" }]
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],

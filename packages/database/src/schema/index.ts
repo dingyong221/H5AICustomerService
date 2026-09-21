@@ -44,6 +44,102 @@ export const merchants = mysqlTable(
   ],
 );
 
+export const merchantUsers = mysqlTable(
+  'merchant_user',
+  {
+    id: id('id').notNull(),
+    status: varchar('status', { length: 32 }).notNull().default('active'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id], name: 'pk_merchant_user' }),
+    index('idx_merchant_user_status').on(table.status, table.id),
+  ],
+);
+
+export const externalIdentities = mysqlTable(
+  'external_identity',
+  {
+    id: id('id').notNull(),
+    merchantUserId: id('merchant_user_id').notNull(),
+    provider: varchar('provider', { length: 32 }).notNull(),
+    issuer: varchar('issuer', { length: 255 }).notNull(),
+    audience: varchar('audience', { length: 191 }).notNull(),
+    subjectLookupKey: digest('subject_lookup_key').notNull(),
+    subjectLookupKeyVersion: int('subject_lookup_key_version', { unsigned: true }).notNull(),
+    phoneMatchVerifiedAt: utcDateTime('phone_match_verified_at'),
+    lastSeenAt: utcDateTime('last_seen_at').notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id], name: 'pk_external_identity' }),
+    uniqueIndex('uq_external_identity_subject').on(
+      table.provider,
+      table.issuer,
+      table.audience,
+      table.subjectLookupKey,
+    ),
+    index('idx_external_identity_user').on(table.merchantUserId, table.id),
+    foreignKey({
+      columns: [table.merchantUserId],
+      foreignColumns: [merchantUsers.id],
+      name: 'fk_external_identity_merchant_user',
+    }).onDelete('restrict'),
+  ],
+);
+
+export const merchantMemberships = mysqlTable(
+  'merchant_membership',
+  {
+    merchantId: id('merchant_id').notNull(),
+    merchantUserId: id('merchant_user_id').notNull(),
+    role: varchar('role', { length: 32 }).notNull().default('owner'),
+    status: varchar('status', { length: 32 }).notNull().default('active'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.merchantId, table.merchantUserId],
+      name: 'pk_merchant_membership',
+    }),
+    index('idx_merchant_membership_user').on(table.merchantUserId, table.status, table.merchantId),
+    foreignKey({
+      columns: [table.merchantId],
+      foreignColumns: [merchants.id],
+      name: 'fk_merchant_membership_merchant',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.merchantUserId],
+      foreignColumns: [merchantUsers.id],
+      name: 'fk_merchant_membership_user',
+    }).onDelete('restrict'),
+  ],
+);
+
+export const industryTemplates = mysqlTable(
+  'industry_template',
+  {
+    id: id('id').notNull(),
+    code: varchar('code', { length: 64 }).notNull(),
+    version: int('version', { unsigned: true }).notNull(),
+    displayName: varchar('display_name', { length: 128 }).notNull(),
+    status: varchar('status', { length: 32 }).notNull().default('active'),
+    requiredMaterials: json('required_materials').$type<readonly string[]>().notNull(),
+    requiredPolicies: json('required_policies').$type<readonly string[]>().notNull(),
+    template: json('template').$type<Record<string, unknown>>().notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id], name: 'pk_industry_template' }),
+    uniqueIndex('uq_industry_template_code_version').on(table.code, table.version),
+    index('idx_industry_template_status').on(table.status, table.code, table.version),
+  ],
+);
+
 export const assistants = mysqlTable(
   'assistant',
   {
@@ -65,6 +161,52 @@ export const assistants = mysqlTable(
       columns: [table.merchantId],
       foreignColumns: [merchants.id],
       name: 'fk_assistant_merchant',
+    }).onDelete('restrict'),
+  ],
+);
+
+export const onboardingSessions = mysqlTable(
+  'onboarding_session',
+  {
+    id: id('id').notNull(),
+    merchantUserId: id('merchant_user_id').notNull(),
+    merchantId: id('merchant_id'),
+    assistantId: id('assistant_id'),
+    industryTemplateId: id('industry_template_id'),
+    state: varchar('state', { length: 32 }).notNull(),
+    cancelledFromState: varchar('cancelled_from_state', { length: 32 }),
+    answers: json('answers').$type<Record<string, unknown>>().notNull(),
+    missingItems: json('missing_items').$type<readonly Record<string, unknown>[]>().notNull(),
+    generationErrorCode: varchar('generation_error_code', { length: 64 }),
+    version: int('version', { unsigned: true }).notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    cancelledAt: utcDateTime('cancelled_at'),
+    completedAt: utcDateTime('completed_at'),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id], name: 'pk_onboarding_session' }),
+    index('idx_onboarding_user_updated').on(table.merchantUserId, table.updatedAt, table.id),
+    index('idx_onboarding_state').on(table.state, table.updatedAt, table.id),
+    foreignKey({
+      columns: [table.merchantUserId],
+      foreignColumns: [merchantUsers.id],
+      name: 'fk_onboarding_session_user',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.merchantId],
+      foreignColumns: [merchants.id],
+      name: 'fk_onboarding_session_merchant',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.industryTemplateId],
+      foreignColumns: [industryTemplates.id],
+      name: 'fk_onboarding_session_industry_template',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.merchantId, table.assistantId],
+      foreignColumns: [assistants.merchantId, assistants.id],
+      name: 'fk_onboarding_session_assistant',
     }).onDelete('restrict'),
   ],
 );
@@ -388,3 +530,5 @@ export type AssistantRow = typeof assistants.$inferSelect;
 export type ReleaseRow = typeof releases.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;
+export type MerchantUserRow = typeof merchantUsers.$inferSelect;
+export type OnboardingSessionRow = typeof onboardingSessions.$inferSelect;

@@ -89,6 +89,9 @@ importers:
       '@h5cs/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@h5cs/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@nestjs/common':
         specifier: 'catalog:'
         version: 12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0)
@@ -284,6 +287,9 @@ importers:
 
   packages/database:
     dependencies:
+      '@h5cs/domain':
+        specifier: workspace:*
+        version: link:../domain
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.2(mysql2@3.24.4(@types/node@26.6.2))

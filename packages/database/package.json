@@ -22,6 +22,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@h5cs/domain": "workspace:*",
     "drizzle-orm": "catalog:",
     "mysql2": "catalog:",
     "zod": "catalog:"

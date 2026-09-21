@@ -1,4 +1,8 @@
+import Link from 'next/link';
+
 import { Button, EmptyState, PageShell, StatusBadge } from '@h5cs/ui';
+
+import { buildWorkBuddyEntryViewModel } from './onboarding/onboarding-view-model';
 
 function ArrowIcon() {
   return (
@@ -21,9 +25,38 @@ function InboxIcon() {
   );
 }
 
+function SparkIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path
+        d="m12 3 1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3Zm6 10 .8 2.2L21 16l-2.2.8L18 19l-.8-2.2L15 16l2.2-.8L18 13Z"
+        stroke="currentColor"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+    </svg>
+  );
+}
+
+function LockIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path
+        d="M7 10V8a5 5 0 0 1 10 0v2m-11 0h12v10H6V10Zm6 4v2"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.6"
+      />
+    </svg>
+  );
+}
+
 const setupItems = ['商家与客服名称', '业务范围与回答边界', '欢迎语与无法回答策略'];
 
 export default function MerchantDashboardPage() {
+  const workBuddy = buildWorkBuddyEntryViewModel({ authorization: 'binding_required' });
+
   return (
     <PageShell
       aside={<Button disabled>发布客服</Button>}
@@ -40,6 +73,53 @@ export default function MerchantDashboardPage() {
       }
       title="把真实业务资料，变成可控的 AI 客服"
     >
+      <section aria-labelledby="workbuddy-heading" className="workbuddy-entry">
+        <div className="workbuddy-entry__header">
+          <div>
+            <p className="panel__eyebrow">WorkBuddy 入口</p>
+            <h2 id="workbuddy-heading">你想从哪里开始？</h2>
+            <p>WorkBuddy 只负责发起受限的平台操作。客服生成、保存和管理结果均以服务端为准。</p>
+          </div>
+          <div className="workbuddy-identity">
+            <StatusBadge tone={workBuddy.identity.tone}>{workBuddy.identity.label}</StatusBadge>
+            <span>{workBuddy.identity.description}</span>
+            {workBuddy.identity.actionHref && workBuddy.identity.actionLabel ? (
+              <Link href={workBuddy.identity.actionHref}>{workBuddy.identity.actionLabel}</Link>
+            ) : null}
+          </div>
+        </div>
+        <div className="workbuddy-choice-grid">
+          <article>
+            <div aria-hidden="true" className="workbuddy-choice-grid__icon">
+              <SparkIcon />
+            </div>
+            <div>
+              <span className="workbuddy-choice-grid__kicker">从零开始</span>
+              <h3>{workBuddy.create.label}</h3>
+              <p>{workBuddy.create.description}</p>
+            </div>
+            <Link className="workbuddy-action" href={workBuddy.create.href}>
+              进入四步引导
+              <ArrowIcon />
+            </Link>
+          </article>
+          <article>
+            <div aria-hidden="true" className="workbuddy-choice-grid__icon">
+              <LockIcon />
+            </div>
+            <div>
+              <span className="workbuddy-choice-grid__kicker">需要登录</span>
+              <h3>{workBuddy.manage.label}</h3>
+              <p>{workBuddy.manage.description}</p>
+            </div>
+            <Link className="workbuddy-action" href={workBuddy.manage.href}>
+              登录后进入管理
+              <ArrowIcon />
+            </Link>
+          </article>
+        </div>
+      </section>
+
       <div id="overview" className="dashboard-grid">
         <section aria-labelledby="service-heading" className="hero-card">
           <div className="hero-card__topline">

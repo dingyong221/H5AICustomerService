@@ -4,6 +4,8 @@ import {
   apiErrorEnvelopeSchema,
   apiSuccessEnvelopeSchema,
   livenessDataSchema,
+  skillIntentRequestSchema,
+  skillIntentResultSchema,
   tenantContextSchema,
 } from '../src/index.js';
 
@@ -40,5 +42,41 @@ describe('shared contracts', () => {
         request_id: 'request-123',
       }),
     ).toBeDefined();
+  });
+
+  it('accepts the supported Skill intents and rejects caller-supplied external identity', () => {
+    expect(skillIntentRequestSchema.parse({ intent: 'create_customer_service' }).intent).toBe(
+      'create_customer_service',
+    );
+    expect(skillIntentRequestSchema.parse({ intent: 'open_management_console' }).intent).toBe(
+      'open_management_console',
+    );
+    expect(skillIntentRequestSchema.parse({ intent: 'help' }).intent).toBe('help');
+    expect(() =>
+      skillIntentRequestSchema.parse({
+        intent: 'create_customer_service',
+        open_id: 'caller-controlled-subject',
+      }),
+    ).toThrow();
+  });
+
+  it('validates an explicit onboarding continuation result', () => {
+    expect(
+      skillIntentResultSchema.parse({
+        action: 'continue_onboarding',
+        onboarding_session_id: '33333333333333333333333333333333',
+        state: 'industry',
+        missing_items: [{ code: 'industry_code', message: '请选择行业' }],
+      }).action,
+    ).toBe('continue_onboarding');
+  });
+
+  it('rejects malformed external onboarding session IDs', () => {
+    expect(() =>
+      skillIntentRequestSchema.parse({
+        intent: 'create_customer_service',
+        resume_session_id: 'not-a-binary-id',
+      }),
+    ).toThrow();
   });
 });
