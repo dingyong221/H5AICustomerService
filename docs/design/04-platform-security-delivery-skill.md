@@ -534,6 +534,41 @@ Connector 的“断开”是另一条撤销链：由本平台授权服务器撤�
 | phoneverification | 功能开关、`user.contact.readable`、号码规范化规则、限流与审计策略 | 未获 scope 或未完成平台 OTP/再认证时关闭；不记录原手机号 |
 | 撤销/解绑 | 本地幂等流程、Connector grant 撤销入口、用户提示与支持流程 | WorkBuddy 远端撤销端点保持“未配置/待官方确认”，禁止填猜测 URL |
 
+#### 11.4.8 浏览器会话、唯一绑定与商家 consent
+
+WorkBuddy 当前 Open API 文档把 `state` 标为建议，但 RFC 9700 要求：当授权服务器未确认支持 PKCE 时，客户端必须使用一次性 CSRF token 并安全绑定到发起授权的浏览器会话。第三方应用当前参数表未声明 PKCE，因此本项目不能只检查“state 存在且未使用”，还必须防止攻击者把自己 WorkBuddy 账号的 callback 链接转发给已登录的平台用户，造成登录 CSRF/账号错绑。
+
+绑定事务至少保存 state 摘要、浏览器 session ID 摘要及 session generation、已认证平台用户、预期 issuer/client ID、精确 redirect URI、请求 scopes、发起时间、过期时间和消费时间；若已进入商家 consent，还要保存服务端选出的 `merchant_id` 与 membership 版本。callback 必须同时满足：当前 `Secure`/`HttpOnly`/host-only session 与事务一致，平台用户未切换、state 未过期且原子消费、参数无重复/额外值、redirect/issuer/client/scopes 未漂移。若跨站回调无法携带主 session cookie，应使用独立的短期 `__Host-` callback cookie 或先回到同站中转页完成再认证；不得退化为“只凭 state 找到平台用户”。绑定成功后轮换平台 session ID，callback 页面设置 `Cache-Control: no-store` 和 `Referrer-Policy: no-referrer`，清理 URL 中的 code/state；错误 callback 也必须先校验并消费 state，不能成为探测或重放旁路。
+
+外部身份绑定采用以下冲突规则：
+
+1. `(provider, issuer, client_id/audience, subject_lookup_key)` 必须全局唯一，只能指向一个平台用户；相同主体与相同用户重复回调应幂等更新 `last_seen_at`，与不同用户冲突必须 fail closed，不能“后写覆盖”、按手机号自动合并或重新归属。
+2. 首版同时要求一个平台用户在同一 `(provider, issuer, client_id/audience)` 下至多一个有效 WorkBuddy 外部主体。数据库还需反向唯一约束或等效事务锁；若以后支持多 WorkBuddy 账号，必须建模为显式多账号选择与独立 consent，不能静默改变当前主体。
+3. 新主体不能仅凭 WorkBuddy 换票自动创建并视为已绑定的平台账号。用户必须已有平台登录/OTP 会话并明确确认；若允许“以 WorkBuddy 创建平台账号”，那是独立注册流程，需重新定义恢复、注销和风控，不能复用本绑定事务暗中创建。
+
+商家 consent 与外部身份绑定分开处理，候选商家只来自服务端实时查询的 active memberships：
+
+| Active membership 数 | Consent 行为 | 禁止 |
+| --- | --- | --- |
+| 0 | 不签发 Connector grant/token；显示“暂无可授权商家”，可进入独立的新商家入驻流程 | 不自动创建商家后继续原 consent；不使用聊天中的商家名称/ID |
+| 1 | 可预选唯一商家，但仍展示商家、client/Connector、scopes、有效期与撤销方式并要求明确同意 | 不因“只有一个”而自动授权；不把登录等同 consent |
+| 多个 | 展示服务端返回的 active 列表并要求用户明确选择一个；选择提交使用一次性服务器引用 | 不接受自由输入 `merchant_id`；不默认最近商家；不允许模型代选 |
+
+consent 记录必须绑定平台用户、外部身份 binding、选定商家、client ID、resource、scopes、membership 版本和同意时间；签发授权码、换票以及每次 MCP 调用都重新核对用户/商家/membership 状态。成员退出、商家暂停、外部身份解绑或 consent 撤销后，refresh-token family 立即撤销；短期 access token 还必须通过在线 binding/membership resolver 或 denylist 立即失效，不能只等待 JWT 自然过期。
+
+#### 11.4.9 当前代码审查结论
+
+| 控制面 | 当前已有 | 尚缺/阻断 |
+| --- | --- | --- |
+| 第三方应用 state | 工作区服务生成 256 bit state 并保存摘要、`loginSessionDigest`、配置 ID/版本；callback 重解析 cookie session，bridge 在换票前按 state + session 原子消费并复核配置 ID/版本 | 默认 runtime 仍未装配登录/事务/仓储；redirect URI、请求 scopes 和目标商家尚未全部进入该 bridge-state 快照；provider error callback 不受理，完整回归须保持全绿 |
+| 浏览器边界 | Merchant Web 草稿只采用可信 server snapshot，query 不能改变登录/绑定/商家/consent 状态；本地 controller 严格解析成功 callback，并要求三个写接口携带 Origin 与显式 CSRF header，由登录适配器复核后才返回 mutation session | 无成功后 session 轮换、provider error callback、真实平台 CSRF key/cookie 生命周期和真实跨站回调；cookie 的 `Secure`/`HttpOnly`/host-only/`SameSite` 配置尚无可运行平台会话实现；runtime 明确 unavailable |
+| 外部身份 | HMAC 查找键和正向唯一索引；工作区新增反向唯一、status/解绑/撤销字段、迁移及 MySQL bind 仓储，涵盖幂等和跨用户/反向冲突 | 新迁移/仓储尚未由 runtime 装配；现有 onboarding repository 仍会为未见主体创建 `merchant_user`，不得误接入绑定流；解绑、转绑与审计链未实现 |
+| 商家解析/consent | membership 0/1/多查询存在；新增服务以完整 session + 64 位事务引用 + pending identity + candidate ref 读取/记录逐次 consent，拒绝旧事务、错 session 和跨标签页串线，单候选仍先返回 `consent_required`；另有 authorization/consent-grant 迁移和 MySQL 仓储草稿 | runtime 和平台事务/候选/consent adapters 未接通；服务层 consent 接口尚未显式携带 client/resource/scopes 或 membership 版本，仓储尚未形成端到端可运行闭环，故不能证明同意内容与最终 grant 一致 |
+| Token 隔离 | Connector token 校验 issuer/audience/token_use，单测拒绝模拟的 WorkBuddy Open API token 和错 audience；第三方 bridge 当前丢弃原 token | 尚无真实 WorkBuddy token 加密仓储/phoneverification 出站层，不能证明两类凭据在生产配置、日志、缓存和撤销域完全隔离 |
+| 撤销 | Connector MySQL refresh-token family 支持原子轮换、重放后 family 撤销 | 没有公开撤销/断开端点、binding/member 变更传播或 access-token denylist；生产 binding resolver/签名 codec 不可用；WorkBuddy 第三方远端撤销入口仍未确认 |
+
+因此当前只能声称“本地协议、UI/服务状态机、迁移与 MySQL 仓储草稿存在，runtime 继续 fail closed”。state/session 的本地预换票匹配代码不等于平台 session cookie 生命周期和跨站回调已经验收；也不得声称已完成针对具体商家/client/resource/scope 的显式 consent、外部身份一对一上线、立即撤销、真实 WorkBuddy 换票或生产接入。
+
 ### 11.5 安装、触发、链接、帮助与典型对话
 
 建议在 Connector 市场元数据中放 2～5 条低风险自然语言示例，例如：
@@ -649,17 +684,18 @@ WorkBuddy 只是调用端，业务事实、租户授权、幂等和审计仍由�
 | 401 与元数据发现 | 无 token、过期 token、伪造 token、错 audience 请求 `/mcp`；跟随 `WWW-Authenticate` 读取 RFC 9728/8414 元数据 | 认证在工具执行前返回正确 HTTP 401/403；challenge URL 可达；resource、issuer、端点和能力完全一致；根路径兼容别名如存在则与主元数据相同 |
 | Connector 注册与 OAuth 浏览器流 | 按 WorkBuddy 当前要求动态注册公共客户端；另测 MCP 2026 CIMD/预注册兼容；首次连接、取消、私有 scheme、回环回退、换票、刷新、断开、重连及 refresh token 重用 | 无 client secret；只用 PKCE S256；state/resource/redirect/`iss` 精确校验；client registration 不跨 issuer；动态回环端口可用；未验证 CIMD 前不移除 DCR；旧 refresh/access token 在轮换或撤销后不可用 |
 | 两套 Token 隔离 | 分别把 WorkBuddy Open API token、错 issuer/audience token 请求 `/mcp`，并检查所有配置、存储、日志和出站目标 | `/mcp` 全部拒绝非本平台 Connector token；Connector token 永不发往 WorkBuddy；两套凭据无混用、透传、兑换或值日志 |
-| 第三方应用换票/刷新 | 回调 state 重放/错 session/错商家/错 redirect；code 重放/过期；token 字段缺失；`expires_in` 不同值；并发刷新、超时、`invalid_grant`、新旧 refresh token、scope/open_id 漂移 | secret 仅后端；state/code 一次性；只有完整事务成功才绑定；按实际 `expires_in` 调度；刷新单飞且原子替换；字段/主体漂移 fail closed；无 token/code/secret 值日志 |
-| WorkBuddy 平台身份 | 第三方应用审核、最小 scope、首次/再次授权；同账号跨设备、重装、撤销再授权；账号注销/重建和跨应用 `open_id` 语义咨询官方 | 服务端换票取得 `open_id`；确认其应用隔离和稳定性语义；只以 `(issuer, client_id, open_id)` 为候选键；普通 Skill/Connector 未经验证仍不得自称获得平台身份 |
+| 第三方应用 callback/换票 | 从另一浏览器/账号转发合法 callback；state 重放、错 session、换号登录、重复/额外参数、错误 callback、错 redirect；code 重放/过期；token 字段缺失 | state 原子消费且绑定当前 browser session generation、平台用户、issuer/client/redirect/scopes；错会话在换票前拒绝；成功后轮换 session；只有完整绑定事务提交才显示成功；无 code/state/token 值日志 |
+| WorkBuddy 平台身份唯一绑定 | 第三方应用审核、最小 scope、首次/再次授权；同主体并发绑定同一/不同平台用户；同平台用户绑定第二个 WorkBuddy 主体；撤销再绑定；账号注销/重建和跨应用 `open_id` 语义咨询官方 | 服务端换票取得 `open_id`；正向和反向唯一策略均由数据库/事务强制；同一绑定幂等，跨用户冲突 fail closed；不自动创建/合并/转绑平台账号；未经验证不得自称获得稳定平台身份 |
+| 0/1/多商家 consent | 分别准备 0、1、2 个 active memberships；并发退出/暂停；篡改或重放选择引用；错 client/resource/scope | 0 个不签发；1 个仍需明确同意；多个必须从服务端列表选一个；consent 绑定用户/外部身份/商家/client/resource/scopes/membership 版本，签发和每次调用均复核 |
 | 手机号核验 | 仅在安全页输入手机号并完成平台 OTP/再认证，再调用 `phoneverification`；覆盖大陆/港澳格式、matched 正反例、错 scope、限流、超时 | 只得到 matched；不作为登录或自动合并凭据；聊天/日志无手机号、OTP；不匹配和错误不泄露任一侧账号存在性 |
-| 撤销与解绑 | 重复解绑、并发刷新、断开 Connector、解除平台绑定、成员退出、账号停用；核对 WorkBuddy 官方是否新增撤销入口 | 本地立即冻结并销毁凭据、停止刷新、撤销 Connector grant、清缓存/任务且幂等；明确 WorkBuddy 侧远端授权是否已撤销，未有官方端点时绝不声称完成远端撤销 |
+| 撤销与解绑 | 重复解绑、并发刷新、断开 Connector、解除平台绑定、成员退出、账号/商家停用；持旧 access token 重试；核对 WorkBuddy 官方是否新增撤销入口 | 本地立即冻结并销毁凭据、停止刷新、撤销 Connector refresh family/grant、在线 resolver 立即拒绝旧 access token、清缓存/任务且幂等；明确 WorkBuddy 侧是否已撤销，未有官方端点时绝不声称远端撤销 |
 | 绑定链接 | 检查聊天中链接是否可点击、复制、跨端打开、过期、重放、转发、换账号/商家 | 只到 allowlist HTTPS；单次/短期；转发不能接管；无法点击时仍有安全复制路径 |
 | 帮助/提示 | Connector 示例、OAuth 重连、Token `docUrl`、错误 `help_url`；场景胶囊/占位符等 Buddy 应用 UI 不在本形态范围 | 文案不诱导发送秘密；链接域名明确；普通 Skill 不伪装成 Buddy 应用 UI |
 | 权限与确认 | 只读用户发布、错 scope、跨租户 ID、知识提示注入、重复确认、响应丢失 | 全部拒绝或幂等；无资源存在性泄露；只有当前用户本轮确认可消费确认令牌 |
 | 凭据泄漏 | 检查聊天、任务历史、进程参数、Skill/Connector 包、日志、错误、遥测、URL、浏览器历史 | 无密码、OTP、access/refresh token、client secret；发现任一项即阻断 |
 | 发布上架 | 私测包校验和、版本升级/降级、审核材料、隐私说明、撤回与紧急停用 | 渠道、版本、审核状态可追溯；未获批不得宣称公开可安装；可撤销并回到上一安全版本 |
 
-本批完成了当前 WorkBuddy Connector、第三方应用、Open API 与 OAuth/MCP 主来源复核，并收口服务端换票/刷新、`open_id`、`phoneverification`、解绑/撤销、非秘密配置和负向测试约束；这些是文档安全审查，不是生产或实机验收。共享工作树中已有固定端点 authorize/授权码换票、state 一次性消费、`open_id` HMAC 派生身份的本地安全骨架与单元测试，但尚未成为可用集成。当前阻断仍包括：第三方应用注册/审核和真实 client 配置、生产 callback 路由、持久化 state/绑定仓储、加密 token 保管、刷新单飞、`open_id` 稳定性、phoneverification、解绑流程、WorkBuddy 侧远端撤销入口，以及 MCP 2026 CIMD 与 WorkBuddy DCR 的目标客户端兼容性均未接通、未确认或未实测。
+本批完成了当前 WorkBuddy Connector、第三方应用、Open API 与 OAuth/MCP 主来源复核，并审查 browser state/session、callback 重放、外部身份唯一性、0/1/多商家 consent、token 隔离和撤销传播；这些是文档与本地代码审查，不是生产或实机验收。共享工作树已新增本地授权 controller/service、可信 UI snapshot、state/candidate/consent/binding 接口、迁移和 MySQL 仓储草稿；state consume 已在本地代码中接收当前 session digest，写操作也已要求 Origin、CSRF header 和精确事务引用，但默认 runtime 仍显式 unavailable，真实 CSRF/session cookie 生命周期与跨站 callback 未接入。consent 服务接口尚未把 client/resource/scopes/membership 版本贯穿到可运行授权链；在线 binding/member resolver、access-token 立即撤销、第三方 token 保管/刷新/phoneverification/解绑及 WorkBuddy 远端撤销入口仍未完成；MCP 2026 CIMD 与 WorkBuddy DCR 的目标客户端兼容性也未实测。
 
 目标形态不再等待二选一，但只有上述门禁由真实 WorkBuddy 客户端和测试商家通过，且第三方应用/Connector 完成所需注册、审核和上架批准后，才能宣称可安装或投入生产。以下任一情况直接阻断生产：普通 Skill/Connector 无可信主体却允许跨用户操作；要求在聊天发送密码/OTP/Token；两套 OAuth token 混用或透传；`open_id` 稳定性未确认却作为唯一账号键；任意 URL 可被模型注入；跨商家切换由参数决定；发布/回滚缺少服务端权限、版本和一次性确认。
 
@@ -675,6 +711,7 @@ WorkBuddy 只是调用端，业务事实、租户授权、幂等和审计仍由�
 - [OAuth 2.1 draft-13](https://www.ietf.org/archive/id/draft-ietf-oauth-v2-1-13.html)、[RFC 7636 PKCE](https://www.rfc-editor.org/rfc/rfc7636)、[RFC 8252 Native Apps](https://www.rfc-editor.org/rfc/rfc8252.html)：公共客户端、PKCE S256、私有 scheme 与动态端口回环回调。
 - [RFC 9728 Protected Resource Metadata](https://www.rfc-editor.org/rfc/rfc9728)、[RFC 8414 Authorization Server Metadata](https://www.rfc-editor.org/rfc/rfc8414.html)、[RFC 7591 Dynamic Client Registration](https://www.rfc-editor.org/rfc/rfc7591.html)、[RFC 9207 Authorization Server Issuer Identification](https://www.rfc-editor.org/rfc/rfc9207.html)：资源/授权服务器发现、WorkBuddy 兼容动态注册和 issuer mix-up 防护。
 - [RFC 6749 OAuth 2.0](https://www.rfc-editor.org/rfc/rfc6749.html)、[RFC 8707 Resource Indicators](https://www.rfc-editor.org/rfc/rfc8707.html)、[RFC 6750 Bearer Token Usage](https://www.rfc-editor.org/rfc/rfc6750.html)、[RFC 9700 OAuth Security BCP](https://www.rfc-editor.org/rfc/rfc9700.html)、[RFC 7009 Token Revocation](https://www.rfc-editor.org/rfc/rfc7009.html)：授权码/刷新基础语义、资源/audience 限制、Bearer challenge、refresh-token 重放防护和撤销语义。
+- [RFC 10017 OAuth 2.0 for Browser-Based Applications](https://www.rfc-editor.org/rfc/rfc10017.html)：BFF token 隔离、浏览器 session cookie 防护和 redirect URI 登录 CSRF 要求。
 
 ## 12. 分阶段交付计划
 

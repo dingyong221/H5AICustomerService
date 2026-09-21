@@ -1,6 +1,12 @@
 import { createHash } from 'node:crypto';
 
-import type { MerchantUserId, VerifiedExternalIdentity } from '@h5cs/domain';
+import type {
+  MerchantUserId,
+  VerifiedExternalIdentity,
+  WorkBuddyBindingStateRecord,
+  WorkBuddyBindingStateRepository as DomainWorkBuddyBindingStateRepository,
+  WorkBuddyBindingStateToStore,
+} from '@h5cs/domain';
 
 import {
   deriveExternalSubjectLookupKey,
@@ -9,19 +15,14 @@ import {
 } from '../skill/workbuddy-authenticator.js';
 import type { WorkBuddyOpenApiClient } from './workbuddy-open-api-client.js';
 
-export type WorkBuddyBindingStateRecord = Readonly<{
-  transactionId: string;
-  merchantUserId: MerchantUserId;
-  expiresAt: Date;
-}>;
+export type { WorkBuddyBindingStateRecord, WorkBuddyBindingStateToStore } from '@h5cs/domain';
 
-export interface WorkBuddyBindingStateRepository {
-  assertReady(): Promise<void>;
-  /** Atomically consumes an unexpired state digest and returns it at most once. */
-  consume(stateDigest: Uint8Array, now: Date): Promise<WorkBuddyBindingStateRecord | null>;
-}
+export type WorkBuddyBindingStateRepository = Pick<
+  DomainWorkBuddyBindingStateRepository,
+  'assertReady' | 'consume'
+>;
 
-export class UnavailableWorkBuddyBindingStateRepository implements WorkBuddyBindingStateRepository {
+export class UnavailableWorkBuddyBindingStateRepository implements DomainWorkBuddyBindingStateRepository {
   public async assertReady(): Promise<never> {
     await Promise.resolve();
     throw new WorkBuddyAuthenticationUnavailableError(
@@ -29,7 +30,15 @@ export class UnavailableWorkBuddyBindingStateRepository implements WorkBuddyBind
     );
   }
 
-  public async consume(_stateDigest: Uint8Array, _now: Date): Promise<never> {
+  public async consume(
+    _stateDigest: Uint8Array,
+    _loginSessionDigest: Uint8Array,
+    _now: Date,
+  ): Promise<never> {
+    return this.assertReady();
+  }
+
+  public async store(_record: WorkBuddyBindingStateToStore): Promise<never> {
     return this.assertReady();
   }
 }
@@ -53,6 +62,8 @@ export class WorkBuddyIdentityBridge {
   readonly #states: WorkBuddyBindingStateRepository;
   readonly #subjectHmacSecret: Uint8Array;
   readonly #subjectLookupKeyVersion: number;
+  readonly #configurationId: string;
+  readonly #configurationVersion: number;
   readonly #clock: () => Date;
 
   public constructor(input: {
@@ -60,6 +71,8 @@ export class WorkBuddyIdentityBridge {
     states: WorkBuddyBindingStateRepository;
     subjectHmacSecret: Uint8Array;
     subjectLookupKeyVersion: number;
+    configurationId: string;
+    configurationVersion: number;
     clock?: () => Date;
   }) {
     if (input.subjectHmacSecret.byteLength < 32) {
@@ -72,24 +85,50 @@ export class WorkBuddyIdentityBridge {
         'WorkBuddy subject HMAC key version is invalid',
       );
     }
+    if (
+      !/^[A-Za-z0-9](?:[A-Za-z0-9:_-]{0,127})$/u.test(input.configurationId) ||
+      !Number.isSafeInteger(input.configurationVersion) ||
+      input.configurationVersion < 1
+    ) {
+      throw new WorkBuddyAuthenticationUnavailableError(
+        'WorkBuddy authorization configuration identity is invalid',
+      );
+    }
     this.#client = input.client;
     this.#states = input.states;
     this.#subjectHmacSecret = input.subjectHmacSecret.slice();
     this.#subjectLookupKeyVersion = input.subjectLookupKeyVersion;
+    this.#configurationId = input.configurationId;
+    this.#configurationVersion = input.configurationVersion;
     this.#clock = input.clock ?? (() => new Date());
   }
 
   public async completeAuthorization(input: {
     authorizationCode: string;
+    loginSessionDigest: Uint8Array;
     state: string;
   }): Promise<WorkBuddyIdentityBridgeResult> {
-    if (!validState(input.state) || !validCode(input.authorizationCode)) {
+    if (
+      !validState(input.state) ||
+      !validCode(input.authorizationCode) ||
+      input.loginSessionDigest.byteLength !== 32
+    ) {
       throw new WorkBuddyAuthenticationRequiredError();
     }
     await this.#states.assertReady();
     const now = this.#clock();
-    const transaction = await this.#states.consume(digestState(input.state), now);
-    if (transaction === null || transaction.expiresAt.getTime() <= now.getTime()) {
+    const transaction = await this.#states.consume(
+      digestState(input.state),
+      input.loginSessionDigest,
+      now,
+    );
+    if (
+      transaction === null ||
+      transaction.expiresAt.getTime() <= now.getTime() ||
+      transaction.configurationId !== this.#configurationId ||
+      transaction.configurationVersion !== this.#configurationVersion ||
+      !Buffer.from(transaction.loginSessionDigest).equals(Buffer.from(input.loginSessionDigest))
+    ) {
       throw new WorkBuddyAuthenticationRequiredError();
     }
 

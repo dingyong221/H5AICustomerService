@@ -11,13 +11,21 @@ import { WorkBuddyMcpMiddleware } from './mcp/workbuddy-mcp.middleware.js';
 import { OAuthController } from './oauth/oauth.controller.js';
 import { createRuntimeOAuth, OAuthRuntime } from './oauth/oauth-runtime.js';
 import { McpBearerAuthMiddleware } from './oauth/mcp-bearer-auth.middleware.js';
+import { WorkBuddyLocalAuthorizationController } from './oauth/workbuddy-local-authorization.controller.js';
+import { createRuntimeWorkBuddyLocalAuthorization } from './oauth/workbuddy-local-authorization.runtime.js';
+import { WorkBuddyLocalAuthorizationService } from './oauth/workbuddy-local-authorization.service.js';
 import { RequestIdMiddleware } from './request-id.js';
 import { SkillOnboardingApplicationService } from './skill/skill-onboarding.service.js';
 import { createRuntimeSkillOnboardingService } from './skill/runtime.js';
 import { SkillController } from './skill/skill.controller.js';
 
 @Module({
-  controllers: [AppController, SkillController, OAuthController],
+  controllers: [
+    AppController,
+    SkillController,
+    OAuthController,
+    WorkBuddyLocalAuthorizationController,
+  ],
   providers: [
     HealthService,
     {
@@ -29,6 +37,10 @@ import { SkillController } from './skill/skill.controller.js';
       inject: [OAuthRuntime],
       useFactory: (oauth: OAuthRuntime) =>
         createRuntimeSkillOnboardingService(process.env, oauth.authenticator),
+    },
+    {
+      provide: WorkBuddyLocalAuthorizationService,
+      useFactory: () => createRuntimeWorkBuddyLocalAuthorization(),
     },
     WorkBuddyMcpAdapter,
     WorkBuddyMcpMiddleware,

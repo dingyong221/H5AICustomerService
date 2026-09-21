@@ -68,7 +68,13 @@ export const externalIdentities = mysqlTable(
     audience: varchar('audience', { length: 191 }).notNull(),
     subjectLookupKey: digest('subject_lookup_key').notNull(),
     subjectLookupKeyVersion: int('subject_lookup_key_version', { unsigned: true }).notNull(),
+    status: varchar('status', { length: 32 }).notNull().default('active'),
     phoneMatchVerifiedAt: utcDateTime('phone_match_verified_at'),
+    boundAt: utcDateTime('bound_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP(6)`),
+    unlinkRequestedAt: utcDateTime('unlink_requested_at'),
+    revokedAt: utcDateTime('revoked_at'),
     lastSeenAt: utcDateTime('last_seen_at').notNull(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -82,6 +88,12 @@ export const externalIdentities = mysqlTable(
       table.subjectLookupKey,
     ),
     index('idx_external_identity_user').on(table.merchantUserId, table.id),
+    uniqueIndex('uq_external_identity_user_context').on(
+      table.merchantUserId,
+      table.provider,
+      table.issuer,
+      table.audience,
+    ),
     foreignKey({
       columns: [table.merchantUserId],
       foreignColumns: [merchantUsers.id],
@@ -134,11 +146,160 @@ export const oauthPublicClients = mysqlTable(
   ],
 );
 
+export const connectorAuthorizationTransactions = mysqlTable(
+  'connector_authorization_transaction',
+  {
+    transactionDigest: digest('transaction_digest').notNull(),
+    loginSessionDigest: digest('login_session_digest').notNull(),
+    clientIdDigest: digest('client_id_digest').notNull(),
+    redirectUri: varchar('redirect_uri', { length: 2048 }).notNull(),
+    resource: varchar('resource', { length: 2048 }).notNull(),
+    resourceDigest: digest('resource_digest').notNull(),
+    scope: varchar('scope', { length: 64 }).notNull(),
+    codeChallenge: varchar('code_challenge', { length: 128 }).notNull(),
+    connectorStateDigest: digest('connector_state_digest').notNull(),
+    step: varchar('step', { length: 64 }).notNull(),
+    merchantUserId: id('merchant_user_id'),
+    merchantId: id('merchant_id'),
+    candidateVersion: int('candidate_version', { unsigned: true }).notNull().default(0),
+    expiresAt: utcDateTime('expires_at').notNull(),
+    consumedAt: utcDateTime('consumed_at'),
+    createdAt: utcDateTime('created_at').notNull(),
+    updatedAt: utcDateTime('updated_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.transactionDigest], name: 'pk_connector_authorization_tx' }),
+    index('idx_connector_authorization_step_expiry').on(
+      table.step,
+      table.expiresAt,
+      table.transactionDigest,
+    ),
+    index('idx_connector_authorization_session').on(
+      table.loginSessionDigest,
+      table.expiresAt,
+      table.transactionDigest,
+    ),
+    index('idx_connector_authorization_user').on(
+      table.merchantUserId,
+      table.updatedAt,
+      table.transactionDigest,
+    ),
+    foreignKey({
+      columns: [table.clientIdDigest],
+      foreignColumns: [oauthPublicClients.clientIdDigest],
+      name: 'fk_connector_authorization_client',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.merchantUserId],
+      foreignColumns: [merchantUsers.id],
+      name: 'fk_connector_authorization_user',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.merchantId],
+      foreignColumns: [merchants.id],
+      name: 'fk_connector_authorization_merchant',
+    }).onDelete('restrict'),
+  ],
+);
+
+export const connectorConsentGrants = mysqlTable(
+  'connector_consent_grant',
+  {
+    id: id('id').notNull(),
+    bindingIdDigest: digest('binding_id_digest').notNull(),
+    bindingId: varchar('binding_id', { length: 191 }).notNull(),
+    activeKeyDigest: digest('active_key_digest'),
+    authorizationTransactionDigest: digest('authorization_transaction_digest').notNull(),
+    merchantUserId: id('merchant_user_id').notNull(),
+    merchantId: id('merchant_id').notNull(),
+    clientIdDigest: digest('client_id_digest').notNull(),
+    resource: varchar('resource', { length: 2048 }).notNull(),
+    resourceDigest: digest('resource_digest').notNull(),
+    scope: varchar('scope', { length: 64 }).notNull(),
+    consentVersion: varchar('consent_version', { length: 64 }).notNull(),
+    status: varchar('status', { length: 32 }).notNull(),
+    grantedAt: utcDateTime('granted_at').notNull(),
+    revokedAt: utcDateTime('revoked_at'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id], name: 'pk_connector_consent_grant' }),
+    uniqueIndex('uq_connector_consent_binding').on(table.bindingIdDigest),
+    uniqueIndex('uq_connector_consent_transaction').on(table.authorizationTransactionDigest),
+    uniqueIndex('uq_connector_consent_active').on(table.activeKeyDigest),
+    index('idx_connector_consent_user_status').on(
+      table.merchantUserId,
+      table.status,
+      table.updatedAt,
+    ),
+    index('idx_connector_consent_merchant_status').on(
+      table.merchantId,
+      table.status,
+      table.updatedAt,
+    ),
+    foreignKey({
+      columns: [table.authorizationTransactionDigest],
+      foreignColumns: [connectorAuthorizationTransactions.transactionDigest],
+      name: 'fk_connector_consent_transaction',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.clientIdDigest],
+      foreignColumns: [oauthPublicClients.clientIdDigest],
+      name: 'fk_connector_consent_client',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.merchantId, table.merchantUserId],
+      foreignColumns: [merchantMemberships.merchantId, merchantMemberships.merchantUserId],
+      name: 'fk_connector_consent_membership',
+    }).onDelete('restrict'),
+  ],
+);
+
+export const workbuddyBridgeStates = mysqlTable(
+  'workbuddy_bridge_state',
+  {
+    stateDigest: digest('state_digest').notNull(),
+    authorizationTransactionDigest: digest('authorization_transaction_digest').notNull(),
+    merchantUserId: id('merchant_user_id').notNull(),
+    loginSessionDigest: digest('login_session_digest').notNull(),
+    configurationId: varchar('configuration_id', { length: 128 }).notNull(),
+    configurationVersion: int('configuration_version', { unsigned: true }).notNull(),
+    expiresAt: utcDateTime('expires_at').notNull(),
+    consumedAt: utcDateTime('consumed_at'),
+    createdAt: utcDateTime('created_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.stateDigest], name: 'pk_workbuddy_bridge_state' }),
+    index('idx_workbuddy_bridge_state_expiry').on(
+      table.consumedAt,
+      table.expiresAt,
+      table.stateDigest,
+    ),
+    index('idx_workbuddy_bridge_state_session').on(
+      table.loginSessionDigest,
+      table.createdAt,
+      table.stateDigest,
+    ),
+    foreignKey({
+      columns: [table.authorizationTransactionDigest],
+      foreignColumns: [connectorAuthorizationTransactions.transactionDigest],
+      name: 'fk_workbuddy_bridge_authorization',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.merchantUserId],
+      foreignColumns: [merchantUsers.id],
+      name: 'fk_workbuddy_bridge_user',
+    }).onDelete('restrict'),
+  ],
+);
+
 export const oauthAuthorizationCodes = mysqlTable(
   'oauth_authorization_code',
   {
     codeDigest: digest('code_digest').notNull(),
     clientIdDigest: digest('client_id_digest').notNull(),
+    consentGrantId: id('consent_grant_id'),
     redirectUri: varchar('redirect_uri', { length: 2048 }).notNull(),
     resource: varchar('resource', { length: 2048 }).notNull(),
     scope: varchar('scope', { length: 64 }).notNull(),
@@ -160,6 +321,11 @@ export const oauthAuthorizationCodes = mysqlTable(
       foreignColumns: [oauthPublicClients.clientIdDigest],
       name: 'fk_oauth_authorization_code_client',
     }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.consentGrantId],
+      foreignColumns: [connectorConsentGrants.id],
+      name: 'fk_oauth_authorization_code_grant',
+    }).onDelete('restrict'),
   ],
 );
 
@@ -169,6 +335,7 @@ export const oauthRefreshTokenFamilies = mysqlTable(
     familyIdDigest: digest('family_id_digest').notNull(),
     familyId: varchar('family_id', { length: 128 }).notNull(),
     clientIdDigest: digest('client_id_digest').notNull(),
+    consentGrantId: id('consent_grant_id'),
     bindingId: varchar('binding_id', { length: 191 }).notNull(),
     resource: varchar('resource', { length: 2048 }).notNull(),
     scope: varchar('scope', { length: 64 }).notNull(),
@@ -183,6 +350,11 @@ export const oauthRefreshTokenFamilies = mysqlTable(
       columns: [table.clientIdDigest],
       foreignColumns: [oauthPublicClients.clientIdDigest],
       name: 'fk_oauth_refresh_family_client',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.consentGrantId],
+      foreignColumns: [connectorConsentGrants.id],
+      name: 'fk_oauth_refresh_family_grant',
     }).onDelete('restrict'),
   ],
 );

@@ -2,163 +2,283 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildWorkBuddyConnectionViewModel,
-  resolveSecureAuthorizationEntry,
+  decodeTrustedWorkBuddyAuthorizationSnapshot,
+  resolveSecureServerNavigation,
   secureAuthorizationLinkAttributes,
+  type TrustedWorkBuddyAuthorizationSnapshot,
+  type WorkBuddyMerchantCandidate,
 } from './connection-view-model';
 
 const applicationOrigin = 'https://merchant.example.com';
+const merchantOne: WorkBuddyMerchantCandidate = {
+  displayName: '蓝天家电服务',
+  reference: 'merchant_ref_one',
+  roleLabel: '管理员',
+};
+const merchantTwo: WorkBuddyMerchantCandidate = {
+  displayName: '青山维修',
+  reference: 'merchant_ref_two',
+  roleLabel: '所有者',
+};
 
-describe('WorkBuddy connection security boundary', () => {
-  it('stays unconfigured without a server-provided authorization entry', () => {
+const merchantResolution = (
+  merchants: readonly WorkBuddyMerchantCandidate[],
+): TrustedWorkBuddyAuthorizationSnapshot => ({
+  connectorLabel: 'H5 AI Customer Service',
+  merchants,
+  scope: 'mcp:tools',
+  stage: 'merchant_resolution_required',
+});
+
+describe('WorkBuddy trusted authorization page state', () => {
+  it('fails closed when no trusted server snapshot or backend route exists', () => {
     const model = buildWorkBuddyConnectionViewModel({ applicationOrigin });
-    expect(model.state).toBe('unconfigured');
+
+    expect(model).toMatchObject({
+      actionLabel: '等待可信服务端路由',
+      blocked: true,
+      label: '授权后端不可用',
+      state: 'backend_unavailable',
+    });
     expect(model.authorizationHref).toBeUndefined();
+    expect(model.steps.every((step) => step.status === 'blocked')).toBe(true);
   });
 
-  it('accepts only same-origin or explicitly allowed HTTPS authorization entries', () => {
+  it('accepts only same-origin server navigation and strips unsafe routes', () => {
     expect(
-      resolveSecureAuthorizationEntry({
+      resolveSecureServerNavigation({
         applicationOrigin,
-        serverAuthorizationEntry: '/oauth/workbuddy/authorize?state=safe-state',
+        navigation: { href: '/login/start?transaction=opaque_ref' },
       }),
-    ).toBe('https://merchant.example.com/oauth/workbuddy/authorize?state=safe-state');
-
+    ).toBe('https://merchant.example.com/login/start?transaction=opaque_ref');
     expect(
-      resolveSecureAuthorizationEntry({
-        allowedAuthorizationOrigins: ['https://auth.workbuddy.example'],
-        applicationOrigin,
-        serverAuthorizationEntry: 'https://auth.workbuddy.example/oauth/authorize',
+      resolveSecureServerNavigation({
+        applicationOrigin: 'http://127.0.0.1:3000',
+        navigation: { href: '/auth/workbuddy/start' },
       }),
-    ).toBe('https://auth.workbuddy.example/oauth/authorize');
+    ).toBe('http://127.0.0.1:3000/auth/workbuddy/start');
 
-    for (const unsafeEntry of [
-      'http://merchant.example.com/oauth/authorize',
-      'https://foreign.example/oauth/authorize',
-      'https://user:password@merchant.example.com/oauth/authorize',
-      'https://merchant.example.com/oauth/authorize#token',
-      'https://merchant.example.com/oauth/authorize?code=one-time-code',
-      'https://merchant.example.com/oauth/authorize?access_token=secret',
-      'https://merchant.example.com/oauth/authorize?open_id=identifier',
+    for (const href of [
+      'http://merchant.example.com/login',
+      'https://foreign.example/login',
+      'https://user:password@merchant.example.com/login',
+      'https://merchant.example.com/login#token',
+      'https://merchant.example.com/oauth/token',
+      '/auth/workbuddy/callback?code=one-time-code',
+      '/auth/workbuddy/callback?state=correlation-secret',
+      '/auth/workbuddy/callback?open_id=identifier',
     ]) {
       expect(
-        resolveSecureAuthorizationEntry({
+        resolveSecureServerNavigation({
           applicationOrigin,
-          serverAuthorizationEntry: unsafeEntry,
+          navigation: { href },
         }),
       ).toBeUndefined();
     }
   });
 
-  it('provides page links with a strict no-referrer boundary', () => {
+  it('keeps strict no-referrer attributes on every enabled navigation', () => {
     expect(secureAuthorizationLinkAttributes).toEqual({
       referrerPolicy: 'no-referrer',
       rel: 'noreferrer',
     });
   });
 
-  it('shows disconnected only when a validated authorization entry is available', () => {
-    expect(
-      buildWorkBuddyConnectionViewModel({
-        applicationOrigin,
-        serverAuthorizationEntry: '/oauth/workbuddy/authorize?state=safe-state',
-      }),
-    ).toMatchObject({
-      authorizationHref: 'https://merchant.example.com/oauth/workbuddy/authorize?state=safe-state',
-      label: '尚未连接',
-      state: 'disconnected',
-    });
-  });
-
-  it('treats code and state only as an untrusted callback pending server verification', () => {
+  it('uses query presence only for a fixed notice and never for authorization state', () => {
     const model = buildWorkBuddyConnectionViewModel({
       applicationOrigin,
-      callbackParameters: {
-        code: 'sensitive-one-time-code',
-        state: 'sensitive-correlation-state',
+      trustedServerSnapshot: {
+        loginAction: { href: '/login/start' },
+        stage: 'login_required',
       },
-      serverAuthorizationEntry: '/oauth/workbuddy/authorize',
+      untrustedCallbackPresent: true,
     });
 
-    expect(model.state).toBe('callback_pending');
-    expect(JSON.stringify(model)).not.toContain('sensitive-one-time-code');
-    expect(JSON.stringify(model)).not.toContain('sensitive-correlation-state');
+    expect(model.state).toBe('login_required');
+    expect(model.authorizationHref).toBe('https://merchant.example.com/login/start');
+    expect(model.securityNotice).toContain('不会改变登录、绑定、商家或授权状态');
+    expect(JSON.stringify(model)).not.toContain('code=');
+    expect(JSON.stringify(model)).not.toContain('open_id');
+  });
+
+  it('presents login then binding only from trusted server snapshots', () => {
+    const login = buildWorkBuddyConnectionViewModel({
+      applicationOrigin,
+      trustedServerSnapshot: {
+        loginAction: { href: '/login/start' },
+        stage: 'login_required',
+      },
+    });
+    const binding = buildWorkBuddyConnectionViewModel({
+      applicationOrigin,
+      trustedServerSnapshot: {
+        accountLabel: '账号尾号 4821',
+        bindingAction: { href: '/auth/workbuddy/start' },
+        stage: 'binding_required',
+      },
+    });
+
+    expect(login).toMatchObject({ blocked: false, state: 'login_required' });
+    expect(login.steps.map((step) => step.status)).toEqual([
+      'current',
+      'pending',
+      'pending',
+      'pending',
+    ]);
+    expect(binding).toMatchObject({ blocked: false, state: 'binding_required' });
+    expect(binding.steps.map((step) => step.status)).toEqual([
+      'complete',
+      'current',
+      'pending',
+      'pending',
+    ]);
+  });
+
+  it('fails closed for zero merchants and never invents a tenant', () => {
+    const model = buildWorkBuddyConnectionViewModel({
+      applicationOrigin,
+      trustedServerSnapshot: merchantResolution([]),
+    });
+
+    expect(model).toMatchObject({
+      blocked: true,
+      merchants: [],
+      state: 'merchant_access_required',
+    });
+    expect(model.consent).toBeUndefined();
     expect(model.authorizationHref).toBeUndefined();
   });
 
-  it('does not turn provider errors into trusted authorization or merchant states', () => {
-    const failed = buildWorkBuddyConnectionViewModel({
+  it('turns exactly one trusted merchant into a consent state without auto-approval', () => {
+    const snapshot = merchantResolution([merchantOne]);
+    if (snapshot.stage !== 'merchant_resolution_required') throw new Error('Unexpected fixture');
+    const model = buildWorkBuddyConnectionViewModel({
       applicationOrigin,
-      callbackParameters: { error: 'provider-secret-error-value' },
-      serverAuthorizationEntry: '/oauth/workbuddy/authorize',
-    });
-    const selection = buildWorkBuddyConnectionViewModel({
-      applicationOrigin,
-      callbackParameters: { error: 'merchant_selection_required' },
-      serverAuthorizationEntry: '/oauth/workbuddy/authorize',
+      trustedServerSnapshot: {
+        ...snapshot,
+        singleMerchantConsentAction: { href: '/auth/workbuddy/consent' },
+      },
     });
 
-    expect(failed.state).toBe('callback_rejected');
-    expect(JSON.stringify(failed)).not.toContain('provider-secret-error-value');
-    expect(selection.state).toBe('callback_rejected');
+    expect(model).toMatchObject({
+      actionLabel: '查看并同意授权',
+      authorizationHref: 'https://merchant.example.com/auth/workbuddy/consent',
+      blocked: false,
+      consent: {
+        connectorLabel: 'H5 AI Customer Service',
+        merchantDisplayName: '蓝天家电服务',
+        scope: 'mcp:tools',
+      },
+      state: 'consent_required',
+    });
+    expect(model.consent?.permissions).toHaveLength(4);
   });
 
-  it('rejects unknown, repeated, incomplete and oversized callback parameters', () => {
-    const cases = [
-      { access_token: 'secret' },
-      { code: ['one', 'two'], state: 'expected' },
-      { code: 'only-code' },
-      { code: 'x'.repeat(2_049), state: 'expected' },
-      { connected: 'true' },
-    ];
+  it('requires an explicit choice for multiple trusted merchants and has no default', () => {
+    const model = buildWorkBuddyConnectionViewModel({
+      applicationOrigin,
+      trustedServerSnapshot: merchantResolution([
+        {
+          ...merchantOne,
+          selectionAction: { href: '/auth/workbuddy/merchant/merchant_ref_one' },
+        },
+        {
+          ...merchantTwo,
+          selectionAction: { href: 'https://foreign.example/merchant_ref_two' },
+        },
+      ]),
+    });
 
-    for (const callbackParameters of cases) {
-      expect(
-        buildWorkBuddyConnectionViewModel({
-          applicationOrigin,
-          callbackParameters,
-          serverAuthorizationEntry: '/oauth/workbuddy/authorize',
-        }).state,
-      ).toBe('callback_rejected');
-    }
+    expect(model.state).toBe('merchant_selection_required');
+    expect(model.authorizationHref).toBeUndefined();
+    expect(model.merchants).toEqual([
+      {
+        displayName: '蓝天家电服务',
+        reference: 'merchant_ref_one',
+        roleLabel: '管理员',
+        selectionHref: 'https://merchant.example.com/auth/workbuddy/merchant/merchant_ref_one',
+      },
+      {
+        displayName: '青山维修',
+        reference: 'merchant_ref_two',
+        roleLabel: '所有者',
+      },
+    ]);
+    expect(model.blocked).toBe(false);
   });
 
-  it('shows signed-in only from a trusted server state, never from callback text', () => {
-    expect(
-      buildWorkBuddyConnectionViewModel({
-        applicationOrigin,
-        callbackParameters: { connected: 'true' },
-        serverAuthorizationEntry: '/oauth/workbuddy/authorize',
-      }).state,
-    ).toBe('callback_rejected');
+  it('shows consent details but remains blocked without a consent submission route', () => {
+    const model = buildWorkBuddyConnectionViewModel({
+      applicationOrigin,
+      trustedServerSnapshot: {
+        connectorLabel: 'H5 AI Customer Service',
+        merchant: merchantOne,
+        scope: 'mcp:tools',
+        stage: 'consent_required',
+      },
+    });
 
+    expect(model).toMatchObject({
+      blocked: true,
+      state: 'consent_required',
+    });
+    expect(model.authorizationHref).toBeUndefined();
+    expect(model.steps.map((step) => step.status)).toEqual([
+      'complete',
+      'complete',
+      'complete',
+      'current',
+    ]);
+  });
+
+  it('shows authorized only from a trusted snapshot and still validates management navigation', () => {
+    const model = buildWorkBuddyConnectionViewModel({
+      applicationOrigin,
+      trustedServerSnapshot: {
+        connectorLabel: 'H5 AI Customer Service',
+        managementAction: { href: '/' },
+        merchant: merchantOne,
+        stage: 'authorized',
+      },
+      untrustedCallbackPresent: true,
+    });
+
+    expect(model.state).toBe('authorized');
+    expect(model.authorizationHref).toBeUndefined();
+    expect(model.blocked).toBe(true);
+    expect(model.steps.every((step) => step.status === 'complete')).toBe(true);
+  });
+
+  it('decodes only bounded trusted state shapes and rejects ambiguous merchants', () => {
     expect(
-      buildWorkBuddyConnectionViewModel({
-        applicationOrigin,
-        trustedServerState: 'signed_in',
+      decodeTrustedWorkBuddyAuthorizationSnapshot({
+        connectorLabel: 'H5 AI Customer Service',
+        merchants: [merchantOne],
+        scope: 'mcp:tools',
+        stage: 'merchant_resolution_required',
       }),
-    ).toMatchObject({ state: 'signed_in', label: '已登录' });
-  });
-
-  it('presents every trusted server state without allowing callbacks to override it', () => {
-    const expectedLabels = {
-      authorization_failed: '授权失败',
-      binding_required: '需要绑定商家',
-      conflict: '绑定冲突',
-      consent_required: '需要授权同意',
-      merchant_selection_required: '多商家待选择',
-      revoked: '授权已撤销',
-      signed_in: '已登录',
-    } as const;
-
-    for (const [trustedServerState, label] of Object.entries(expectedLabels)) {
-      expect(
-        buildWorkBuddyConnectionViewModel({
-          applicationOrigin,
-          callbackParameters: { error: 'untrusted-callback-error' },
-          serverAuthorizationEntry: '/oauth/workbuddy/authorize?state=safe-state',
-          trustedServerState: trustedServerState as keyof typeof expectedLabels,
-        }),
-      ).toMatchObject({ label, state: trustedServerState });
-    }
+    ).toMatchObject({ stage: 'merchant_resolution_required' });
+    expect(
+      decodeTrustedWorkBuddyAuthorizationSnapshot({
+        connectorLabel: 'H5 AI Customer Service',
+        merchants: [merchantOne, merchantOne],
+        scope: 'mcp:tools',
+        stage: 'merchant_resolution_required',
+      }),
+    ).toBeUndefined();
+    expect(
+      decodeTrustedWorkBuddyAuthorizationSnapshot({
+        connectorLabel: 'H5 AI Customer Service',
+        merchant: { ...merchantOne, reference: '../other-merchant' },
+        scope: 'mcp:tools',
+        stage: 'consent_required',
+      }),
+    ).toBeUndefined();
+    expect(
+      decodeTrustedWorkBuddyAuthorizationSnapshot({
+        connected: true,
+        stage: 'authorized',
+      }),
+    ).toBeUndefined();
   });
 });

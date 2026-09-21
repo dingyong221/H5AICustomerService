@@ -1240,3 +1240,18 @@ MVP把一个Connector授权上下文定义为“单活动商家”。用户切�
 5. Connector授权响应新增RFC 9207 `iss`，metadata同步声明支持。以上能力均由本地单元/协议测试覆盖，未调用真实WorkBuddy。
 
 下一增量仍需完成：bridge state和外部身份绑定的MySQL仓储、callback路由、平台登录与consent/grant状态机、0/1/多商家选择、正式签名/JWKS、binding resolver、撤销/解绑/恢复、完整本地HTTP+MySQL E2E。生产托管MySQL、真实WorkBuddy凭据、远程部署和实机验证继续保持未完成。
+
+### 17.11 本轮第二个实现增量
+
+> 本增量基线：commit `1fa630a`。目标是把身份桥之后的本地账号授权事实和接口边界推进到可审查状态，不是启用真实运行时。没有写入或调用真实 WorkBuddy 凭据、用户身份、生产 MySQL 或远程服务。
+
+本轮新增以下本地能力：
+
+1. 新增 WorkBuddy bridge state、外部身份唯一绑定、Connector 授权事务和 consent grant 的领域契约、InnoDB 迁移及 MySQL 仓储。bridge state 只保存 state 与登录 session 摘要；外部身份同时受“主体只能属于一个平台用户”和“同一平台用户在相同 provider/issuer/client 上只能有一个主体”的数据库约束；同一绑定幂等，跨用户或保留状态冲突 fail closed。
+2. Connector 授权事务保存 client、精确 redirect、resource、`mcp:tools`、PKCE challenge、Connector state 摘要、单一用户/商家与生命周期；grant 激活时在事务中复核 active Membership，并原子撤销同一授权上下文的旧 grant 与 Refresh Token family。授权码与 Refresh Token family 增加 grant 外键位置，但现有运行时尚未使用这些字段签发可用 Token。
+3. 新增本地账号授权 controller/service 骨架，覆盖开始绑定、callback、状态读取、0/1/多商家分支、商家选择和逐次 consent。callback 在远程换票前同时校验一次性 state、当前登录 session 摘要和配置版本；可变更请求要求平台登录适配器验证 Origin、显式 CSRF header、当前 session 与 64 位随机授权事务引用，不能只按账号查找“最新事务”或复用账号级 consent。
+4. Merchant Web 的登录、绑定和 consent 页面只接受白名单解码的服务端可信快照；query/callback、环境变量状态、前端缓存和聊天内容都不能把页面推进为已登录、已选商家或已授权。0 个商家停止，1 个商家仍需明确同意，多个商家不默认选择；缺少状态源或安全操作路由时全部 fail closed。
+
+当前仍不能声明第 17.9 节完成。非 test 运行时继续固定返回不可用：平台登录/session、授权事务状态迁移、候选商家、逐次 consent 和外部身份绑定适配器尚未装配；授权事务/grant 仓储还没有贯穿现有 `OAuthResourceOwnerAuthorizer`、授权码签发、Token 换取与在线 binding resolver；原 Connector state 仍只有摘要，未由安全浏览器上下文恢复到最终 redirect；正式签名/JWKS、撤销/解绑/恢复、审计/outbox、真实 MySQL 集成测试及完整本地 HTTP+MCP E2E 仍未完成。
+
+下一增量应优先实现平台 session 与授权事务的 MySQL 适配器，把可信状态 API 接到 Merchant Web，并在同一事务中完成“外部身份绑定 → active Membership 复核 → 单一商家 consent grant → 一次性授权码”；随后再接 binding resolver 与在线撤销，不能先启用生产运行时或用测试身份绕过上述链路。

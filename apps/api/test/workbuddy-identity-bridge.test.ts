@@ -27,6 +27,9 @@ const clientConfig = {
 const state = 'state_'.padEnd(48, 'x');
 const code = 'authorization-code-value';
 const now = new Date('2026-09-21T12:00:00.000Z');
+const loginSessionDigest = new Uint8Array(32).fill(4);
+const configurationId = 'workbuddy_config_01';
+const configurationVersion = 1;
 
 const jsonResponse = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {
@@ -47,11 +50,18 @@ class TestStateRepository implements WorkBuddyBindingStateRepository {
 
   public async consume(
     stateDigest: Uint8Array,
+    expectedLoginSessionDigest: Uint8Array,
     _now: Date,
   ): Promise<WorkBuddyBindingStateRecord | null> {
     await Promise.resolve();
     const key = Buffer.from(stateDigest).toString('hex');
     const record = this.#records.get(key) ?? null;
+    if (
+      record === null ||
+      !Buffer.from(record.loginSessionDigest).equals(Buffer.from(expectedLoginSessionDigest))
+    ) {
+      return null;
+    }
     this.#records.delete(key);
     return record;
   }
@@ -117,8 +127,11 @@ describe('WorkBuddy third-party OAuth identity bridge', () => {
   it('consumes state once and returns only a HMAC-derived identity', async () => {
     const repository = new TestStateRepository();
     repository.add(state, {
-      transactionId: 'binding_transaction_01',
+      transactionId: '1'.repeat(64),
       merchantUserId: toMerchantUserId('00112233445566778899aabbccddeeff'),
+      loginSessionDigest,
+      configurationId,
+      configurationVersion,
       expiresAt: new Date(now.getTime() + 60_000),
     });
     const client = new WorkBuddyOpenApiClient(
@@ -130,10 +143,16 @@ describe('WorkBuddy third-party OAuth identity bridge', () => {
       states: repository,
       subjectHmacSecret: new Uint8Array(32).fill(9),
       subjectLookupKeyVersion: 2,
+      configurationId,
+      configurationVersion,
       clock: () => now,
     });
 
-    const result = await bridge.completeAuthorization({ authorizationCode: code, state });
+    const result = await bridge.completeAuthorization({
+      authorizationCode: code,
+      loginSessionDigest,
+      state,
+    });
     expect(result.identity).toMatchObject({
       provider: 'workbuddy',
       issuer: 'https://www.workbuddy.cn',
@@ -149,16 +168,19 @@ describe('WorkBuddy third-party OAuth identity bridge', () => {
     expect(serialized).not.toContain(tokenPayload.access_token);
     expect(serialized).not.toContain(tokenPayload.refresh_token);
 
-    await expect(bridge.completeAuthorization({ authorizationCode: code, state })).rejects.toThrow(
-      WorkBuddyAuthenticationRequiredError,
-    );
+    await expect(
+      bridge.completeAuthorization({ authorizationCode: code, loginSessionDigest, state }),
+    ).rejects.toThrow(WorkBuddyAuthenticationRequiredError);
   });
 
   it('consumes state before a failed exchange so ambiguous callbacks cannot be replayed', async () => {
     const repository = new TestStateRepository();
     repository.add(state, {
-      transactionId: 'binding_transaction_02',
+      transactionId: '2'.repeat(64),
       merchantUserId: toMerchantUserId('00112233445566778899aabbccddeeff'),
+      loginSessionDigest,
+      configurationId,
+      configurationVersion,
       expiresAt: new Date(now.getTime() + 60_000),
     });
     const client = new WorkBuddyOpenApiClient(
@@ -170,23 +192,28 @@ describe('WorkBuddy third-party OAuth identity bridge', () => {
       states: repository,
       subjectHmacSecret: new Uint8Array(32).fill(9),
       subjectLookupKeyVersion: 1,
+      configurationId,
+      configurationVersion,
       clock: () => now,
     });
 
-    await expect(bridge.completeAuthorization({ authorizationCode: code, state })).rejects.toThrow(
-      WorkBuddyOpenApiExchangeError,
-    );
-    await expect(bridge.completeAuthorization({ authorizationCode: code, state })).rejects.toThrow(
-      WorkBuddyAuthenticationRequiredError,
-    );
+    await expect(
+      bridge.completeAuthorization({ authorizationCode: code, loginSessionDigest, state }),
+    ).rejects.toThrow(WorkBuddyOpenApiExchangeError);
+    await expect(
+      bridge.completeAuthorization({ authorizationCode: code, loginSessionDigest, state }),
+    ).rejects.toThrow(WorkBuddyAuthenticationRequiredError);
   });
 
   it('rejects expired or malformed state before exchanging credentials', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(tokenPayload));
     const repository = new TestStateRepository();
     repository.add(state, {
-      transactionId: 'binding_transaction_03',
+      transactionId: '3'.repeat(64),
       merchantUserId: toMerchantUserId('00112233445566778899aabbccddeeff'),
+      loginSessionDigest,
+      configurationId,
+      configurationVersion,
       expiresAt: new Date(now.getTime() - 1),
     });
     const bridge = new WorkBuddyIdentityBridge({
@@ -194,14 +221,20 @@ describe('WorkBuddy third-party OAuth identity bridge', () => {
       states: repository,
       subjectHmacSecret: new Uint8Array(32).fill(9),
       subjectLookupKeyVersion: 1,
+      configurationId,
+      configurationVersion,
       clock: () => now,
     });
 
-    await expect(bridge.completeAuthorization({ authorizationCode: code, state })).rejects.toThrow(
-      WorkBuddyAuthenticationRequiredError,
-    );
     await expect(
-      bridge.completeAuthorization({ authorizationCode: code, state: 'short' }),
+      bridge.completeAuthorization({ authorizationCode: code, loginSessionDigest, state }),
+    ).rejects.toThrow(WorkBuddyAuthenticationRequiredError);
+    await expect(
+      bridge.completeAuthorization({
+        authorizationCode: code,
+        loginSessionDigest,
+        state: 'short',
+      }),
     ).rejects.toThrow(WorkBuddyAuthenticationRequiredError);
     expect(fetchMock).not.toHaveBeenCalled();
   });

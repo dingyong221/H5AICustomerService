@@ -910,3 +910,82 @@ consent页面至少展示以下信息：
 本轮已经交付第14章的一部分基础能力：Connector OAuth的MySQL摘要仓储与事务轮换、RFC 9207 `iss`、固定官方端点的WorkBuddy服务端换票客户端、一次性bridge state消费契约、`HMAC(issuer, client_id, open_id)`身份派生，以及不把回调参数当成可信登录结果的页面状态模型。没有写入真实凭据，也没有调用真实WorkBuddy。
 
 第14.7节尚未整体通过。平台登录/consent、bridge state与外部绑定MySQL事实、0/1/多商家选择、callback路由、正式签名/JWKS、binding resolver、撤销/解绑/恢复和完整本地E2E仍是下一增量；托管生产MySQL、真实第三方应用、远程部署、实机与审核继续未完成。因此当前只能称“账号与授权接入的首个本地实现增量”，不能称“配置可接入的本地实现已验证”或“WorkBuddy已接通”。
+
+## 15. 本地可信授权页面状态闭环
+
+> 本增量基线：commit `1fa630a`。范围仅为商家Web的页面状态、可信输入边界和本地测试，不新增数据库或API路由。本文所称“可信服务端状态”是经过服务端状态源读取并按白名单结构解码的授权快照；当前没有该后端状态源，因此真实页面必须显示不可用并停止，不能用query、callback、环境变量状态字符串或前端缓存模拟完成。
+
+### 15.1 页面只消费一种可信状态
+
+页面状态只能来自`TrustedWorkBuddyAuthorizationSnapshot`。该快照表达当前服务端已经确认的步骤、服务端计算出的商家候选和安全导航；页面不能自行把下列输入提升为授权事实：
+
+- `code`、`state`、`error`、`connected=true`、`merchant_id`或其他query/callback字段。
+- `WORKBUDDY_AUTHORIZATION_ENTRY`等单一环境变量中的地址或状态字符串。
+- localStorage、sessionStorage、客户端Cookie文本、页面刷新前的React状态或WorkBuddy对话内容。
+- Connector回传的昵称、企业名称、手机号、`open_id`或任意Token声明。
+
+绑定页可以识别“URL中存在参数”这一事实并显示固定安全提示，但不能读取参数值决定登录、绑定、商家数量、consent或成功状态。参数值不得出现在页面、链接、日志或错误文案中。
+
+```text
+可信服务端快照
+  → 平台登录
+  → WorkBuddy身份绑定
+  → 服务端计算0 / 1 / 多个有效商家
+  → 明确选择单一商家
+  → 展示并提交consent
+  → 已授权
+
+query / callback ──只能触发固定“未采信”提示──┘
+```
+
+### 15.2 页面与状态责任
+
+| 页面 | 可信状态 | 用户可见内容 | 当前无后端路由时 |
+| --- | --- | --- | --- |
+| `/login` | `login_required`或后续服务端快照 | 登录只建立平台会话；展示登录、绑定、商家、consent四步进度 | `backend_unavailable`，登录动作禁用，不用环境变量URL兜底 |
+| `/auth/workbuddy/bind` | `binding_required`、`merchant_resolution_required`、冲突/撤销 | 身份绑定说明、0/1/多商家分支、服务端候选商家和固定URL参数安全提示 | 不处理callback结果；没有状态源和操作路由时全部停止 |
+| `/auth/workbuddy/consent` | `consent_required` | 已验证Connector显示名、单一商家、`mcp:tools`和四个实际动作 | 没有consent提交路由时同意/拒绝不可提交，不产生伪造成功 |
+
+安全导航必须来自可信快照，并再次限制为当前站点同源的`/login`或`/auth/workbuddy`路径；远程HTTP、跨源、userinfo、fragment，以及含`code`、`state`、Token、`open_id`、密码或OTP的链接全部丢弃。开发期只额外允许HTTP loopback origin，不扩大生产来源。
+
+### 15.3 0、1与多商家页面分支
+
+| 服务端候选数 | 页面状态 | 页面动作 | 授权含义 |
+| --- | --- | --- | --- |
+| 0 | `merchant_access_required` | 只显示无可用商家；没有受控创建/邀请路由时按钮禁用 | 不创建占位商家，不进入consent，不签发授权 |
+| 1 | `consent_required` | 显示唯一商家、Connector、`mcp:tools`及四项能力；可导航到服务端consent页但不能自动同意 | 单一候选只免去“选择”，不免去明确consent |
+| 多个 | `merchant_selection_required` | 展示服务端候选的名称与角色；不预选，只有带安全服务端选择路由的候选可点击 | 一次只选择一个；query中的商家引用和无路由候选均无效 |
+
+多商家选择后，服务端必须返回新的`consent_required`快照并再次给出所选单一商家；前端不能仅凭一次点击在本地把状态改为已选择。`authorized`也只能由后续可信快照给出，callback文字和页面导航成功均不能产生该状态。
+
+### 15.4 状态展示与fail-closed规则
+
+授权页统一展示四步进度：平台登录、身份绑定、确认单一商家、明确授权同意。每一步只允许`blocked`、`pending`、`current`或`complete`四种展示结果：
+
+- 无可信状态源、解码失败或状态源异常时，四步全部为`blocked`，主状态为`backend_unavailable`。
+- 当前步骤之前可以显示`complete`，但只依据服务端快照；页面不根据路径或点击次数推断完成。
+- 操作路由缺失、跨源或包含敏感参数时，对应按钮禁用。页面可以展示可信事实，但不能提供假动作。
+- `consent_required`只展示授权摘要；本增量没有后端提交路由，因此不能实现本地“同意成功”或“拒绝成功”。
+- `authorized`快照仍需安全管理导航；导航无效时保持已授权事实的展示，但不给出不安全跳转。
+
+### 15.5 页面验收矩阵
+
+| 编号 | 场景 | 通过条件 |
+| --- | --- | --- |
+| UI-AUTH-01 | 无状态源 | `/login`、绑定页和consent页均显示授权后端不可用；没有可用授权按钮，不读取环境变量URL伪造连接 |
+| UI-AUTH-02 | query/callback注入 | 注入code/state/error、伪造成功或商家参数后，主状态不变，只出现固定未采信提示；序列化ViewModel不含注入值 |
+| UI-AUTH-03 | 登录状态 | 只有`login_required`快照显示当前登录步骤；安全同源路由可用，缺失/跨源/敏感query路由禁用 |
+| UI-AUTH-04 | 身份绑定 | 只有`binding_required`快照显示登录完成、绑定当前；URL不能把页面推进到该状态 |
+| UI-AUTH-M0 | 0个商家 | 状态为无可授权商家，没有consent摘要或自动商家，缺路由时fail closed |
+| UI-AUTH-M1 | 1个商家 | 进入consent展示但不自动批准；固定展示单一商家、scope和四项工具能力 |
+| UI-AUTH-MN | 多个商家 | 不默认选择；只展示服务端候选；每个候选的跨源或敏感链接单独禁用，不影响其他安全候选 |
+| UI-AUTH-05 | consent状态 | 只有可信`consent_required`快照显示授权摘要；没有提交路由时不能产生已授权状态 |
+| UI-AUTH-06 | 已授权/失败/冲突/撤销 | 四类结果只接受可信快照；失败和撤销不被query覆盖，冲突不显示对方账号信息 |
+| UI-AUTH-07 | 快照解码 | 非法stage、错误scope、重复/超过上限的商家、危险merchant reference或缺失字段均退回`backend_unavailable` |
+| UI-AUTH-08 | 敏感信息与导航 | 页面模型、DOM、链接和测试快照不包含Token、授权码、`open_id`、密码或OTP；所有启用链接带no-referrer边界 |
+
+### 15.6 当前实现结论与剩余阻断
+
+本增量完成的是本地页面状态闭环：统一可信快照解码器、登录/绑定/consent三页、0/1/多商家状态、固定四步进度、安全同源导航以及无后端时的fail-closed默认值。自动化夹具可以覆盖各可信状态，但不代表这些状态已经由真实服务端产生。
+
+以下事项仍未完成：平台账号/session状态API、WorkBuddy callback API、外部身份与Membership查询、商家选择写入、consent提交/拒绝、授权码签发、页面级浏览器E2E、真实WorkBuddy凭据与实机、远程或生产部署。没有这些后端事实与路由前，页面不得对外显示“已接通”或“可授权使用”。

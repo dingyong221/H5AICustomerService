@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { MerchantSelectionRequiredError, toMerchantUserId } from '@h5cs/domain';
+import {
+  ExternalIdentityBindingConflictError,
+  MerchantSelectionRequiredError,
+  toMerchantUserId,
+} from '@h5cs/domain';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 
 import type { DatabaseConnectionConfig } from '../src/config.js';
@@ -51,5 +55,40 @@ describe('MySQL onboarding repository merchant binding', () => {
     await expect(repository.findMerchantBinding(merchantUserId)).resolves.toBe(
       '22222222222222222222222222222222',
     );
+  });
+
+  it('fails closed when a retained external identity is not active', async () => {
+    const execute = vi.fn(async (_statement: string) => [
+      [
+        {
+          merchant_user_id: Buffer.from(merchantUserId, 'hex'),
+          status: 'revoked',
+        },
+      ] as RowDataPacket[],
+      [],
+    ]);
+    const connection = {
+      execute,
+      end: async () => undefined,
+    } as unknown as Connection;
+    const repository = new MySqlOnboardingRepository({
+      openConnection: async () => connection,
+      summary: { host: 'test', database: 'test', tlsRequested: false },
+      toJSON: () => ({ host: 'test', database: 'test', tlsRequested: false }),
+    });
+
+    await expect(
+      repository.resolveOrCreateMerchantUser({
+        provider: 'workbuddy',
+        issuer: 'https://workbuddy.example.test',
+        audience: 'h5cs-production',
+        subjectLookupKey: new Uint8Array(32).fill(1),
+        subjectLookupKeyVersion: 1,
+        phoneMatchVerifiedAt: null,
+        verifiedAt: new Date('2026-09-21T12:00:00.000Z'),
+      }),
+    ).rejects.toBeInstanceOf(ExternalIdentityBindingConflictError);
+    expect(execute).toHaveBeenCalledOnce();
+    expect(execute.mock.calls[0]?.[0]).toMatch(/SELECT merchant_user_id, status/u);
   });
 });

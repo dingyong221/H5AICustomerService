@@ -1,38 +1,27 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 
-import { Button, PageShell, StatusBadge } from '@h5cs/ui';
+import { PageShell, StatusBadge } from '@h5cs/ui';
 
-import {
-  buildWorkBuddyConnectionViewModel,
-  secureAuthorizationLinkAttributes,
-} from '../auth/workbuddy/connection-view-model';
+import { WorkBuddyAuthorizationStatePanel } from '../auth/workbuddy/authorization-state-panel';
+import { buildWorkBuddyConnectionViewModel } from '../auth/workbuddy/connection-view-model';
+import { loadTrustedWorkBuddyAuthorizationSnapshot } from '../auth/workbuddy/trusted-server-state';
 
 export const metadata: Metadata = {
-  description: '登录后进入已有 AI 客服管理后台。',
+  description: '由可信服务端状态驱动的平台登录入口。',
   title: '登录后管理客服',
 };
 
-function configuredAllowedOrigins(): readonly string[] {
-  return (process.env['WORKBUDDY_AUTHORIZATION_ALLOWED_ORIGINS'] ?? '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter((origin) => origin.length > 0);
-}
-
-export default function LoginPage() {
-  const applicationOrigin = process.env['MERCHANT_WEB_ORIGIN'];
-  const serverAuthorizationEntry = process.env['WORKBUDDY_AUTHORIZATION_ENTRY'];
+export default async function LoginPage() {
+  const trustedServerSnapshot = await loadTrustedWorkBuddyAuthorizationSnapshot();
   const connection = buildWorkBuddyConnectionViewModel({
-    allowedAuthorizationOrigins: configuredAllowedOrigins(),
-    ...(applicationOrigin === undefined ? {} : { applicationOrigin }),
-    ...(serverAuthorizationEntry === undefined ? {} : { serverAuthorizationEntry }),
+    applicationOrigin: process.env['MERCHANT_WEB_ORIGIN'],
+    trustedServerSnapshot,
   });
 
   return (
     <PageShell
       aside={<StatusBadge tone={connection.tone}>{connection.label}</StatusBadge>}
-      description={<p>管理地址只负责定位页面，不能替代身份认证或商家权限校验。</p>}
+      description={<p>登录只建立平台会话，不能替代身份绑定、商家选择或授权同意。</p>}
       eyebrow="Authenticated Console"
       notice={
         <div className="connection-banner" role="status">
@@ -43,38 +32,18 @@ export default function LoginPage() {
           </div>
         </div>
       }
-      title="登录后继续管理已有客服"
+      title="登录后继续 WorkBuddy 授权"
     >
       <section className="login-gate">
         <div>
-          <p className="panel__eyebrow">访问控制</p>
-          <h2>管理页面必须校验登录与商家归属</h2>
+          <p className="panel__eyebrow">可信状态边界</p>
+          <h2>只有服务端会话可以确认登录</h2>
           <p>
-            即使入口由 WorkBuddy 返回，也必须先由服务端确认连接与登录；URL
-            参数不能替代账号、商家和客服权限校验。
+            页面不从URL、callback、环境变量中的状态字符串或前端缓存推断账号。当前没有账号状态后端路由时，流程会停在不可用状态。
           </p>
         </div>
-        <div className="login-gate__actions">
-          {connection.authorizationHref ? (
-            <a
-              {...secureAuthorizationLinkAttributes}
-              className="secure-auth-link"
-              href={connection.authorizationHref}
-            >
-              {connection.actionLabel}
-            </a>
-          ) : connection.state === 'signed_in' ? (
-            <Link className="secure-auth-link" href="/">
-              返回工作台
-            </Link>
-          ) : (
-            <Button disabled>{connection.actionLabel}</Button>
-          )}
-          <Link className="quiet-link" href="/auth/workbuddy/bind">
-            前往 HTTPS 安全绑定页
-          </Link>
-        </div>
       </section>
+      <WorkBuddyAuthorizationStatePanel backHref="/" model={connection} />
     </PageShell>
   );
 }

@@ -71,7 +71,29 @@ integrations/workbuddy/
 
 本轮所查官方第三方应用/Open API 页面未公开第三方应用 token/grant revocation 端点。用户解绑时，本平台必须立即冻结绑定、停止刷新、销毁本地 WorkBuddy token、撤销本平台 Connector grant/会话并清理相关任务/缓存，但不能把这些动作描述成已经撤销 WorkBuddy 侧授权。WorkBuddy 侧授权管理入口和远端撤销 API 都需要官方确认；在此之前 UI 必须准确提示两边撤销的差异。
 
-当前本地代码已有固定官方端点的 authorize URL 构造、服务端授权码换票响应校验、state 一次性消费接口、`open_id` HMAC 派生身份和相应单元测试；桥接结果不会返回原始 `open_id` 或 token。它尚未接入生产 callback 路由、真实应用配置、持久化 state/绑定仓储、加密 token 保管、refresh、phoneverification 或解绑流程，因此只算本地安全骨架，不是可用的 WorkBuddy 第三方应用集成。
+当前本地代码已有固定官方端点的 authorize URL 构造、服务端授权码换票响应校验、state 一次性消费接口、`open_id` HMAC 派生身份和相应单元测试；桥接结果不会返回原始 `open_id` 或 token。工作区还出现了 callback/controller、平台会话与 consent 服务、可信服务端 UI 状态、授权事务/consent/反向唯一约束迁移及 MySQL 仓储草稿，但默认运行时仍显式不可用，平台登录与授权适配器未接通。它尚未接入真实应用配置、可用的持久化授权闭环、加密 token 保管、refresh、phoneverification 或解绑流程，因此只算本地安全骨架，不是可用的 WorkBuddy 第三方应用集成。
+
+### 浏览器 session、唯一绑定与 consent 审查
+
+当前草案会生成 256-bit 随机 state，并把其摘要、平台用户、登录 session 摘要及配置 ID/版本写入 MySQL 仓储；callback controller 读取 cookie 并重新解析平台会话，bridge 也会在 WorkBuddy 换票前按 state + session 原子消费并复核配置 ID/版本。这是正确的本地防线，但默认 runtime 尚未装配真实平台 session/事务/仓储，仍不能证明登录 CSRF/账号错绑在可运行系统中已经关闭。生产流程还须把精确 redirect URI、scopes 和目标商家贯穿到授权事务；错误 callback 也必须校验并消费 state。成功后轮换 session ID，页面不缓存、不发送 referrer，并立即清理 URL 中的 code/state。
+
+| 控制           | 当前代码                                                                                                                                                                                            | 上线前要求                                                                                                           |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| callback/UI    | 有严格成功回调 controller、cookie 传入、state + session 摘要原子消费仓储和可信服务端 UI 草案；三个写接口还要求 Origin、显式 CSRF header 和完整 session 校验；provider error 回调仍未进入 state 消费 | 装配真实平台 session/CSRF key，完成 cookie 属性/轮换、换号登录/转发链接/错误 callback 负例和真实跨站回调测试         |
+| 外部主体唯一性 | 已有 HMAC 查找键和正向唯一约束；工作区新增反向唯一、状态/解绑字段、迁移及 MySQL bind 仓储，涵盖幂等和正反向冲突                                                                                     | runtime 尚未装配；未见主体不得暗中创建为“已绑定账号”；还需完成解绑/转绑策略和审计                                    |
+| 商家解析/同意  | 有候选引用、0/1/多商家状态、逐次 consent 服务、迁移和 MySQL grant 仓储草稿；操作绑定 64 位事务引用与完整登录 session，单商家会预选但仍返回 `consent_required`，不会直接授权                         | runtime/adapters 未接通；服务接口还须把外部身份、client/resource/scopes 与 membership 版本贯穿到最终 grant           |
+| Connector 授权 | authorization server 接口要求 resource-owner adapter 返回已同意的 binding ID                                                                                                                        | 生产 adapter 当前不可用；binding ID 必须解析到平台用户、外部身份、选定商家、client/resource/scopes，并在每次调用复核 |
+| 撤销           | Connector refresh-token family 已有原子轮换与重放撤销仓储；身份/consent 状态字段仍是草案                                                                                                            | 尚无断开/撤销端点、binding/member 状态传播和 access-token denylist/在线 resolver；旧短期 JWT 不能只等自然过期        |
+
+商家 consent 固定为：
+
+| Active memberships | 行为                                                                                        |
+| ------------------ | ------------------------------------------------------------------------------------------- |
+| 0                  | 不签发 Connector grant/token；如需创建商家，转入独立入驻流程，完成后重新授权                |
+| 1                  | 可预选，但仍展示商家、Connector/client、scopes、有效期与撤销方式并要求明确同意              |
+| 多个               | 只能从服务端实时列表明确选一个；提交一次性选择引用，禁止自由输入 `merchant_id` 或由模型代选 |
+
+consent 必须绑定用户、外部身份、商家、client、resource、scopes、membership 版本和同意时间；签发授权码、换票和每次 MCP 调用都复核。成员退出、商家停用、外部身份解绑或 consent 撤销时，refresh family 和旧 access token 都必须立即失效。
 
 ### 配置清单（仅名称与约束）
 
@@ -89,7 +111,7 @@ integrations/workbuddy/
 
 - 缺少官方要求的 `icon.svg`/`icon.png`/`icon.jpg`，也未准备隐私、权限用途、支持与撤销说明等审核材料。
 - 已实现OAuth MySQL仓储/迁移并在显式`MYSQL_DATABASE_URL`时装配，但尚无托管生产库；正式签名密钥/KMS、平台登录与授权同意会话、身份绑定解析器或撤销端点仍未实现。因此DCR之外的authorize/token和受保护调用继续fail closed，不会假成功。
-- WorkBuddy 第三方应用尚未注册/审核；本地 authorize/换票/身份桥接骨架虽有单元测试，但生产 callback 路由与配置、持久化 state/绑定仓储、加密 token 保管、单飞刷新、phoneverification 和解绑流程均未接通；官方远端撤销入口也尚未确认。
+- WorkBuddy 第三方应用尚未注册/审核；本地 authorize/换票/身份桥接和 callback/consent/UI/迁移/MySQL 仓储草案虽已出现，state + browser-session 摘要及配置版本也已在本地 consume 路径核对，但默认 runtime 与平台登录/授权适配器仍不可用。完整 redirect/scope/merchant 事务快照、外部身份一对一上线、针对具体 client/resource/scopes/membership 的显式商家 consent、加密 token 保管、单飞刷新、phoneverification 和解绑流程均未形成可运行闭环；官方远端撤销入口也尚未确认。
 - 没有可用于生产的账号绑定、托管私网 MySQL、客服生成服务和目标 WorkBuddy 客户端实机证据。
 - `mcp.json` 中的正式 HTTPS 地址只是部署目标；本轮没有部署该路由，也没有提交审核。
 - 未写入 Client ID、Token、密钥或任何真实凭据；未来凭据仍只能由安全连接流程提供。
@@ -131,13 +153,14 @@ MCP 端点由 `apps/api/src/mcp/` 的 Nest middleware 提供。当前本地联�
 ```text
 pnpm --filter @h5cs/contracts build
 pnpm --filter @h5cs/api exec vitest run test/workbuddy-mcp.test.ts test/oauth.test.ts test/workbuddy-identity-bridge.test.ts
+pnpm --filter @h5cs/database exec vitest run test/identity-authorization-repository.test.ts test/onboarding-repository.test.ts test/oauth-repository.test.ts
 ```
 
-先刷新 workspace contracts 构建产物，避免 API 测试加载旧 Schema。协议测试使用官方 TypeScript SDK 客户端完成初始化、`tools/list` 和 `tools/call`，并覆盖四工具发现、transport Bearer、严格参数、内部事件隔离以及鉴权/数据库未配置错误；OAuth/身份桥接测试覆盖 metadata、PKCE、RFC 9207 `iss`、固定 WorkBuddy 端点、一次性 state、响应字段和 HMAC 主体派生。它们只证明本地安全骨架，不证明真实换票、远程服务或 WorkBuddy 安装可用。
+先刷新 workspace contracts 构建产物，避免 API 测试加载旧 Schema。协议测试使用官方 TypeScript SDK 客户端完成初始化、`tools/list` 和 `tools/call`，并覆盖四工具发现、transport Bearer、严格参数、内部事件隔离以及鉴权/数据库未配置错误；OAuth/身份桥接测试覆盖 metadata、PKCE、RFC 9207 `iss`、固定 WorkBuddy 端点、state + session + 配置版本一次性消费、响应字段和 HMAC 主体派生；数据库测试覆盖身份正反向冲突、bridge state、consent grant、OAuth 原子轮换和 membership 0/1/多查询行为。它们仍不覆盖真实平台 session cookie、端到端显式 consent、在线撤销传播或真实 WorkBuddy 换票。
 
 服务端与协议测试当前固定使用官方 `@modelcontextprotocol/sdk` 1.30.0；升级协议或迁移到该 SDK 后续拆分包前，必须重新执行本节协议测试和目标 WorkBuddy 客户端验证。
 
-本批验收包含官方文档/RFC 交叉审查、非秘密 Connector 元数据/Skill 静态核对、四工具本地协议测试、Connector OAuth 正负测试，以及第三方应用 authorize/换票/state/HMAC 身份桥接的本地测试材料核对；没有执行真实第三方应用换票、远程 OAuth、生产部署或真实 WorkBuddy 客户端测试。后续实机测试至少必须保存以下脱敏证据：
+本批验收包含官方文档/RFC 交叉审查、非秘密 Connector 元数据/Skill 静态核对、四工具本地协议测试、Connector OAuth 正负测试、OAuth/onboarding 数据仓储测试，以及第三方应用 authorize/换票/state/HMAC 身份桥接的本地测试材料核对；没有执行真实第三方应用换票、远程 OAuth、生产部署或真实 WorkBuddy 客户端测试。后续实机测试至少必须保存以下脱敏证据：
 
 1. 无 token、过期 token、伪造 token 和错 audience token 均在工具执行前得到正确 401 challenge，scope 不足得到 403。
 2. 资源 metadata、授权服务器 metadata、动态注册返回和 401 中的 URL/issuer/resource/endpoint 一致。
@@ -151,6 +174,11 @@ pnpm --filter @h5cs/api exec vitest run test/workbuddy-mcp.test.ts test/oauth.te
 10. refresh 的 `open_id` 变化/缺失、scope 扩大/缩减均 fail closed，不会改绑主体或静默扩大权限。
 11. phoneverification 覆盖大陆、港澳与含糊号码，matched 正反例、错 scope、限流和超时；任何响应都不泄露原手机号或自动合并账号。
 12. 重复解绑、解绑与刷新并发、退出商家和账号停用都能立即停止本地使用并幂等销毁凭据；未有 WorkBuddy 官方撤销证据时，界面不会声称远端授权已撤销。
+13. 把浏览器 A 发起的合法 callback 转发给已登录的浏览器 B、切换平台账号后回调、session 轮换/过期后回调均在换票前失败；错误 callback 同样一次性消费 state。
+14. callback 的重复 code/state、额外敏感参数、缺少 session cookie、已消费 state 和同一 code 的并发请求全部失败，页面、历史、referrer 和日志不残留参数值。
+15. 相同 WorkBuddy 主体并发绑定同一用户保持幂等，绑定不同用户 fail closed；同一平台用户绑定第二个 WorkBuddy 主体按首版一对一策略拒绝，不自动创建、合并或转绑账号。
+16. 0/1/多 active memberships 分别验证不签发、明确 consent 和安全选择；在 consent 后、换票前以及持 token 调用前撤销 membership 都会被拒绝。
+17. 断开 Connector、解除外部身份、撤销 consent、退出商家和停用账号后，旧 refresh token 与尚未过期的 access token 都立即失败；Skill 关闭不被误当作撤销。
 
 ## 官方依据
 
@@ -172,4 +200,5 @@ pnpm --filter @h5cs/api exec vitest run test/workbuddy-mcp.test.ts test/oauth.te
 - [RFC 6750 Bearer Token Usage](https://www.rfc-editor.org/rfc/rfc6750.html)
 - [RFC 9700 OAuth 2.0 Security Best Current Practice](https://www.rfc-editor.org/rfc/rfc9700.html)
 - [RFC 7009 OAuth 2.0 Token Revocation](https://www.rfc-editor.org/rfc/rfc7009.html)
+- [RFC 10017 OAuth 2.0 for Browser-Based Applications](https://www.rfc-editor.org/rfc/rfc10017.html)
 - [Model Context Protocol 官方 TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk)

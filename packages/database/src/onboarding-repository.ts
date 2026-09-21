@@ -11,6 +11,7 @@ import type {
   VerifiedExternalIdentity,
 } from '@h5cs/domain';
 import {
+  ExternalIdentityBindingConflictError,
   getOnboardingMissingItems,
   MerchantSelectionRequiredError,
   onboardingStates,
@@ -26,6 +27,7 @@ import { probeDatabase } from './config.js';
 
 type ExternalIdentityRow = RowDataPacket & {
   merchant_user_id: Buffer;
+  status: string;
 };
 
 type MerchantBindingRow = RowDataPacket & {
@@ -195,13 +197,17 @@ export class MySqlOnboardingRepository implements OnboardingRepository {
     return this.#withConnection(async (connection) => {
       const existing = await this.#findExternalIdentity(connection, identity);
       if (existing !== null) {
+        if (existing.status !== 'active') {
+          throw new ExternalIdentityBindingConflictError();
+        }
         await connection.execute(
           `UPDATE external_identity
              SET last_seen_at = ?,
                  phone_match_verified_at = COALESCE(?, phone_match_verified_at),
                  subject_lookup_key_version = ?,
                  updated_at = UTC_TIMESTAMP(6)
-           WHERE provider = ? AND issuer = ? AND audience = ? AND subject_lookup_key = ?`,
+           WHERE provider = ? AND issuer = ? AND audience = ? AND subject_lookup_key = ?
+             AND status = 'active'`,
           [
             identity.verifiedAt,
             identity.phoneMatchVerifiedAt,
@@ -249,6 +255,9 @@ export class MySqlOnboardingRepository implements OnboardingRepository {
         await connection.rollback();
         const raced = await this.#findExternalIdentity(connection, identity);
         if (raced !== null) {
+          if (raced.status !== 'active') {
+            throw new ExternalIdentityBindingConflictError();
+          }
           return { id: toMerchantUserId(idToString(raced.merchant_user_id)) };
         }
         throw error;
@@ -436,7 +445,7 @@ export class MySqlOnboardingRepository implements OnboardingRepository {
     identity: VerifiedExternalIdentity,
   ): Promise<ExternalIdentityRow | null> {
     const [rows] = await connection.execute<ExternalIdentityRow[]>(
-      `SELECT merchant_user_id
+      `SELECT merchant_user_id, status
          FROM external_identity
         WHERE provider = ? AND issuer = ? AND audience = ? AND subject_lookup_key = ?
         LIMIT 1`,
