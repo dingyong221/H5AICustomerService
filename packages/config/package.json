@@ -1,0 +1,25 @@
+{
+  "name": "@h5cs/config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./eslint/base": "./eslint/base.mjs",
+    "./eslint/next": "./eslint/next.mjs",
+    "./tsconfig/base.json": "./tsconfig/base.json",
+    "./tsconfig/nextjs.json": "./tsconfig/nextjs.json",
+    "./tsconfig/node.json": "./tsconfig/node.json"
+  },
+  "peerDependencies": {
+    "@eslint/js": ">=9.39.0 <10.0.0",
+    "eslint": ">=9.39.0 <10.0.0",
+    "eslint-config-next": ">=16.3.0 <17.0.0",
+    "typescript": ">=6.0.0 <6.1.0",
+    "typescript-eslint": ">=8.70.0 <9.0.0"
+  },
+  "peerDependenciesMeta": {
+    "eslint-config-next": {
+      "optional": true
+    }
+  }
+}

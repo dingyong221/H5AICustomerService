@@ -1,0 +1,16 @@
+.git
+.github
+.turbo
+.env
+.env.*
+**/.env
+**/.env.*
+**/.next
+**/.turbo
+**/coverage
+**/dist
+**/node_modules
+*.log
+docs
+infra
+scripts

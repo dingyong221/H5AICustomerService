@@ -1,0 +1,25 @@
+# Dependencies and package-manager state
+node_modules/
+.pnpm-store/
+
+# Builds and test output
+.next/
+dist/
+coverage/
+.turbo/
+
+# Runtime and local environment
+.env
+.env.*
+!.env.example
+*.log
+*.pid
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local infrastructure data
+.data/

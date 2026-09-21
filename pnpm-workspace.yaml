@@ -1,0 +1,32 @@
+packages:
+  - apps/*
+  - packages/*
+
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true
+
+overrides:
+  tsx: 4.23.13
+
+catalog:
+  '@eslint/js': 9.39.5
+  '@nestjs/common': 12.0.3
+  '@nestjs/core': 12.0.3
+  '@nestjs/platform-express': 12.0.3
+  '@types/node': 26.6.2
+  '@types/react': 19.3.0
+  '@types/react-dom': 19.3.0
+  drizzle-kit: 0.31.10
+  drizzle-orm: 0.45.2
+  eslint: 9.39.5
+  eslint-config-next: 16.3.5
+  mysql2: 3.24.4
+  next: 16.3.5
+  react: 19.3.0
+  react-dom: 19.3.0
+  tsx: 4.23.13
+  typescript: 6.0.3
+  typescript-eslint: 8.70.0
+  vitest: 4.1.11
+  zod: 4.6.5
