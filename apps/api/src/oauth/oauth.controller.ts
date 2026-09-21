@@ -170,6 +170,7 @@ export class OAuthController {
       const redirect = new URL(error.redirectUri);
       redirect.searchParams.set('error', error.error);
       redirect.searchParams.set('error_description', error.message);
+      redirect.searchParams.set('iss', this.runtime.server.issuer);
       if (error.state !== undefined) redirect.searchParams.set('state', error.state);
       response.redirect(302, redirect.toString());
       return;

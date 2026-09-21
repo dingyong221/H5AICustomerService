@@ -119,6 +119,96 @@ export const merchantMemberships = mysqlTable(
   ],
 );
 
+export const oauthPublicClients = mysqlTable(
+  'oauth_public_client',
+  {
+    clientIdDigest: digest('client_id_digest').notNull(),
+    clientId: varchar('client_id', { length: 128 }).notNull(),
+    clientName: varchar('client_name', { length: 200 }),
+    redirectUris: json('redirect_uris').$type<readonly string[]>().notNull(),
+    createdAt: utcDateTime('created_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.clientIdDigest], name: 'pk_oauth_public_client' }),
+    index('idx_oauth_public_client_created').on(table.createdAt, table.clientIdDigest),
+  ],
+);
+
+export const oauthAuthorizationCodes = mysqlTable(
+  'oauth_authorization_code',
+  {
+    codeDigest: digest('code_digest').notNull(),
+    clientIdDigest: digest('client_id_digest').notNull(),
+    redirectUri: varchar('redirect_uri', { length: 2048 }).notNull(),
+    resource: varchar('resource', { length: 2048 }).notNull(),
+    scope: varchar('scope', { length: 64 }).notNull(),
+    codeChallenge: varchar('code_challenge', { length: 128 }).notNull(),
+    bindingId: varchar('binding_id', { length: 191 }).notNull(),
+    expiresAt: utcDateTime('expires_at').notNull(),
+    consumedAt: utcDateTime('consumed_at'),
+    createdAt: utcDateTime('created_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.codeDigest], name: 'pk_oauth_authorization_code' }),
+    index('idx_oauth_authorization_code_expiry').on(
+      table.consumedAt,
+      table.expiresAt,
+      table.codeDigest,
+    ),
+    foreignKey({
+      columns: [table.clientIdDigest],
+      foreignColumns: [oauthPublicClients.clientIdDigest],
+      name: 'fk_oauth_authorization_code_client',
+    }).onDelete('restrict'),
+  ],
+);
+
+export const oauthRefreshTokenFamilies = mysqlTable(
+  'oauth_refresh_token_family',
+  {
+    familyIdDigest: digest('family_id_digest').notNull(),
+    familyId: varchar('family_id', { length: 128 }).notNull(),
+    clientIdDigest: digest('client_id_digest').notNull(),
+    bindingId: varchar('binding_id', { length: 191 }).notNull(),
+    resource: varchar('resource', { length: 2048 }).notNull(),
+    scope: varchar('scope', { length: 64 }).notNull(),
+    revokedAt: utcDateTime('revoked_at'),
+    createdAt: utcDateTime('created_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.familyIdDigest], name: 'pk_oauth_refresh_token_family' }),
+    index('idx_oauth_refresh_family_client').on(table.clientIdDigest, table.createdAt),
+    index('idx_oauth_refresh_family_revoked').on(table.revokedAt, table.familyIdDigest),
+    foreignKey({
+      columns: [table.clientIdDigest],
+      foreignColumns: [oauthPublicClients.clientIdDigest],
+      name: 'fk_oauth_refresh_family_client',
+    }).onDelete('restrict'),
+  ],
+);
+
+export const oauthRefreshTokens = mysqlTable(
+  'oauth_refresh_token',
+  {
+    tokenDigest: digest('token_digest').notNull(),
+    familyIdDigest: digest('family_id_digest').notNull(),
+    replacementTokenDigest: digest('replacement_token_digest'),
+    expiresAt: utcDateTime('expires_at').notNull(),
+    usedAt: utcDateTime('used_at'),
+    createdAt: utcDateTime('created_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tokenDigest], name: 'pk_oauth_refresh_token' }),
+    index('idx_oauth_refresh_token_family').on(table.familyIdDigest, table.createdAt),
+    index('idx_oauth_refresh_token_expiry').on(table.usedAt, table.expiresAt, table.tokenDigest),
+    foreignKey({
+      columns: [table.familyIdDigest],
+      foreignColumns: [oauthRefreshTokenFamilies.familyIdDigest],
+      name: 'fk_oauth_refresh_token_family',
+    }).onDelete('restrict'),
+  ],
+);
+
 export const industryTemplates = mysqlTable(
   'industry_template',
   {

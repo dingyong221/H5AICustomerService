@@ -3,7 +3,10 @@ import Link from 'next/link';
 
 import { Button, PageShell, StatusBadge } from '@h5cs/ui';
 
-import { buildWorkBuddyConnectionViewModel } from '../auth/workbuddy/connection-view-model';
+import {
+  buildWorkBuddyConnectionViewModel,
+  secureAuthorizationLinkAttributes,
+} from '../auth/workbuddy/connection-view-model';
 
 export const metadata: Metadata = {
   description: '登录后进入已有 AI 客服管理后台。',
@@ -54,14 +57,13 @@ export default function LoginPage() {
         <div className="login-gate__actions">
           {connection.authorizationHref ? (
             <a
+              {...secureAuthorizationLinkAttributes}
               className="secure-auth-link"
               href={connection.authorizationHref}
-              referrerPolicy="no-referrer"
-              rel="noreferrer"
             >
               {connection.actionLabel}
             </a>
-          ) : connection.state === 'connected' ? (
+          ) : connection.state === 'signed_in' ? (
             <Link className="secure-auth-link" href="/">
               返回工作台
             </Link>

@@ -40,9 +40,8 @@ export class UnavailableWorkBuddyAuthenticator implements WorkBuddyAuthenticator
 }
 
 export type ExternalSubjectContext = Readonly<{
-  provider: 'workbuddy';
   issuer: string;
-  audience: string;
+  clientId: string;
   openId: string;
   lookupKeyVersion: number;
 }>;
@@ -58,7 +57,7 @@ export const deriveExternalSubjectLookupKey = (
   }
   if (
     context.issuer.trim().length === 0 ||
-    context.audience.trim().length === 0 ||
+    context.clientId.trim().length === 0 ||
     context.openId.length === 0 ||
     !Number.isSafeInteger(context.lookupKeyVersion) ||
     context.lookupKeyVersion < 1
@@ -74,9 +73,8 @@ export const deriveExternalSubjectLookupKey = (
     hmac.update(length).update(bytes);
   };
 
-  updateLengthPrefixed(context.provider);
   updateLengthPrefixed(context.issuer);
-  updateLengthPrefixed(context.audience);
+  updateLengthPrefixed(context.clientId);
   updateLengthPrefixed(context.openId);
   // lookupKeyVersion identifies the server-side HMAC key and is persisted beside the digest.
   // Reading old versions while writing a new version is intentionally not implemented yet.

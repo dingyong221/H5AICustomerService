@@ -8,7 +8,7 @@ import {
   oauthProtectedResourceMetadataSchema,
   oauthTokenResponseSchema,
 } from '@h5cs/contracts';
-import type { VerifiedExternalIdentity } from '@h5cs/domain';
+import { OAuthRepositoryUnavailableError, type VerifiedExternalIdentity } from '@h5cs/domain';
 
 import { JoseAccessTokenCodec } from '../src/oauth/jose-access-token-codec.js';
 import { McpAccessTokenAuthenticator } from '../src/oauth/mcp-access-token-authenticator.js';
@@ -233,6 +233,7 @@ describe('OAuth 2.1 and MCP bearer boundary', () => {
     const { server, codec, repository } = await createTestServer();
     const { client, verifier, code, callback } = await registerAndAuthorize(server, repository);
     expect(callback.searchParams.get('state')).toBe('opaque-state');
+    expect(callback.searchParams.get('iss')).toBe(config.issuer);
 
     const token = await server.exchangeToken({
       grant_type: 'authorization_code',
@@ -439,6 +440,27 @@ describe('OAuth 2.1 and MCP bearer boundary', () => {
         OAUTH_ISSUER: 'https://h5cs.example.test/oauth',
       }),
     ).toThrow('OAUTH_ISSUER must be HTTPS');
+  });
+
+  it('maps a configured repository readiness failure to a safe 503', async () => {
+    class FailedRepository extends TestOAuthRepository {
+      public override async assertReady(): Promise<never> {
+        await Promise.resolve();
+        throw new OAuthRepositoryUnavailableError('database details must stay private');
+      }
+    }
+
+    const { codec } = await createTestServer();
+    const server = new OAuthAuthorizationServer(config, new FailedRepository(), codec);
+    await expect(
+      server.registerPublicClient({
+        redirect_uris: ['http://127.0.0.1:43123/oauth/callback'],
+      }),
+    ).rejects.toMatchObject({
+      error: 'temporarily_unavailable',
+      message: 'OAuth service is not configured',
+      statusCode: 503,
+    });
   });
 
   it('serves metadata without the global API envelope and returns standard OAuth errors', async () => {

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildWorkBuddyConnectionViewModel,
   resolveSecureAuthorizationEntry,
+  secureAuthorizationLinkAttributes,
 } from './connection-view-model';
 
 const applicationOrigin = 'https://merchant.example.com';
@@ -48,6 +49,13 @@ describe('WorkBuddy connection security boundary', () => {
     }
   });
 
+  it('provides page links with a strict no-referrer boundary', () => {
+    expect(secureAuthorizationLinkAttributes).toEqual({
+      referrerPolicy: 'no-referrer',
+      rel: 'noreferrer',
+    });
+  });
+
   it('shows disconnected only when a validated authorization entry is available', () => {
     expect(
       buildWorkBuddyConnectionViewModel({
@@ -61,7 +69,7 @@ describe('WorkBuddy connection security boundary', () => {
     });
   });
 
-  it('treats code and state as binding pending without echoing either value', () => {
+  it('treats code and state only as an untrusted callback pending server verification', () => {
     const model = buildWorkBuddyConnectionViewModel({
       applicationOrigin,
       callbackParameters: {
@@ -71,13 +79,13 @@ describe('WorkBuddy connection security boundary', () => {
       serverAuthorizationEntry: '/oauth/workbuddy/authorize',
     });
 
-    expect(model.state).toBe('binding_pending');
+    expect(model.state).toBe('callback_pending');
     expect(JSON.stringify(model)).not.toContain('sensitive-one-time-code');
     expect(JSON.stringify(model)).not.toContain('sensitive-correlation-state');
     expect(model.authorizationHref).toBeUndefined();
   });
 
-  it('classifies authorization failure and multi-merchant selection without echoing errors', () => {
+  it('does not turn provider errors into trusted authorization or merchant states', () => {
     const failed = buildWorkBuddyConnectionViewModel({
       applicationOrigin,
       callbackParameters: { error: 'provider-secret-error-value' },
@@ -89,9 +97,9 @@ describe('WorkBuddy connection security boundary', () => {
       serverAuthorizationEntry: '/oauth/workbuddy/authorize',
     });
 
-    expect(failed.state).toBe('authorization_failed');
+    expect(failed.state).toBe('callback_rejected');
     expect(JSON.stringify(failed)).not.toContain('provider-secret-error-value');
-    expect(selection.state).toBe('merchant_selection_required');
+    expect(selection.state).toBe('callback_rejected');
   });
 
   it('rejects unknown, repeated, incomplete and oversized callback parameters', () => {
@@ -110,24 +118,47 @@ describe('WorkBuddy connection security boundary', () => {
           callbackParameters,
           serverAuthorizationEntry: '/oauth/workbuddy/authorize',
         }).state,
-      ).toBe('authorization_failed');
+      ).toBe('callback_rejected');
     }
   });
 
-  it('shows connected only from a trusted server state, never from callback text', () => {
+  it('shows signed-in only from a trusted server state, never from callback text', () => {
     expect(
       buildWorkBuddyConnectionViewModel({
         applicationOrigin,
         callbackParameters: { connected: 'true' },
         serverAuthorizationEntry: '/oauth/workbuddy/authorize',
       }).state,
-    ).toBe('authorization_failed');
+    ).toBe('callback_rejected');
 
     expect(
       buildWorkBuddyConnectionViewModel({
         applicationOrigin,
-        trustedServerState: 'connected',
+        trustedServerState: 'signed_in',
       }),
-    ).toMatchObject({ state: 'connected', label: '已连接' });
+    ).toMatchObject({ state: 'signed_in', label: '已登录' });
+  });
+
+  it('presents every trusted server state without allowing callbacks to override it', () => {
+    const expectedLabels = {
+      authorization_failed: '授权失败',
+      binding_required: '需要绑定商家',
+      conflict: '绑定冲突',
+      consent_required: '需要授权同意',
+      merchant_selection_required: '多商家待选择',
+      revoked: '授权已撤销',
+      signed_in: '已登录',
+    } as const;
+
+    for (const [trustedServerState, label] of Object.entries(expectedLabels)) {
+      expect(
+        buildWorkBuddyConnectionViewModel({
+          applicationOrigin,
+          callbackParameters: { error: 'untrusted-callback-error' },
+          serverAuthorizationEntry: '/oauth/workbuddy/authorize?state=safe-state',
+          trustedServerState: trustedServerState as keyof typeof expectedLabels,
+        }),
+      ).toMatchObject({ label, state: trustedServerState });
+    }
   });
 });

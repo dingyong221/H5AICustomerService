@@ -7,6 +7,7 @@ import type {
   OAuthTokenRequest,
   OAuthTokenResponse,
 } from '@h5cs/contracts';
+import { OAuthRepositoryUnavailableError } from '@h5cs/domain';
 
 import {
   OAuthProtocolError,
@@ -80,6 +81,10 @@ export class OAuthAuthorizationServer {
     this.#clock = clock;
   }
 
+  public get issuer(): string {
+    return this.#config.issuer;
+  }
+
   public authorizationServerMetadata() {
     return {
       issuer: this.#config.issuer,
@@ -91,6 +96,7 @@ export class OAuthAuthorizationServer {
       code_challenge_methods_supported: ['S256'] as const,
       token_endpoint_auth_methods_supported: ['none'] as const,
       scopes_supported: [MCP_SCOPE] as const,
+      authorization_response_iss_parameter_supported: true as const,
     };
   }
 
@@ -214,6 +220,7 @@ export class OAuthAuthorizationServer {
 
     const callback = new URL(request.redirect_uri);
     callback.searchParams.set('code', code);
+    callback.searchParams.set('iss', this.#config.issuer);
     if (request.state !== undefined) callback.searchParams.set('state', request.state);
     return callback.toString();
   }
@@ -330,6 +337,7 @@ export class OAuthAuthorizationServer {
     } catch (error) {
       if (
         error instanceof OAuthStorageUnavailableError ||
+        error instanceof OAuthRepositoryUnavailableError ||
         error instanceof OAuthTokenCodecUnavailableError
       ) {
         throw new OAuthProtocolError(

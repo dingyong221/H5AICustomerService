@@ -1,6 +1,6 @@
 # H5 AI 客服生成与管理平台：平台、安全、交付与 WorkBuddy Skill 设计
 
-> - 文档状态：持续演进的设计基线，供产品、研发、安全、测试和运维评审；WorkBuddy Skill、Connector 非秘密元数据、本地 Streamable HTTP MCP 四工具适配层及 OAuth 协议边界已形成，生产 OAuth 适配器、身份桥接、远程部署、上架审核与实机验证尚未完成。
+> - 文档状态：持续演进的设计基线，供产品、研发、安全、测试和运维评审；WorkBuddy Skill、Connector 非秘密元数据、本地 Streamable HTTP MCP 四工具适配层、OAuth MySQL仓储及第三方应用身份桥安全骨架已形成，完整生产 OAuth/身份适配、远程部署、上架审核与实机验证尚未完成。
 > - 需求依据：`H5_AI客服生成与管理平台_产品需求分析_V1.0.md`（2026-09-20）。
 > - 首版目标：在 4～7 周参考窗口内形成 3～5 家同类商家可试用的最小闭环；时间目标不是交付承诺。
 > - 术语：本文的“租户”即 `Merchant`；“客服”即 `Assistant`；“发布版本”即不可变 `Release`。
@@ -407,7 +407,7 @@ AI 输出不能只做逐字断言。确定性部分断言结构化状态、引�
 - **待实机验证**：官方有相关描述，但与目标版本、账号权限、渲染/回调行为或本项目组合方式有关，必须保留客户端录屏、网络记录和服务端审计作为证据。
 - **不可假设**：官方资料没有给出该保证，设计和排期不得依赖；除非后续取得新版官方文档或书面确认并补做实机验证。
 
-结论：**目标形态已经确定为 WorkBuddy Skill 负责对话编排、远程 HTTPS MCP Connector 提供受控工具、平台同源 WorkBuddy 应用服务承接 MCP/OAuth/身份桥接并复用核心业务服务。** 当前四个最小工具、非秘密 Connector 元数据、本地 Streamable HTTP 协议测试，以及 401 challenge、双 metadata、公共客户端注册、PKCE 授权码、刷新轮换契约和 MCP JWT 校验的本地安全边界已经存在。这不代表远程服务或可安装包已经完成：生产 MySQL OAuth 仓储、签名密钥、平台登录/同意会话、第三方应用身份桥接、正式图标、远程部署及目标客户端行为仍待实现和验证。官方确有第三方应用 OAuth 返回 `open_id` 的能力，但没有证据表明普通 Skill 或 Connector 会自动收到该标识，也没有完整说明其生命周期稳定性。因此身份桥接必须经过服务端换票和安全网页登录/手机号 + OTP，绝不在聊天中收集密码、OTP、Access Token 或 API Key。
+结论：**目标形态已经确定为 WorkBuddy Skill 负责对话编排、远程 HTTPS MCP Connector 提供受控工具、平台同源 WorkBuddy 应用服务承接 MCP/OAuth/身份桥接并复用核心业务服务。** 当前四个最小工具、非秘密 Connector 元数据、本地 Streamable HTTP 协议测试，以及401 challenge、双metadata、公共客户端注册、PKCE授权码、MySQL刷新轮换仓储、第三方应用换票/HMAC桥接和MCP JWT测试边界已经存在。这不代表远程服务或可安装包已经完成：托管生产MySQL、正式签名密钥、平台登录/同意会话、持久化bridge/binding、正式图标、远程部署及目标客户端行为仍待实现和验证。官方确有第三方应用OAuth返回`open_id`的能力，但没有证据表明普通Skill或Connector会自动收到该标识，也没有完整说明其生命周期稳定性。因此身份桥接必须经过服务端换票和安全网页登录/手机号+OTP，绝不在聊天中收集密码、OTP、Access Token或API Key。
 
 ### 11.2 官方能力证据矩阵
 
@@ -469,7 +469,7 @@ AI 输出不能只做逐字断言。确定性部分断言结构化状态、引�
 1. 绑定入口使用正式 HTTPS 域名；链接只携带至少 128 bit 熵的一次性随机引用，TTL 建议 5～10 分钟、单次使用、完成即作废，不含手机号、邮箱、`open_id`、商家 ID、Token 或可枚举序号。
 2. 页面明确显示发起来源、将绑定的 WorkBuddy/Connector 名称、当前平台账号、商家、申请 scopes、数据用途、有效期和撤销入口；多商家必须让用户主动选择。
 3. 账号认证只在本平台网页完成：已有会话需按风险再认证；无会话可使用手机号 + OTP 或其他正式网页登录。密码和 OTP 永不进入 WorkBuddy 对话、Skill 参数、MCP 工具参数、命令行或 URL。
-4. OAuth 使用 Authorization Code + PKCE S256；校验 `state`、一次性授权码、精确回调地址和 `aud`。WorkBuddy 官方私有协议回调与 `127.0.0.1` 动态回环回退只在目标客户端实测通过后登记。
+4. 两条 OAuth 分开实施：Connector OAuth 使用 Authorization Code + PKCE S256，并校验 `state`、一次性授权码、精确回调地址、issuer、resource/audience；WorkBuddy 第三方应用按其当前文档使用服务端机密客户端授权码流，必须校验 `state` 和字节级一致的 HTTPS `redirect_uri`。当前第三方应用参数表未声明 PKCE，未取得官方确认和实机证据前不得声称该流支持 PKCE，也不得把 Connector 的私有 scheme/回环回调套用到第三方应用。
 5. access token 短期、绑定本平台 `sub`、单一 `merchant_id`、`aud` 和 scopes；refresh token 轮换、可撤销，服务端只存安全摘要/会话记录。退出商家、账号停用、商家暂停或撤销授权后必须失效。
 6. 绑定状态查询不得返回身份详情；错误对外只给稳定码和下一步，不泄露手机号是否注册、商家是否存在或跨租户资源信息。对绑定创建、登录、OTP、授权、撤销、失败和重放写审计。
 7. 防止登录 CSRF、链接转发和会话混淆：绑定完成前再次展示目标主体与商家；浏览器会话与绑定事务同源关联；更换账号或商家必须重启授权；已登录并不等于自动同意。
@@ -479,11 +479,11 @@ AI 输出不能只做逐字断言。确定性部分断言结构化状态、引�
 
 远程 HTTP MCP 的认证必须发生在工具执行之前，不能只让 `tools/call` 返回业务错误：
 
-1. 对缺失、过期或无效 Bearer token 的受保护 MCP 请求，资源服务器返回 HTTP `401`，并带 `WWW-Authenticate: Bearer resource_metadata="https://h5cs.1rying.com/.well-known/oauth-protected-resource/mcp"`；无效或过期 token 可同时返回 `error="invalid_token"`。scope 不足返回 `403`。`h5cs_help` 是否保持匿名必须另行形成明确路由策略，不能让匿名工具削弱 `/mcp` 整体挑战行为。
+1. 对缺失、过期或无效 Bearer token 的受保护 MCP 请求，资源服务器返回 HTTP `401`，并带 `WWW-Authenticate: Bearer resource_metadata="https://h5cs.1rying.com/.well-known/oauth-protected-resource/mcp"`；无效或过期 token 可同时返回 `error="invalid_token"`。scope 不足返回 `403`，challenge 同时包含 `error="insufficient_scope"`、当前操作所需的最小 `scope` 和同一 `resource_metadata`；不能只返回 JSON 业务错误。`h5cs_help` 是否保持匿名必须另行形成明确路由策略，不能让匿名工具削弱 `/mcp` 整体挑战行为。
 2. 按 RFC 9728 对资源 `https://h5cs.1rying.com/mcp` 的路径派生，主元数据地址为 `https://h5cs.1rying.com/.well-known/oauth-protected-resource/mcp`。WorkBuddy 文档示例使用根路径 `/.well-known/oauth-protected-resource`；只有目标客户端实测确有需要时才提供内容完全一致的兼容别名，401 必须指向经验证的精确地址。
 3. Protected Resource Metadata 的 `resource` 必须精确等于 `https://h5cs.1rying.com/mcp`，`authorization_servers` 至少列出本平台授权服务器 issuer，并声明支持的 scopes/Bearer 方式。授权服务器在其 HTTPS `/.well-known/oauth-authorization-server` 发布 RFC 8414 元数据，包括 issuer、authorization/token/registration endpoints、response/grant types、scopes、token endpoint 认证方式和 `S256` 能力。
-4. 动态注册按 RFC 7591 接受公共客户端：`token_endpoint_auth_method` 为 `none`，`response_types` 只含 `code`，grants 只开放 `authorization_code` 和确需的 `refresh_token`，严格保存并原样回显获准的 `redirect_uris`，不得签发或要求 `client_secret`。
-5. 授权请求必须携带 PKCE `code_challenge_method=S256`、高熵 `state`、精确 `redirect_uri` 和 RFC 8707 `resource=https://h5cs.1rying.com/mcp`。授权码短期、一次性并绑定 client、redirect URI、code challenge、主体、商家、scopes 和 resource。
+4. WorkBuddy 当前 Connector 文档仍要求 RFC 7591 动态注册，因此兼容端点必须接受公共客户端：`token_endpoint_auth_method` 为 `none`，`response_types` 只含 `code`，grants 只开放 `authorization_code` 和确需的 `refresh_token`，严格保存并原样回显获准的 `redirect_uris`，不得签发或要求 `client_secret`。MCP 2026-07-28 已优先采用 Client ID Metadata Documents（CIMD）并把 DCR 标为兼容机制；在 WorkBuddy 官方文档和目标客户端确认支持 CIMD 前，本项目不能移除 DCR。CIMD/预注册属于后续兼容测试，不能与当前 WorkBuddy DCR 验收混写。
+5. 授权请求必须携带 PKCE `code_challenge_method=S256`、高熵 `state`、精确 `redirect_uri` 和 RFC 8707 `resource=https://h5cs.1rying.com/mcp`。授权码短期、一次性并绑定 client、授权服务器 issuer、redirect URI、code challenge、主体、商家、scopes 和 resource。授权服务器应按 RFC 9207 返回 `iss`，客户端必须把它与发现时记录的 issuer 做简单字符串比较；client registration/credentials 也不得跨 issuer 复用。
 6. 换票必须验证 `code_verifier`、授权码、client、redirect URI 和 resource；签发的 access token 必须限制 issuer、audience/resource、到期时间、scopes 和平台绑定 `sub`。商家上下文在每次工具执行时从有效Membership解析，不信任客户端自报`merchant_id`。每次 MCP HTTP 请求只从 `Authorization: Bearer` 取 token，绝不接受 query、工具参数或聊天文本中的 token。
 7. 资源服务器在执行任何工具前验证签名、issuer、audience、expiry/not-before、scope、主体/商家状态和撤销状态；错误只给稳定码并保留审计。它不得接受 WorkBuddy Open API token，也不得把收到的 token 原样传给其他资源服务器。
 8. refresh token 必须轮换并检测旧 token 重用；撤销、断开 Connector、平台用户/商家成员关系变化、账号停用或风险事件都应使相应会话失效。刷新成功后由客户端用新 access token 重试原请求；服务端不得把刷新失败伪装成工具业务失败。
@@ -494,7 +494,45 @@ WorkBuddy 当前文档优先使用 `workbuddy://workbuddy/mcp/connector%3A<sourc
 
 #### 11.4.3 Token 生命周期与隔离
 
-官方 Connector OAuth 文档建议 access token 约 1 小时、refresh token 不少于 30 天；这是 WorkBuddy 客户端互操作建议，不替代本项目的撤销、轮换和风险评审。第三方应用概览称 WorkBuddy Open API access token 为 24 小时、refresh token 为 60 天，但 Open API 换票响应示例的 `expires_in` 是 3600 秒，官方两页当前存在不一致；实现必须以实际响应 `expires_in` 为准并在实机核验中确认。无论最终时长如何，这组 WorkBuddy Open API 凭据都**不是**本项目 Connector token，二者不得混用。
+官方 Connector OAuth 文档建议 access token 约 1 小时、refresh token 不少于 30 天；这是 WorkBuddy 客户端互操作建议，不替代本项目的撤销、轮换和风险评审。第三方应用概览称 WorkBuddy Open API access token 为 24 小时、refresh token 为 60 天，但当前 Open API 中英文页面/示例出现 `expires_in=3600` 与 `604800` 等不同值；实现必须以每次成功响应的 `expires_in` 为准，不能用文档概览或示例硬编码，并须在目标环境保留脱敏实测证据。无论最终时长如何，这组 WorkBuddy Open API 凭据都**不是**本项目 Connector token，二者不得混用。
+
+#### 11.4.4 WorkBuddy 第三方应用服务端换票与刷新
+
+第三方应用是 WorkBuddy 签发凭据的机密客户端，不是 Connector OAuth 客户端。实现约束如下：
+
+1. 浏览器只访问 `GET https://www.workbuddy.cn/openapi/v2/authorize`；`response_type=code`，`client_id` 为已审核应用，`redirect_uri` 必须与开放平台登记值及后续换票值字节级一致，scope 取本次绑定所需的最小交集。即使官方把 `state` 标为建议，本项目也必须生成至少 128 bit 熵、短期、一次性的 `state`，并在服务端绑定浏览器会话、平台用户、目标商家、redirect URI 和 scopes。
+2. 回调只接收 `code`/`state` 或标准错误，先原子消费并校验 state，再由后端立即以 `application/x-www-form-urlencoded` POST 到 `https://www.workbuddy.cn/openapi/v2/token`。授权码约 10 分钟且一次性；`client_secret` 只能由后端 Secret 管理系统注入，不得进入浏览器、前端 bundle、Connector、Skill、日志、trace、URL 或错误响应。
+3. 换票响应必须校验 HTTP/业务状态、`token_type=Bearer`、正整数 `expires_in`、实际 scope 不超出申请/获批集合，以及非空 `open_id`。若当前流程只用`open_id`建立外部主体，完成HMAC派生后立即丢弃access/refresh token，不得为“以后可能调用”而落库；若phoneverification或其他已批准Open API确需后续调用，则必须在同一事务内加密写入Token。两种模式都只有在state消费与身份绑定原子提交后才能标为可用，任何解析、加密或持久化失败都不得返回绑定成功。
+4. 刷新仍 POST 同一 `/token`，使用 `grant_type=refresh_token`、该应用的 `client_id`/`client_secret` 和当前 refresh token。每个授权记录使用互斥锁或单飞控制，避免并发刷新；若响应返回新 refresh token，按 RFC 6749 原子替换并在成功提交后销毁旧值，绝不能因超时盲目并发重试。若没有返回新 refresh token，只能在目标环境确认旧值仍有效后沿用。
+5. 刷新响应中的 `open_id` 必须与原绑定 `(issuer, client_id, open_id)` 一致，scope 不得静默扩大；`open_id` 缺失/变化、scope 缩减到不能满足绑定用途或响应字段矛盾时，隔离该授权并要求重新绑定，不能改绑到新主体。`invalid_grant` 视为授权失效，停止自动重试并清除本地可用态；429/5xx/网络错误仅按有界退避重试，不能把未知结果写成成功。
+6. Open API 返回 401 时，后端最多在单飞刷新成功后重放一次原调用；403/`invalid_scope` 不触发刷新，直接进入缺权限/重新授权路径。所有出站地址固定 allowlist 到 WorkBuddy 官方 HTTPS host，禁止让用户、模型或数据库字段覆盖 token/authorize/base URL。
+
+#### 11.4.5 `open_id` 与 `phoneverification` 边界
+
+- `open_id` 只能来自 WorkBuddy `/token` 的服务端成功响应，外部主体候选键固定为 `(issuer, client_id, open_id)`；不得从浏览器参数、Skill/MCP 工具参数、聊天文本或用户自报读取。当前官方文档没有给出跨应用、应用重建、账号注销/重建时的稳定性保证，因此必须等待书面确认和实机矩阵，不能只用裸 `open_id` 自动认领平台账号。
+- 存储优先使用带版本的 HMAC 查找键；如业务确需原值则另行加密，且与 Open API token 分列/分权。刷新时主体不一致必须 fail closed；不能用昵称、头像或手机号去“修复”主体漂移。
+- `POST /openapi/v2/user/phoneverification` 需要 `user.contact.readable`，只返回调用方提交手机号是否匹配当前授权用户，不返回真实或脱敏手机号。手机号必须来自已登录的平台安全页并先完成平台自己的 OTP/再认证；不得来自聊天、模型、Skill 或任意 MCP 参数。
+- 服务端按官方号码规则规范化输入：大陆号可接受本地或 `+86`，港澳 8 位号必须明确 `+852`/`+853`，含糊号码直接拒绝。调用按平台用户、WorkBuddy 授权、IP/设备和时间窗限速；正反例使用一致的外部文案和近似时序，日志不记录原手机号。
+- `matched=true` 只是补强“两个已认证会话可能属于同一人”的信号，不是登录、OTP、唯一标识或商家权限；仍需用户明确确认绑定。`matched=false`、403、超时和 5xx 都不能泄露哪一侧账号/手机号存在，也不能触发自动合并或改绑。
+
+#### 11.4.6 撤销、断开与解绑
+
+本轮所查 WorkBuddy 第三方应用/Open API 官方页面只公开 `/authorize` 和 `/token`（换票/刷新），未找到可由第三方应用调用的 token revocation 或 grant revocation 端点。不得臆造 URL，也不得把“删除本地 token”描述为已撤销 WorkBuddy 侧授权。
+
+用户在本平台执行解绑时必须再认证并明确目标主体/商家；服务端以幂等事务先冻结绑定和后台刷新，再撤销本平台 Connector grant/会话，清除队列任务与缓存，删除或密码学销毁 WorkBuddy access/refresh token，最后删除/停用 `external_subject ↔ platform_user ↔ merchant` 关系并写不含凭据值的审计。解绑不得删除 WorkBuddy 账号或其他商家绑定。若 WorkBuddy 后续提供可信撤销端点，应先按 RFC 7009 接入和实测，再把远端撤销加入流程；在此之前 UI 必须明确“已解除本平台绑定并停止使用凭据，WorkBuddy 侧授权需在其授权管理入口另行撤销（入口待官方确认）”。因为残留 access token 可能在到期前仍有效，本地 token 销毁、停止刷新、短期访问凭据和异常告警都是上线门禁。
+
+Connector 的“断开”是另一条撤销链：由本平台授权服务器撤销相应 refresh-token family、关联 access token/会话并使后续 MCP 请求返回 401；它不能替代第三方应用解绑。Skill 的启用/关闭也不等于上述任一撤销。
+
+#### 11.4.7 非秘密配置清单
+
+| 配置类别 | 必需项 | 约束 |
+| --- | --- | --- |
+| WorkBuddy 第三方应用 | 环境专属 `client_id`、Secret Manager 中的 `client_secret`、唯一 HTTPS callback、获批 scopes、authorize/token/base URL allowlist | 开发/测试/生产应用与回调完全隔离；secret 不落库明文、不进仓库/前端/Connector；未获批不启用 |
+| 绑定状态 | state HMAC/加密密钥引用、TTL、一次性消费仓储、平台 session/用户/商家绑定 | state/code/token 均禁止日志；回调域名固定；失败统一文案 |
+| Token 保管 | 独立 encryption-key 引用、凭据类型、issuer、client ID、open_id 查找键版本、scope、expires_at、refresh 状态 | 与 Connector OAuth 存储/密钥用途/撤销域隔离；只允许后端服务身份读取 |
+| 刷新策略 | 提前量、单飞锁、超时、最大重试、退避、`invalid_grant` 终态、scope/open_id 漂移策略 | 运行时以响应 `expires_in` 计算；不依赖概览固定时长；未知结果不并发重放 |
+| phoneverification | 功能开关、`user.contact.readable`、号码规范化规则、限流与审计策略 | 未获 scope 或未完成平台 OTP/再认证时关闭；不记录原手机号 |
+| 撤销/解绑 | 本地幂等流程、Connector grant 撤销入口、用户提示与支持流程 | WorkBuddy 远端撤销端点保持“未配置/待官方确认”，禁止填猜测 URL |
 
 ### 11.5 安装、触发、链接、帮助与典型对话
 
@@ -535,7 +573,7 @@ WorkBuddy：仅在服务端确认令牌和发布 API 成功后，返回真实 re
 
 ### 11.6 包形态与发布上架约束
 
-目标包形态已经确定。当前 `integrations/workbuddy/` 已有非秘密 `connector-meta.json`、单 Server `mcp.json`、Skill/references 源稿，应用内也已有四个最小工具的本地 Streamable HTTP MCP 适配层及 OAuth 协议边界测试；正式图标、生产 OAuth 适配器、身份桥接、远程部署、审核与实机证据仍不存在。完成这些缺口前不得打包上传或发布：
+目标包形态已经确定。当前 `integrations/workbuddy/` 已有非秘密 `connector-meta.json`、单 Server `mcp.json`、Skill/references 源稿，应用内也已有四个最小工具的本地 Streamable HTTP MCP 适配层、OAuth MySQL仓储和第三方应用身份桥安全骨架；正式图标、完整生产 OAuth/身份适配、远程部署、审核与实机证据仍不存在。完成这些缺口前不得打包上传或发布：
 
 ```text
 h5-ai-customer-service-connector/
@@ -552,7 +590,7 @@ h5-ai-customer-service-connector/
             └── safety-and-confirmation.md
 ```
 
-OAuth metadata、动态注册、授权、换票、刷新和撤销端点属于远程平台服务，不应把实现、secret 或 token 放进 Connector 包。当前应用已有 HTTP `401` challenge、发现链以及使用测试适配器验证的注册、PKCE 换票和刷新轮换；真实运行时仍刻意使用不可用仓储、密钥和账号会话，因此除 metadata/401 外会 fail closed，尚不满足远程 Connector OAuth 验收。
+OAuth metadata、动态注册、授权、换票、刷新和撤销端点属于远程平台服务，不应把实现、secret 或 token 放进 Connector 包。当前应用已有 HTTP `401` challenge、发现链、MySQL OAuth仓储，以及使用测试适配器验证的注册、PKCE 换票和刷新轮换；显式配置`MYSQL_DATABASE_URL`后动态注册可使用该仓储，但正式签名密钥、账号/consent会话和binding resolver仍刻意不可用，因此authorize/token及受保护调用继续fail closed，尚不满足远程 Connector OAuth 验收。
 
 发布约束：
 
@@ -609,17 +647,19 @@ WorkBuddy 只是调用端，业务事实、租户授权、幂等和审计仍由�
 | Skill 安装/触发 | 市场安装、本地 ZIP、启用/关闭、自动触发、手动触发、中英文改写和误触发 | 低风险意图可重复路由；关闭后不自动调用；高风险不会因触发词直接执行 |
 | Connector 包 | 解析 `connector-meta.json`/`mcp.json`/内置 Skill，发现工具并调用 HTTPS MCP | 只有一个 Server；工具 Schema 正确；同步超时和异步任务行为符合契约 |
 | 401 与元数据发现 | 无 token、过期 token、伪造 token、错 audience 请求 `/mcp`；跟随 `WWW-Authenticate` 读取 RFC 9728/8414 元数据 | 认证在工具执行前返回正确 HTTP 401/403；challenge URL 可达；resource、issuer、端点和能力完全一致；根路径兼容别名如存在则与主元数据相同 |
-| 动态注册与 OAuth 浏览器流 | 注册公共客户端；首次连接、取消、私有 scheme、回环回退、换票、刷新、断开、重连及 refresh token 重用 | 无 client secret；只用 PKCE S256；state/resource/redirect 精确校验；动态回环端口可用；旧 refresh/access token 在轮换或撤销后不可用 |
+| Connector 注册与 OAuth 浏览器流 | 按 WorkBuddy 当前要求动态注册公共客户端；另测 MCP 2026 CIMD/预注册兼容；首次连接、取消、私有 scheme、回环回退、换票、刷新、断开、重连及 refresh token 重用 | 无 client secret；只用 PKCE S256；state/resource/redirect/`iss` 精确校验；client registration 不跨 issuer；动态回环端口可用；未验证 CIMD 前不移除 DCR；旧 refresh/access token 在轮换或撤销后不可用 |
 | 两套 Token 隔离 | 分别把 WorkBuddy Open API token、错 issuer/audience token 请求 `/mcp`，并检查所有配置、存储、日志和出站目标 | `/mcp` 全部拒绝非本平台 Connector token；Connector token 永不发往 WorkBuddy；两套凭据无混用、透传、兑换或值日志 |
-| WorkBuddy 平台身份 | 第三方应用审核、最小 scope、首次/再次授权；同账号跨设备、重装、撤销再授权；账号注销/重建咨询官方 | 服务端取得 `open_id`；确认其应用隔离和稳定性语义；普通 Skill/Connector 未经验证仍不得自称获得平台身份 |
-| 手机号核验 | 仅在安全页输入手机号并完成平台 OTP，再调用 `phoneverification` 正反例 | 只得到 matched；聊天/日志无手机号、OTP；不匹配不泄露任一侧账号存在性 |
+| 第三方应用换票/刷新 | 回调 state 重放/错 session/错商家/错 redirect；code 重放/过期；token 字段缺失；`expires_in` 不同值；并发刷新、超时、`invalid_grant`、新旧 refresh token、scope/open_id 漂移 | secret 仅后端；state/code 一次性；只有完整事务成功才绑定；按实际 `expires_in` 调度；刷新单飞且原子替换；字段/主体漂移 fail closed；无 token/code/secret 值日志 |
+| WorkBuddy 平台身份 | 第三方应用审核、最小 scope、首次/再次授权；同账号跨设备、重装、撤销再授权；账号注销/重建和跨应用 `open_id` 语义咨询官方 | 服务端换票取得 `open_id`；确认其应用隔离和稳定性语义；只以 `(issuer, client_id, open_id)` 为候选键；普通 Skill/Connector 未经验证仍不得自称获得平台身份 |
+| 手机号核验 | 仅在安全页输入手机号并完成平台 OTP/再认证，再调用 `phoneverification`；覆盖大陆/港澳格式、matched 正反例、错 scope、限流、超时 | 只得到 matched；不作为登录或自动合并凭据；聊天/日志无手机号、OTP；不匹配和错误不泄露任一侧账号存在性 |
+| 撤销与解绑 | 重复解绑、并发刷新、断开 Connector、解除平台绑定、成员退出、账号停用；核对 WorkBuddy 官方是否新增撤销入口 | 本地立即冻结并销毁凭据、停止刷新、撤销 Connector grant、清缓存/任务且幂等；明确 WorkBuddy 侧远端授权是否已撤销，未有官方端点时绝不声称完成远端撤销 |
 | 绑定链接 | 检查聊天中链接是否可点击、复制、跨端打开、过期、重放、转发、换账号/商家 | 只到 allowlist HTTPS；单次/短期；转发不能接管；无法点击时仍有安全复制路径 |
 | 帮助/提示 | Connector 示例、OAuth 重连、Token `docUrl`、错误 `help_url`；场景胶囊/占位符等 Buddy 应用 UI 不在本形态范围 | 文案不诱导发送秘密；链接域名明确；普通 Skill 不伪装成 Buddy 应用 UI |
 | 权限与确认 | 只读用户发布、错 scope、跨租户 ID、知识提示注入、重复确认、响应丢失 | 全部拒绝或幂等；无资源存在性泄露；只有当前用户本轮确认可消费确认令牌 |
 | 凭据泄漏 | 检查聊天、任务历史、进程参数、Skill/Connector 包、日志、错误、遥测、URL、浏览器历史 | 无密码、OTP、access/refresh token、client secret；发现任一项即阻断 |
 | 发布上架 | 私测包校验和、版本升级/降级、审核材料、隐私说明、撤回与紧急停用 | 渠道、版本、审核状态可追溯；未获批不得宣称公开可安装；可撤销并回到上一安全版本 |
 
-本批完成了官方协议/安全审查、两套凭据边界收口，并确认本地存在 Connector 非秘密元数据、Skill、四工具适配层，以及 401、RFC 9728/8414 metadata、动态注册、PKCE 换票、私有 scheme/回环限制、刷新轮换和 token 隔离测试。这些是本地协议层验收，不是生产 OAuth、远程部署或 WorkBuddy 实机验收。当前阻断仍包括：生产 OAuth 持久化/签名/账号会话适配器、撤销端点、第三方应用注册和 `open_id` 绑定、真实客户端回调与重连都未实现或未实测。
+本批完成了当前 WorkBuddy Connector、第三方应用、Open API 与 OAuth/MCP 主来源复核，并收口服务端换票/刷新、`open_id`、`phoneverification`、解绑/撤销、非秘密配置和负向测试约束；这些是文档安全审查，不是生产或实机验收。共享工作树中已有固定端点 authorize/授权码换票、state 一次性消费、`open_id` HMAC 派生身份的本地安全骨架与单元测试，但尚未成为可用集成。当前阻断仍包括：第三方应用注册/审核和真实 client 配置、生产 callback 路由、持久化 state/绑定仓储、加密 token 保管、刷新单飞、`open_id` 稳定性、phoneverification、解绑流程、WorkBuddy 侧远端撤销入口，以及 MCP 2026 CIMD 与 WorkBuddy DCR 的目标客户端兼容性均未接通、未确认或未实测。
 
 目标形态不再等待二选一，但只有上述门禁由真实 WorkBuddy 客户端和测试商家通过，且第三方应用/Connector 完成所需注册、审核和上架批准后，才能宣称可安装或投入生产。以下任一情况直接阻断生产：普通 Skill/Connector 无可信主体却允许跨用户操作；要求在聊天发送密码/OTP/Token；两套 OAuth token 混用或透传；`open_id` 稳定性未确认却作为唯一账号键；任意 URL 可被模型注入；跨商家切换由参数决定；发布/回滚缺少服务端权限、版本和一次性确认。
 
@@ -631,10 +671,10 @@ WorkBuddy 只是调用端，业务事实、租户授权、幂等和审计仍由�
 - [WorkBuddy 开放平台：第三方应用](https://open.workbuddy.cn/docs/third-party-app)：OAuth 2.1、显式授权、应用凭据、scope、审核与 token 生命周期。
 - [WorkBuddy 开放平台：Open API](https://open.workbuddy.cn/docs/openapi)：授权码流程、`open_id`、用户资料和手机号匹配接口。
 - [WorkBuddy 开放平台：Buddy 应用](https://open.workbuddy.cn/docs/buddy-app)：快捷提示、输入框占位符、内置 Connector OAuth 绑定、预览和发布审核流程。
-- [MCP Authorization Specification 2025-06-18](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)：HTTP MCP 的资源服务器职责、metadata discovery、401 challenge、`resource`、token audience 与禁止 token pass-through。
+- [MCP Authorization Specification 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)：HTTP MCP 的资源服务器职责、metadata discovery、401/403 scope challenge、`resource`、issuer 校验、CIMD/DCR 注册优先级、refresh token 与禁止 token pass-through。
 - [OAuth 2.1 draft-13](https://www.ietf.org/archive/id/draft-ietf-oauth-v2-1-13.html)、[RFC 7636 PKCE](https://www.rfc-editor.org/rfc/rfc7636)、[RFC 8252 Native Apps](https://www.rfc-editor.org/rfc/rfc8252.html)：公共客户端、PKCE S256、私有 scheme 与动态端口回环回调。
-- [RFC 9728 Protected Resource Metadata](https://www.rfc-editor.org/rfc/rfc9728)、[RFC 8414 Authorization Server Metadata](https://www.rfc-editor.org/rfc/rfc8414.html)、[RFC 7591 Dynamic Client Registration](https://www.rfc-editor.org/rfc/rfc7591.html)：资源/授权服务器发现和公共客户端动态注册。
-- [RFC 8707 Resource Indicators](https://www.rfc-editor.org/rfc/rfc8707.html)、[RFC 6750 Bearer Token Usage](https://www.rfc-editor.org/rfc/rfc6750.html)：资源/audience 限制、Authorization header 与 401 Bearer challenge。
+- [RFC 9728 Protected Resource Metadata](https://www.rfc-editor.org/rfc/rfc9728)、[RFC 8414 Authorization Server Metadata](https://www.rfc-editor.org/rfc/rfc8414.html)、[RFC 7591 Dynamic Client Registration](https://www.rfc-editor.org/rfc/rfc7591.html)、[RFC 9207 Authorization Server Issuer Identification](https://www.rfc-editor.org/rfc/rfc9207.html)：资源/授权服务器发现、WorkBuddy 兼容动态注册和 issuer mix-up 防护。
+- [RFC 6749 OAuth 2.0](https://www.rfc-editor.org/rfc/rfc6749.html)、[RFC 8707 Resource Indicators](https://www.rfc-editor.org/rfc/rfc8707.html)、[RFC 6750 Bearer Token Usage](https://www.rfc-editor.org/rfc/rfc6750.html)、[RFC 9700 OAuth Security BCP](https://www.rfc-editor.org/rfc/rfc9700.html)、[RFC 7009 Token Revocation](https://www.rfc-editor.org/rfc/rfc7009.html)：授权码/刷新基础语义、资源/audience 限制、Bearer challenge、refresh-token 重放防护和撤销语义。
 
 ## 12. 分阶段交付计划
 
@@ -686,4 +726,4 @@ WorkBuddy 只是调用端，业务事实、租户授权、幂等和审计仍由�
 
 ## 15. 评审结论建议
 
-平台首版最重要的工程选择不是提前微服务化，而是把租户上下文、Session 所有权、不可变 Release、幂等副作用、审计和可恢复性做成默认路径。WorkBuddy 作为受限管理客户端接入，目标形态固定为 Skill 对话编排 + 远程 HTTPS MCP Connector + 平台同源 WorkBuddy 应用服务；同源服务复用商家后台的身份、权限、业务服务、审计和事实存储，不成为第二套后台或业务真值。最终会上架 WorkBuddy；当前已有 Skill/references、Connector 非秘密元数据、单 Server MCP 配置、本地四工具适配和 OAuth 协议边界，但身份桥接、生产 OAuth 仓储/密钥/账号会话/撤销、远程部署、注册审核和目标客户端行为尚未完成，因而仍不可安装、不可发布、不可宣称已交付或已生产。WorkBuddy 不进入消费者数据平面，也不成为在线服务依赖。若资源或排期不足，应减少文件类型、运营报表和界面精细度，不能削弱跨租户隔离、发布确认、凭据隔离、事实边界和恢复验证。
+平台首版最重要的工程选择不是提前微服务化，而是把租户上下文、Session 所有权、不可变 Release、幂等副作用、审计和可恢复性做成默认路径。WorkBuddy 作为受限管理客户端接入，目标形态固定为 Skill 对话编排 + 远程 HTTPS MCP Connector + 平台同源 WorkBuddy 应用服务；同源服务复用商家后台的身份、权限、业务服务、审计和事实存储，不成为第二套后台或业务真值。最终会上架 WorkBuddy；当前已有 Skill/references、Connector 非秘密元数据、单 Server MCP 配置、本地四工具适配、OAuth MySQL仓储和第三方应用身份桥安全骨架，但持久化bridge/binding、正式签名密钥、账号/consent会话、撤销、远程部署、注册审核和目标客户端行为尚未完成，因而仍不可安装、不可发布、不可宣称已交付或已生产。WorkBuddy 不进入消费者数据平面，也不成为在线服务依赖。若资源或排期不足，应减少文件类型、运营报表和界面精细度，不能削弱跨租户隔离、发布确认、凭据隔离、事实边界和恢复验证。

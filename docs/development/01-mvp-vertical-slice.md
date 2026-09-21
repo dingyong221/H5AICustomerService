@@ -1055,14 +1055,188 @@ MCP client → /mcp Authorization: Bearer <平台MCP Token>
 - 目标WorkBuddy客户端对本平台OAuth 2.1 + PKCE、Protected Resource Metadata、resource、刷新/撤销和重连的行为未实机验证。
 - 生产Authorization Server选型、密钥托管/JWKS轮换、Refresh Token策略、撤销传播、会话/MFA和账号恢复未定稿。
 - 生产HTTPS OAuth/MCP路由、CORS/CSRF/Cookie、反向代理、限流、监控、告警和应急撤销未验证。
-- 当前HMAC实现仍含`provider`并使用`audience`字段，尚未与`HMAC(issuer, client_id, open_id)`契约完成代码/迁移统一。
+- `f81b53a`基线中的HMAC实现仍含`provider`并使用`audience`字段；本轮已把派生输入统一为长度前缀编码的`issuer + client_id + open_id`，持久化字段`audience`明确承载第三方应用`client_id`。真实数据迁移仍须在首次生产写入前验证。
 - 真实账号冲突绑定、解绑/换绑、离职/商家转移、账号合并和申诉流程未完成。
 - Connector图标、隐私/授权说明、审核材料、正式打包、目标客户端实机和市场发布未完成。
 
 本阶段禁止写入仓库任何真实Token、client secret、签名/HMAC私钥或用户`open_id`。即使本地验收全部通过，状态也只能是“本地OAuth安全边界验证完成”，不得写成“WorkBuddy OAuth已接入”“真实账号已打通”或“生产可用”。
 
-### 16.7 本轮实现结果与剩余项
+### 16.9 本轮实现结果与剩余项
 
 本轮已实现并自动化验证：MCP HTTP 401 challenge、RFC 9728标准路径与根路径兼容metadata、RFC 8414 metadata、公共客户端注册、仅S256的PKCE授权码、一次性code、精确resource/client/redirect校验、短期MCP JWT、refresh token原子轮换/重放撤销契约、两类token用途隔离，以及缺少真实适配器时的503/fail-closed行为。动态注册只接受配置的WorkBuddy私有回调或`127.0.0.1`动态端口`/oauth/callback`，拒绝任意HTTPS、`localhost`和未知source。
 
-仍未达到16.6完整退出条件：生产MySQL OAuth仓储、正式签名密钥/KMS、平台登录/同意会话、WorkBuddy第三方应用服务端换票与`open_id`身份桥接、撤销端点/传播、正式HTTPS部署和目标客户端实机证据均未完成。当前真实运行时刻意使用不可用适配器，不能签发可用生产Token。
+该基线仍未达到16.6完整退出条件：当时生产MySQL OAuth仓储、正式签名密钥/KMS、平台登录/同意会话、WorkBuddy第三方应用服务端换票与`open_id`身份桥接、撤销端点/传播、正式HTTPS部署和目标客户端实机证据均未完成。后续增量见第17.10节；当前仍不能签发可用生产Token。
+
+## 17. 真实配置可接入的账号与授权垂直切片
+
+> 基线commit：`f81b53a`。本节是下一阶段实现契约，不是完成报告。该基线已有OAuth协议核心、受限动态注册、JWT测试codec、刷新令牌轮换契约和浏览器安全状态模型，但还没有OAuth MySQL迁移；`createRuntimeOAuth()`固定装配四个`Unavailable*`适配器。因此该基线不能完成真实平台登录、consent、WorkBuddy换票、账号绑定、解绑或商家授权，也没有真实凭据、生产部署或目标客户端实机证据。本轮首个实现增量见第17.10节。
+
+### 17.1 本切片的完成语义
+
+“真实配置可接入”在本切片中表示：运行时不依赖代码内测试身份，可以从受控配置装配真实适配器；当以后注入一组合法的非生产Connector配置、平台登录配置和WorkBuddy第三方应用配置时，不需要修改业务语义即可执行端到端授权；没有配置时仍fail closed。
+
+本切片允许并要求使用本地测试密钥、MySQL测试库和可编程WorkBuddy OAuth提供方模拟器完成自动化，但不得据此声明以下任一事项：
+
+- 已获得或使用真实WorkBuddy client ID、client secret、用户`open_id`或Open API Token。
+- 已在目标WorkBuddy客户端完成Connector安装、真实授权或MCP实机调用。
+- 已部署正式HTTPS端点、生产密钥、生产数据库或监控告警。
+- 已完成Connector审核、隐私审核、账号恢复运营流程或生产发布。
+
+### 17.2 安全域与类型边界
+
+| 安全域                   | 发起方/签发方                     | 服务端输入                                                 | 服务端输出                               | 唯一允许的调用目标                                 |
+| ------------------------ | --------------------------------- | ---------------------------------------------------------- | ---------------------------------------- | -------------------------------------------------- |
+| Connector OAuth          | WorkBuddy Connector发起，平台签发 | 平台授权请求、平台授权码、PKCE verifier、平台Refresh Token | 平台MCP Access Token/Refresh Token       | 本平台`POST /mcp`                                  |
+| WorkBuddy Open API OAuth | 平台后端发起，WorkBuddy签发       | WorkBuddy回调code、平台后端持有的第三方应用client凭据      | 后端换票响应；其中`open_id`进入身份桥    | WorkBuddy授权/Token/Open API端点与平台外部身份绑定 |
+| 平台账号会话             | 浏览器发起，平台登录服务签发      | 平台受控登录因子与安全Cookie                               | 已认证Account、`auth_time`与重新认证级别 | 平台登录、consent、解绑和恢复页面                  |
+
+实现必须使用不同的TypeScript类型、配置命名空间、HTTP client、日志过滤器、存储字段和测试夹具。禁止接受`string`后依次尝试两种验证器；禁止把WorkBuddy Open API Token传给`McpAccessTokenAuthenticator`；禁止把平台MCP Token传给WorkBuddy HTTP client；禁止在Connector claims、工具参数或浏览器表单中承载`open_id`。
+
+当前固定scope仍为`mcp:tools`。由于它不是细粒度权限，consent必须同时展示四个实际门面工具及其动作边界；不得把`mcp:tools`描述为对平台账号或全部商家的无限访问。
+
+### 17.3 配置包与启动门禁
+
+配置分成可独立校验、不能相互补值的四个包。下表中的“目标配置”是接入契约；除已存在的环境变量外，具体名称可在实现时由配置模块统一，但不得把secret值写入仓库或前端构建产物。
+
+| 配置包                | 必需项                                                                                                                                          | 校验与装配结果                                                                                                             |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Connector公开协议     | 现有`OAUTH_ISSUER`、`OAUTH_MCP_RESOURCE`、`WORKBUDDY_CONNECTOR_SOURCE`，精确回调策略、Access Token TTL、授权码TTL                               | issuer生产只能为HTTPS；resource必须是同源精确`/mcp`；私有回调只能匹配已配置source，回环回调只允许测试/开发策略             |
+| Connector持久化与签名 | MySQL连接与迁移版本、Access Token签名key引用、key ID/JWKS发布策略、Refresh Token摘要pepper/等价保护、时钟源                                     | `OAuthRepository.assertReady()`、签名与验证自检全部成功后才允许register/authorize/token；不得自动生成可跨重启使用的生产key |
+| 平台登录与consent     | 登录提供方适配器、session cookie签名/加密key引用、Cookie域/`Secure`/`HttpOnly`/`SameSite`、CSRF key、会话和重新认证TTL、consent文案版本         | 能创建服务端登录会话和授权事务；缺一项时authorize不得用固定Account兜底                                                     |
+| WorkBuddy身份桥       | WorkBuddy issuer、authorization/token端点、第三方应用client ID、client secret引用、精确回调URI、最小Open API scopes、subject HMAC key引用及版本 | 专用HTTP client和`WorkBuddyIdentityBridge`自检通过；缺失时绑定入口显示未配置，回调不换票，Connector授权不跨过必需绑定步骤  |
+
+配置加载只记录配置ID、key ID、版本、origin和启用状态，不记录secret。所有端点、redirect URI与issuer必须拒绝userinfo、fragment和非允许query；生产配置不得使用HTTP、loopback、示例域名、内联私钥或默认Cookie key。
+
+readiness必须按能力报告而不是只看进程存活：公开metadata可以在后端适配器未就绪时继续返回已实现的静态协议描述，但`register/authorize/token`、身份桥与受保护MCP调用必须返回安全503/401，不得签发临时Token或注入测试用户。测试适配器只允许通过显式test依赖注入装配，不能由某个缺失环境变量隐式启用。
+
+### 17.4 运行时适配器责任
+
+| 目标责任（名称可调整）              | 对接现有边界                                           | 必须保证                                                                                                            |
+| ----------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `MySqlOAuthRepository`              | `OAuthRepository`及现有OAuth表                         | client注册、授权码一次性消费、Refresh Token轮换/家族撤销均使用MySQL事务；进程内Map和Redis不是事实源                 |
+| `ConfiguredAccessTokenCodec`        | `OAuthAccessTokenCodec` / `JoseAccessTokenCodec`       | 从受控key引用签发并验证`iss/aud/token_use/client_id/scope/exp/jti`；支持key ID与安全轮换，不接受WorkBuddy Token     |
+| `PlatformAuthorizationOrchestrator` | 当前`OAuthResourceOwnerAuthorizer`需要扩展的浏览器流程 | 保存授权事务，协调登录、身份桥、商家选择和consent；只有全部完成后返回不透明grant binding ID                         |
+| `MySqlIdentityBindingResolver`      | `OAuthIdentityBindingResolver`                         | 由binding ID解析活动Account、单一merchant、grant和scope；每次调用复核绑定、grant、Account、Merchant与Membership状态 |
+| `WorkBuddyOpenApiIdentityBridge`    | 新的第三方应用OAuth边界                                | 独立state、后端换票、`open_id`响应校验、HMAC查找、并发幂等和冲突结果；绝不签发平台MCP Token                         |
+| `ConnectorGrantRevocationService`   | Refresh Token仓储、binding resolver与审计              | 撤销grant/家族后，即使JWT未到期，下一次binding解析也拒绝；写审计与outbox但不记录敏感值                              |
+| `IdentityRecoveryService`           | 外部身份状态、平台重新认证与运营审计                   | 解绑、同账号重绑、冲突工单和经批准的迁移使用明确状态机；不自动合并Account或转移Membership                           |
+
+`f81b53a`中的`OAuthResourceOwnerAuthorizer.resolveAuthorizationSession()`只能表达“已有登录会话且已同意后返回binding ID”。实现本切片时必须增加授权事务和浏览器重定向/恢复能力，或由上层orchestrator在调用该接口前完成这些步骤；不能把`OAuthResourceOwnerUnavailableError`改写成固定测试身份。
+
+### 17.5 MySQL事实模型与状态机增量
+
+现有`oauth_public_client`、`oauth_authorization_code`、`oauth_refresh_token_family`、`oauth_refresh_token`、`merchant_user`、`external_identity`和`merchant_membership`提供基础，但还不足以表达真实登录、consent、解绑和恢复。下一阶段至少需要以下事实；表名可调整，语义不可丢失：
+
+| 事实                    | 最小字段/约束                                                                                                                       |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| 平台登录会话            | session摘要、Account、`auth_time`、认证级别、过期/撤销时间、CSRF关联；浏览器只持有安全Cookie                                        |
+| OAuth授权事务           | 事务摘要、client、精确redirect、resource、scope、PKCE challenge、Connector state、当前步骤、Account、选择候选版本、过期/消费时间    |
+| Connector consent grant | 不透明binding/grant ID、Account、单一merchant、client、resource、scope、consent版本、状态、授予/撤销时间；活动唯一性策略明确        |
+| WorkBuddy bridge事务    | state摘要、Account、登录session、配置ID/版本、原授权事务、过期/消费时间；不保存换票code或Token明文                                  |
+| 外部身份绑定            | `issuer + client_id + subject_lookup_key + HMAC key版本`、Account、`active/unlink_pending/revoked/conflict_hold`状态、绑定/解绑时间 |
+| 身份恢复工单            | 申请Account、冲突绑定安全引用、原因、状态、审批人与审计引用；不得复制`open_id`、Token或密码证据                                     |
+
+当前`external_identity`使用`provider + issuer + audience + subject_lookup_key`唯一键。启用真实配置前必须完成显式迁移：将`audience`定义并验证为第三方应用`client_id`，或改为独立`client_id`列；HMAC输入统一为无歧义编码的`issuer + client_id + open_id`。不得仅在文档或变量名中把任意audience静默当作client ID。
+
+状态机目标：
+
+```text
+OAuth授权事务:
+requested → login_required → binding_required → merchant_selection_required
+         → consent_required → approved → code_issued → consumed
+任一步 → denied | expired | failed
+
+外部身份绑定:
+unbound → pending → active → unlink_pending → revoked
+pending + 已属于其他Account → conflict_hold → original_account | manual_review
+
+Connector grant:
+pending → active → revoked | expired
+```
+
+状态跳转和审计写入必须与权威数据在同一MySQL事务内完成；通知和缓存失效通过outbox派生。Redis只能保存可丢弃的限流/短缓存，不得决定谁绑定了哪个Account或商家。
+
+### 17.6 授权、商家选择与Token绑定
+
+平台`/oauth/authorize`先完成现有协议校验，再创建服务端授权事务。登录、bridge和consent页面只引用该事务；每次恢复都检查浏览器会话、事务未过期/未消费以及原client、redirect、resource、scope、PKCE challenge未变化。
+
+商家候选只来自当前Account的活动`merchant_membership`与活动Merchant，按服务端稳定规则排序，并用绑定授权事务的短时不透明选择引用提交：
+
+- **0个商家：** 停在`merchant_selection_required`的“无可用商家”分支。若本切片同时实现创建商家，则以用户确认的展示名在一个事务中创建Merchant与owner Membership，再回到同一授权事务复核；若只支持邀请，则在Membership真正生效前不得继续。不能自动创建占位商家。
+- **1个商家：** 可以预选但不能跳过consent；提交时再次验证Membership。
+- **多个商家：** 不设默认值，只能选择服务端候选中的一个。一个grant与一个Refresh Token家族只能关联一个merchant。
+
+MVP把一个Connector授权上下文定义为“单活动商家”。用户切换商家时创建新的授权事务并重新consent；新grant激活与当前client连接的旧grant撤销必须原子完成。MCP工具Schema继续不接收`merchant_id`，`bindingId`解析出的服务端merchant是唯一租户上下文。
+
+授权码必须引用已批准grant，而不是只引用外部身份。Token交换、Refresh Token轮换与每次MCP调用都复核grant和Membership；Access Token可以只携带不透明binding ID，不能因JWT签名有效而跳过MySQL中的撤销/归属检查。
+
+### 17.7 身份绑定、解绑与冲突恢复事务
+
+首次绑定使用唯一键与行锁/唯一约束处理并发：未命中则创建`active`绑定；命中同一Account则幂等成功；命中其他Account、`unlink_pending`或策略保留期记录则返回稳定`IDENTITY_CONFLICT`，双方数据零变更且不泄露原Account信息。
+
+撤销Connector grant与解绑外部身份是两个API/用例：
+
+1. **撤销Connector grant：** 锁定grant与Refresh Token家族，标记撤销、失效所有家族、写审计/outbox后提交；外部身份保持`active`。
+2. **解绑外部身份：** 要求新鲜平台重新认证、CSRF校验、影响预览和一次性确认令牌。事务中把绑定改为`revoked`、撤销所有依赖grant/Refresh Token家族并写审计/outbox。取消、重复确认或版本冲突均不得产生部分解绑。
+3. **防锁死：** 若解绑会移除Account唯一的登录/恢复方式，服务端返回`ALTERNATIVE_LOGIN_REQUIRED`；UI不能只靠隐藏按钮实现该规则。
+4. **重绑：** 同一Account也必须重新完成WorkBuddy Open API OAuth；其他Account遇到保留记录时进入冲突恢复，不因旧绑定为`revoked`就立即抢占。
+
+冲突恢复的自动分支仅允许“登录原平台Account并继续/解绑”。不能登录原Account时创建人工恢复工单；工单处理必须验证申请人、记录审批与原因，并在迁移前原子撤销旧grant和会话。账号合并、Membership搬迁和商家数据迁移不在本切片内，任何实现都不能把“迁移外部身份”扩展成这些操作。
+
+建议的脱敏审计动作至少包括`oauth.login_succeeded/failed`、`oauth.consent_granted/denied`、`oauth.grant_revoked`、`workbuddy.bridge_succeeded/failed`、`identity.conflict_detected`、`identity.unlink_requested/completed/failed`和`identity.recovery_opened/resolved`。metadata只记录配置ID、Account内部ID、merchant内部ID、client摘要、结果码和trace ID。
+
+### 17.8 自动化与人工验收矩阵
+
+| 编号       | 层级             | 场景                                       | 必须断言                                                                                                                |
+| ---------- | ---------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| CFG-01     | 集成             | 完整本地测试配置装配                       | MySQL repository、签名codec、平台session、resource owner、binding resolver与bridge全部通过readiness；没有进程内生产兜底 |
+| CFG-02     | 参数化集成       | 逐项删除四个配置包中的必需项               | 对应能力503/fail closed，metadata/帮助仅保留允许的静态能力；不生成key、Token、账号或授权URL                             |
+| CFG-03     | HTTP             | issuer/resource/redirect/WorkBuddy端点非法 | HTTP生产URL、origin、path、userinfo、fragment、loopback与私有callback策略逐项拒绝，错误不回显secret                     |
+| LOGIN-01   | 浏览器E2E        | 无会话登录后恢复授权事务                   | 登录成功只恢复同一未过期事务；不自动绑定、选商家或consent；不可信return URL无效                                         |
+| LOGIN-02   | 浏览器E2E        | 会话过期、CSRF、跨浏览器与重新认证         | 全部安全停止；解绑必须满足新鲜认证；Cookie为`Secure`、`HttpOnly`且SameSite策略与回调流一致                              |
+| CONSENT-01 | 浏览器E2E        | 明确同意                                   | 页面显示client、单一商家、resource、`mcp:tools`与四工具动作；确认后才创建active grant和一次性code                       |
+| CONSENT-02 | HTTP/集成        | 拒绝、过期、重复提交、请求变化             | 返回标准拒绝或安全失败；不创建grant/code；只向已校验redirect返回原state                                                 |
+| WB-01      | bridge集成       | 提供方模拟器正常换票                       | 只有后端换票响应的`open_id`进入HMAC；原值、code、Token和secret不落业务表/URL/日志                                       |
+| WB-02      | 参数化集成       | bridge state缺失/错配/重放、错误响应、超时 | 不创建或修改绑定；不会因此签发Connector code；结果可用trace ID审计                                                      |
+| TOK-01     | HTTP/单元        | 两类Token双向混用                          | WorkBuddy Token不能访问`/mcp`，平台Token不能进入WorkBuddy client；无fallback或共用缓存                                  |
+| BIND-01    | MySQL并发集成    | 首次、同账号重复与并发回调                 | 最多一条active绑定；同账号幂等；HMAC输入和key版本正确，无`open_id`明文                                                  |
+| BIND-02    | MySQL集成        | 查找键已属于其他Account                    | 返回`IDENTITY_CONFLICT`，两边Account/Membership/grant零变化，不泄露原账号信息                                           |
+| MER-00     | 浏览器/MySQL E2E | Account有0个有效商家                       | 不发code；创建或加入商家前无grant；不产生占位Merchant或无租户Token                                                      |
+| MER-01     | 浏览器/MCP E2E   | Account有1个有效商家                       | 明确consent后Token只解析到该商家；篡改资源ID和工具输入不能跨租户                                                        |
+| MER-N      | 浏览器/MCP E2E   | Account有多个有效商家                      | 无默认选择；一次只绑定一个商家；候选外引用拒绝且不泄露存在性                                                            |
+| MER-S      | 集成/MCP E2E     | 切换商家或Membership变化                   | 切换原子撤销旧grant；撤销Membership发生在发code、换Token、刷新或调用前均能阻断                                          |
+| REV-01     | HTTP/MCP E2E     | 撤销Connector grant                        | grant与Refresh家族失效；下一次MCP binding解析拒绝；外部身份与平台登录不变                                               |
+| UNLINK-01  | 浏览器/MySQL E2E | 确认、取消、重放或并发解绑                 | 只有新鲜重新认证+CSRF+一次性确认成功；成功时依赖grant原子失效，取消/重放零部分写入                                      |
+| UNLINK-02  | 集成             | 唯一登录方式防锁死                         | 返回`ALTERNATIVE_LOGIN_REQUIRED`且所有绑定/grant保持原状                                                                |
+| REC-01     | 浏览器/服务集成  | 原账号登录与人工恢复工单                   | 自动路径只回原账号；人工路径未批准前零迁移；批准路径先撤销旧grant并产生完整脱敏审计                                     |
+| ROT-01     | MySQL/HTTP       | Refresh Token轮换与重放                    | 轮换原子；旧Token重放撤销整个家族；client/resource/scope/grant/merchant任一不符均失败                                   |
+| LEAK-01    | 静态/运行扫描    | 敏感数据泄漏                               | 前端产物、MCP Schema、响应、URL、日志、审计和快照中无secret、Token、code、verifier、`open_id`或HMAC原料                 |
+| E2E-01     | 本地真实HTTP     | 配置就绪主链                               | 从授权挑战、平台登录、模拟bridge、0/1/多商家分支、consent、PKCE换票到真实本地`POST /mcp`，成功与所有负向结果可复查      |
+| REAL-01    | 未来人工门禁     | 注入受控非生产真实WorkBuddy配置            | 只有实际完成授权、后端换票和目标客户端调用并留存脱敏证据后才可标记“测试环境已接通”；本阶段默认未执行                    |
+
+自动化不得访问真实WorkBuddy或使用真实用户。WorkBuddy提供方模拟器必须与Connector OAuth测试客户端分成两个进程/测试组件和两套Token格式，避免测试自身掩盖Token混用。
+
+### 17.9 退出条件、交付证据与未完成项
+
+只有第17.8节表内除未来人工门禁`REAL-01`外的全部用例通过，且实现满足以下条件，才可声明“配置可接入的本地实现已验证”：
+
+1. 非test运行时不再固定装配四个`Unavailable*`适配器；完整受控配置可装配MySQL、签名、登录/consent、binding resolver和bridge，缺配置则fail closed。
+2. Connector授权码绑定已登录Account、明确consent与单一merchant；0、1和多商家路径都有真实本地HTTP、MySQL与MCP证据。
+3. WorkBuddy `open_id`的唯一入口是专用后端换票响应；`issuer + client_id + open_id`HMAC契约和现有`audience`字段迁移已完成。
+4. Connector OAuth与WorkBuddy Open API OAuth的端点、Token、state、存储、HTTP client和日志过滤完全分离，并通过双向误用测试。
+5. 撤销grant、解绑、同账号重绑和冲突恢复状态机具备原子性、幂等性、防锁死与脱敏审计测试。
+6. 测试报告列出commit、配置类别与版本、迁移版本、测试命令、用例结果和脱敏trace ID；不包含任何secret或身份原值。
+
+`REAL-01`是后续单独的真实非生产接入门禁，不是本切片自动完成条件。即使17.8中的本地验收全部通过，以下事项仍必须报告为未完成：真实WorkBuddy第三方应用凭据与换票、目标客户端实机、正式域名/TLS部署、生产MySQL与KMS/JWKS、账号恢复运营SLA、数据保留/隐私政策、监控告警、Connector审核及生产发布。
+
+### 17.10 本轮首个实现增量
+
+本轮完成的是第17章的第一段可审查代码，不代表第17.9节整体退出：
+
+1. 新增共享`OAuthRepository`领域契约、四张InnoDB表及迁移`0002_demonic_ulik.sql`；授权码和Refresh Token只保存SHA-256摘要。授权码消费、Refresh Token轮换、重放/上下文错配导致的家族撤销均在MySQL事务和行锁下执行。
+2. `createRuntimeOAuth()`在显式提供`MYSQL_DATABASE_URL`时装配`MySqlOAuthRepository`，缺少配置仍装配不可用仓储。正式Access Token签名、平台登录/consent、binding resolver仍不可用，因此只有仓储就绪的DCR可以前进，authorize/token不会假成功。
+3. 新增固定WorkBuddy官方authorize/token端点的服务端客户端、完整配置门禁、字节级固定callback、超时/响应大小/字段/scope校验，以及一次性bridge state消费边界。`open_id`只从成功换票响应进入长度前缀编码的`HMAC(issuer, client_id, open_id)`，桥接结果不返回原始`open_id`或两种Token。
+4. 浏览器视图把回调参数限定为不可信的`callback_pending/callback_rejected`；只有服务端状态才能显示已登录、待consent、待绑定、多商家、冲突或撤销，授权跳转统一使用`no-referrer`。
+5. Connector授权响应新增RFC 9207 `iss`，metadata同步声明支持。以上能力均由本地单元/协议测试覆盖，未调用真实WorkBuddy。
+
+下一增量仍需完成：bridge state和外部身份绑定的MySQL仓储、callback路由、平台登录与consent/grant状态机、0/1/多商家选择、正式签名/JWKS、binding resolver、撤销/解绑/恢复、完整本地HTTP+MySQL E2E。生产托管MySQL、真实WorkBuddy凭据、远程部署和实机验证继续保持未完成。

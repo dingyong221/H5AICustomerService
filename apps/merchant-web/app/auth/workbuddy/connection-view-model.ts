@@ -1,12 +1,25 @@
 export type WorkBuddyConnectionState =
   | 'unconfigured'
   | 'disconnected'
-  | 'connected'
+  | 'callback_pending'
+  | 'callback_rejected'
+  | 'signed_in'
+  | 'consent_required'
+  | 'binding_required'
   | 'authorization_failed'
-  | 'binding_pending'
-  | 'merchant_selection_required';
+  | 'merchant_selection_required'
+  | 'conflict'
+  | 'revoked';
 
-export type TrustedWorkBuddyConnectionState = Exclude<WorkBuddyConnectionState, 'unconfigured'>;
+export type TrustedWorkBuddyConnectionState =
+  | 'disconnected'
+  | 'signed_in'
+  | 'consent_required'
+  | 'binding_required'
+  | 'authorization_failed'
+  | 'merchant_selection_required'
+  | 'conflict'
+  | 'revoked';
 
 type SearchValue = string | readonly string[] | undefined;
 
@@ -18,6 +31,11 @@ export interface WorkBuddyConnectionViewModel {
   state: WorkBuddyConnectionState;
   tone: 'neutral' | 'info' | 'success' | 'warning' | 'danger';
 }
+
+export const secureAuthorizationLinkAttributes = {
+  referrerPolicy: 'no-referrer',
+  rel: 'noreferrer',
+} as const;
 
 interface BuildConnectionViewModelInput {
   allowedAuthorizationOrigins?: readonly string[];
@@ -117,24 +135,20 @@ function classifyCallback(
   if (parameters === undefined) return undefined;
   const keys = Object.keys(parameters);
   if (keys.length === 0) return undefined;
-  if (keys.some((key) => !allowedCallbackKeys.has(key))) return 'authorization_failed';
+  if (keys.some((key) => !allowedCallbackKeys.has(key))) return 'callback_rejected';
 
   for (const key of keys) {
     const limit = key === 'code' ? 2_048 : 1_024;
-    if (singleSafeValue(parameters[key], limit) === undefined) return 'authorization_failed';
+    if (singleSafeValue(parameters[key], limit) === undefined) return 'callback_rejected';
   }
 
   const error = singleSafeValue(parameters['error'], 1_024);
-  if (error !== undefined) {
-    return error === 'merchant_selection_required'
-      ? 'merchant_selection_required'
-      : 'authorization_failed';
-  }
+  if (error !== undefined) return 'callback_rejected';
 
   const code = singleSafeValue(parameters['code'], 2_048);
   const state = singleSafeValue(parameters['state'], 1_024);
-  if (code !== undefined && state !== undefined) return 'binding_pending';
-  return 'authorization_failed';
+  if (code !== undefined && state !== undefined) return 'callback_pending';
+  return 'callback_rejected';
 }
 
 const statePresentation: Readonly<
@@ -155,11 +169,35 @@ const statePresentation: Readonly<
     label: '尚未连接',
     tone: 'warning',
   },
-  connected: {
-    actionLabel: '已安全连接',
-    description: '服务端已确认连接；后续操作仍会逐次校验登录会话与商家权限。',
-    label: '已连接',
+  callback_pending: {
+    actionLabel: '等待服务端核验回调',
+    description: '页面只确认收到受限回调；代码交换、state 校验和登录结果仍由服务端决定。',
+    label: '回调待核验',
+    tone: 'info',
+  },
+  callback_rejected: {
+    actionLabel: '重新进行安全授权',
+    description: '回调格式无效或提供方返回错误，页面没有据此建立任何可信登录或绑定状态。',
+    label: '回调无效',
+    tone: 'danger',
+  },
+  signed_in: {
+    actionLabel: '服务端已确认登录',
+    description: '服务端已确认有效登录会话；后续操作仍会逐次校验商家和客服权限。',
+    label: '已登录',
     tone: 'success',
+  },
+  consent_required: {
+    actionLabel: '查看并同意授权',
+    description: '服务端要求完成授权同意；只有经过校验的 HTTPS 授权入口可以继续。',
+    label: '需要授权同意',
+    tone: 'warning',
+  },
+  binding_required: {
+    actionLabel: '开始安全绑定',
+    description: '服务端已确认当前登录尚未绑定商家，需要通过受控授权流程继续。',
+    label: '需要绑定商家',
+    tone: 'warning',
   },
   authorization_failed: {
     actionLabel: '重新进行安全授权',
@@ -167,17 +205,23 @@ const statePresentation: Readonly<
     label: '授权失败',
     tone: 'danger',
   },
-  binding_pending: {
-    actionLabel: '等待服务端完成绑定',
-    description: '已收到受限回调，但只有服务端完成代码交换和状态校验后才能认定连接成功。',
-    label: '绑定待完成',
-    tone: 'info',
-  },
   merchant_selection_required: {
     actionLabel: '等待安全商家选择入口',
     description: '当前身份关联多个商家，必须由服务端提供受控选择流程后才能继续。',
     label: '多商家待选择',
     tone: 'warning',
+  },
+  conflict: {
+    actionLabel: '等待解决绑定冲突',
+    description: '服务端发现身份或商家绑定冲突，页面不会覆盖现有绑定或继续授权。',
+    label: '绑定冲突',
+    tone: 'danger',
+  },
+  revoked: {
+    actionLabel: '重新进行安全授权',
+    description: '服务端确认授权已经撤销；旧会话和页面参数不能恢复授权。',
+    label: '授权已撤销',
+    tone: 'danger',
   },
 };
 
@@ -194,7 +238,12 @@ export function buildWorkBuddyConnectionViewModel(
   const presentation = statePresentation[state];
   const canAuthorize =
     authorizationHref !== undefined &&
-    (state === 'disconnected' || state === 'authorization_failed');
+    (state === 'disconnected' ||
+      state === 'callback_rejected' ||
+      state === 'consent_required' ||
+      state === 'binding_required' ||
+      state === 'authorization_failed' ||
+      state === 'revoked');
 
   return {
     ...presentation,

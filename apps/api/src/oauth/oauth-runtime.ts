@@ -1,3 +1,5 @@
+import { loadDatabaseConfig, MySqlOAuthRepository } from '@h5cs/database';
+
 import { OAuthAuthorizationServer } from './oauth-authorization-server.js';
 import { McpAccessTokenAuthenticator } from './mcp-access-token-authenticator.js';
 import { McpOAuthTokenVerifier } from './mcp-oauth-token-verifier.js';
@@ -90,9 +92,13 @@ export class OAuthRuntime {
 
 export const createRuntimeOAuth = (environment: NodeJS.ProcessEnv = process.env): OAuthRuntime => {
   const config = loadOAuthServerConfig(environment);
-  // Production persistence and signing are deliberately unavailable until dedicated adapters and
-  // key management are configured. Never substitute process-local state or a development identity.
-  const repository = new UnavailableOAuthRepository();
+  const database = loadDatabaseConfig(environment);
+  // MySQL persistence is enabled only by an explicit database URL. Signing, platform sessions and
+  // identity resolution remain unavailable until their dedicated adapters are configured; never
+  // substitute process-local state or a development identity.
+  const repository = database.configured
+    ? new MySqlOAuthRepository(database.config)
+    : new UnavailableOAuthRepository(database.reason);
   const accessTokens = new UnavailableOAuthAccessTokenCodec();
   const bindings = new UnavailableOAuthIdentityBindingResolver();
   const resourceOwner = new UnavailableOAuthResourceOwnerAuthorizer();

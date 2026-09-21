@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
@@ -359,19 +359,18 @@ describe('Skill onboarding application service', () => {
 });
 
 describe('WorkBuddy external subject lookup', () => {
-  it('uses issuer and audience as HMAC context and never needs a caller password', () => {
+  it('uses issuer and third-party client ID as HMAC context and never needs a caller password', () => {
     const secret = randomBytes(32);
     const base = {
-      provider: 'workbuddy' as const,
       issuer: 'https://workbuddy.example.test',
-      audience: 'h5cs-skill',
+      clientId: 'h5cs-skill',
       openId: 'stable-open-id',
       lookupKeyVersion: 1,
     };
     const first = deriveExternalSubjectLookupKey(base, secret);
     const second = deriveExternalSubjectLookupKey(base, secret);
-    const otherAudience = deriveExternalSubjectLookupKey(
-      { ...base, audience: 'another-client' },
+    const otherClient = deriveExternalSubjectLookupKey(
+      { ...base, clientId: 'another-client' },
       secret,
     );
     const metadataOnlyVersionChange = deriveExternalSubjectLookupKey(
@@ -379,9 +378,17 @@ describe('WorkBuddy external subject lookup', () => {
       secret,
     );
     const rotatedKey = deriveExternalSubjectLookupKey(base, randomBytes(32));
+    const expected = createHmac('sha256', secret);
+    for (const value of [base.issuer, base.clientId, base.openId]) {
+      const bytes = Buffer.from(value, 'utf8');
+      const length = Buffer.allocUnsafe(4);
+      length.writeUInt32BE(bytes.byteLength);
+      expected.update(length).update(bytes);
+    }
 
     expect(Buffer.from(first).equals(Buffer.from(second))).toBe(true);
-    expect(Buffer.from(first).equals(Buffer.from(otherAudience))).toBe(false);
+    expect(Buffer.from(first).equals(expected.digest())).toBe(true);
+    expect(Buffer.from(first).equals(Buffer.from(otherClient))).toBe(false);
     expect(Buffer.from(first).equals(Buffer.from(metadataOnlyVersionChange))).toBe(true);
     expect(Buffer.from(first).equals(Buffer.from(rotatedKey))).toBe(false);
     expect(first.byteLength).toBe(32);
@@ -390,16 +397,15 @@ describe('WorkBuddy external subject lookup', () => {
   it('uses length prefixes so ambiguous segment boundaries cannot collide', () => {
     const secret = randomBytes(32);
     const common = {
-      provider: 'workbuddy' as const,
       openId: 'stable-open-id',
       lookupKeyVersion: 1,
     };
     const first = deriveExternalSubjectLookupKey(
-      { ...common, issuer: 'a', audience: 'b\0c' },
+      { ...common, issuer: 'a', clientId: 'b\0c' },
       secret,
     );
     const second = deriveExternalSubjectLookupKey(
-      { ...common, issuer: 'a\0b', audience: 'c' },
+      { ...common, issuer: 'a\0b', clientId: 'c' },
       secret,
     );
 

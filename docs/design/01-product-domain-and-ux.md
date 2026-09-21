@@ -790,3 +790,123 @@ Skill每次回复应尽量包含：当前步骤、已完成进度、一个主要
 - 未完成隐私/授权说明、Connector审核材料、图标、目标客户端实机及正式发布。
 
 上述任一项不得用本地测试issuer、硬编码身份、测试Token或模拟`open_id`冒充完成。对外状态仍应是“本地安全边界验证中”，而不是“OAuth已接入”或“生产可用”。
+
+## 14. 真实配置可接入的账号、授权与身份恢复契约
+
+> 下一阶段基线：commit `f81b53a`。该基线已经具备本地OAuth metadata、受限公共客户端注册、PKCE S256授权码、短期平台MCP Token、Refresh Token轮换与安全页面状态模型；正式运行时仍使用不可用适配器。本文所称“真实配置可接入”，仅表示未来提供真实非生产配置时有明确接入点、用户流程和可执行门禁，不表示仓库已有真实凭据、已完成WorkBuddy实机换票、已部署生产环境或已获正式发布审核。
+
+### 14.1 两套OAuth与平台登录态必须分域
+
+| 域 | 平台角色 | 用户看到的入口 | 产物与用途 | 不得混用 |
+| --- | --- | --- | --- | --- |
+| Connector OAuth | 平台是Authorization Server，WorkBuddy Connector/MCP客户端是public client | 平台登录、商家选择和授权同意页 | 平台授权码、MCP Access Token和Refresh Token；仅用于访问本平台`/mcp` | 不调用WorkBuddy Open API，不产生或读取`open_id` |
+| WorkBuddy Open API OAuth | 平台是本项目第三方应用的OAuth client，WorkBuddy是Authorization Server | 平台账号内的“连接WorkBuddy身份”页及WorkBuddy授权页 | WorkBuddy授权码只由平台后端换票；换票结果中的`open_id`只用于计算身份查找键 | Token不作为`/mcp` Bearer，不交给Connector、浏览器脚本或模型 |
+| 平台账号登录态 | 平台是登录会话颁发者 | 平台受控登录页 | 安全Cookie对应的平台Account会话，用于登录、同意、解绑和恢复 | 不是Connector Token，也不是WorkBuddy Open API Token |
+
+三者可以出现在一条连续用户旅程中，但必须由不同的会话、state命名空间、Cookie、存储字段和服务端适配器处理。任一代码、Token、Cookie或`open_id`都不能在另一安全域中作为“已经登录/已经授权”的替代证据。
+
+### 14.2 从Connector到可调用工具的完整用户旅程
+
+1. WorkBuddy Connector访问受保护MCP资源；没有有效平台MCP Token时收到标准授权挑战。
+2. Connector生成自己的高熵`state`与PKCE verifier，以S256 challenge打开平台`/oauth/authorize`。平台只接受登记的client、精确redirect URI、MCP resource和当前支持的`mcp:tools` scope。
+3. 平台将请求保存为短时、一次性的服务端授权事务。浏览器只携带不透明事务引用；不得把任意`return_to`、商家ID、scope或账号ID当成可信事实。
+4. 用户在平台受控页面完成账号登录。已有有效登录会话可继续；没有会话、会话过期或高风险动作需要重新认证时，必须回到平台登录页。密码、OTP、通行密钥或恢复信息不经过WorkBuddy聊天、Connector或MCP工具。
+5. 若该平台Account还没有当前`issuer + client_id`下的有效WorkBuddy外部身份，用户进入独立的WorkBuddy Open API OAuth桥接流程。平台后端校验独立state并换票，只有换票响应中的`open_id`能进入HMAC计算。
+6. 平台按当前Account的有效Membership计算0、1或多个可授权商家，执行第14.6节流程。浏览器提交的商家引用只能选择服务端刚刚返回的候选，不能扩大权限。
+7. 平台展示明确的OAuth consent：Connector名称、当前商家、resource、`mcp:tools`以及本批四个工具可能执行的动作。用户必须明确“同意”或“拒绝”；登录、绑定或选择商家本身都不等于同意。
+8. 只有登录、身份桥接、商家选择、Membership复核与consent全部成功后，平台才签发一次性Connector授权码。拒绝或任一步失败均不签发code。
+9. Connector用原PKCE verifier换取平台MCP Token。每个grant只绑定一个平台Account、一个商家、一个Connector client、一个resource与一组scope；工具调用仍逐次检查grant、Membership和对象归属。
+
+### 14.3 平台账号登录与OAuth consent
+
+账号登录只回答“当前浏览器是谁”，不自动创建商家、不自动绑定WorkBuddy身份，也不自动批准Connector。登录成功后以服务端事务恢复原授权请求；事务过期、client/redirect/resource变化或跨浏览器恢复时必须重新开始，不能依赖前端缓存补全。
+
+consent页面至少展示以下信息：
+
+- 已验证的Connector显示名与client安全标识；未知或未登记client不得展示可同意页面。
+- 将被授权的单一商家名称、当前用户角色和可撤销入口；不得仅显示模糊的“访问账号”。
+- 当前固定scope `mcp:tools`及实际工具动作：查看帮助、创建/恢复首次生成流程、推进流程和打开有权访问的管理入口；明确“创建的是草稿，不能仅凭本次授权发布”。
+- Token的大致生命周期、撤销后影响以及“WorkBuddy Open API授权与本次Connector授权是两套授权”的提示。
+
+同意记录绑定`Account + Connector client + resource + scope + merchant + consent版本`。首次授权、scope扩大、商家切换、consent文案产生实质变化或既有grant被撤销后都必须重新同意。拒绝时向已校验的redirect URI返回标准`access_denied`与原Connector state，不泄露登录、绑定、商家数量或冲突详情。
+
+### 14.4 WorkBuddy第三方应用身份桥接
+
+一个WorkBuddy外部主体在同一`issuer + client_id`下只能绑定一个平台Account；一个平台Account在同一`issuer + client_id`下最多有一个有效绑定。绑定流程如下：
+
+1. 已登录用户在平台页面明确开始连接；服务端创建独立、短时、一次性的bridge state，并绑定Account、登录会话、WorkBuddy配置版本和原授权事务。
+2. WorkBuddy回调只接收允许字段。平台后端以第三方应用client凭据换票，验证响应来源和配置后读取`open_id`；前端不展示、保存或转发code、Token、secret或`open_id`。
+3. 平台计算`subject_lookup_key = HMAC(server_key, encode(issuer, client_id, open_id))`，随即丢弃`open_id`原值；业务表、URL、日志、审计和模型上下文均不得保存其明文。
+4. 查找键不存在时绑定当前Account；已绑定当前Account时幂等恢复；已绑定其他Account或处于受控冻结期时进入冲突恢复，不覆盖、不合并、不抢占。
+5. bridge完成只证明外部身份与平台Account的关联，不签发Connector Token。平台必须返回原授权事务并继续商家选择与consent。
+
+真实WorkBuddy client ID、client secret、授权/Token端点、回调URI、Open API scope和HMAC key都只能由服务端受控配置提供。缺少任一必需配置时连接按钮不可伪装可用，回调与受保护流程fail closed。
+
+### 14.5 撤销、解绑与冲突恢复
+
+产品必须把三个动作分开表达：
+
+| 动作 | 直接效果 | 保留内容 | 后续恢复 |
+| --- | --- | --- | --- |
+| 撤销Connector授权 | 撤销该Account、client、resource、商家与scope对应的grant和Refresh Token家族；后续MCP调用失败 | 平台账号、Membership和WorkBuddy身份绑定 | 重新走商家选择与consent |
+| 解绑WorkBuddy身份 | 在平台重新认证并明确确认后，将外部身份绑定标为已撤销，同时撤销依赖该绑定的Connector grants | 商家数据、平台账号、审计记录和不含`open_id`的受控防抢占记录 | 同一Account也必须重新走WorkBuddy OAuth；其他Account进入冲突恢复 |
+| 退出平台账号 | 结束当前浏览器登录会话 | Connector grant和身份绑定不因单纯退出自动删除 | 下次敏感操作重新登录 |
+
+解绑不得等同删除平台账号或商家数据。若WorkBuddy身份是该Account唯一可用的登录/恢复方式，必须先建立另一条经过验证的登录或恢复方式，否则拒绝解绑以防锁死。解绑确认页需显示影响的Connector连接与商家，但不得显示Token、`open_id`或其他账号详情。
+
+冲突恢复只允许两条路径：
+
+1. 用户能登录原平台Account：回到原账号完成授权或先在原账号中解绑；当前账号不获得任何绑定。
+2. 用户无法登录原Account：创建受控恢复工单，经过已定义的账号恢复校验与人工审计后处理。完成前双方绑定、Membership和商家数据均不改变。
+
+人工恢复不得执行静默账号合并。若政策允许把外部身份迁移到新Account，必须先撤销旧grant与登录会话、记录双人审批/等价受控审计、保留不可逆审计链，再原子地完成迁移；该迁移能力不属于当前已完成功能。
+
+### 14.6 0、1与多商家流程
+
+| 有效商家数 | 用户流程 | 授权结果 | 禁止行为 |
+| --- | --- | --- | --- |
+| 0 | 页面明确显示“当前账号没有可管理商家”，提供“创建新商家”或“接受/申请商家邀请”的受控入口；创建时需用户确认名称并原子建立owner Membership | 在产生并复核有效Membership前不签发授权码；用户取消则`access_denied` | 不自动建占位商家、不把WorkBuddy企业/群名称当平台商家、不发无租户Token |
+| 1 | 显示唯一商家名称、角色与授权影响，可预选但仍需用户明确确认consent | grant固定到该商家；后续Membership失效即拒绝工具调用 | 不因只有一个候选而跳过consent，不接受URL中的替换merchant ID |
+| 多个 | 只列当前Account具有有效Membership的商家；不默认选择，用户明确选择一个后进入consent | 一个grant只绑定一个商家；切换商家必须重新授权并使当前Connector连接的旧grant失效 | 不一次授权全部商家、不让模型猜测、不通过工具参数切换商家、不泄露无权商家 |
+
+商家候选在页面展示、consent提交、授权码签发、Token刷新和每次MCP调用时都要复核。商家被停用、Membership被撤销或角色不再满足工具要求后，旧Access Token即使尚未到期也不能继续访问。
+
+### 14.7 产品验收矩阵
+
+| 编号 | 场景 | 通过条件 |
+| --- | --- | --- |
+| RC-01 | Connector OAuth正常流 | 测试Connector经平台登录、商家选择、明确consent和PKCE取得仅面向所选商家的平台MCP Token；没有WorkBuddy Open API Token进入`/mcp` |
+| RC-02 | 平台登录边界 | 未登录、会话过期、跨浏览器事务和不可信return URL均安全停止；密码、OTP、Cookie和恢复信息不进入聊天、工具参数、URL或日志 |
+| RC-03 | consent拒绝/重放 | 拒绝、事务过期、重复提交、client/redirect/resource/scope变化均不签发code；原Connector state只返回给已校验redirect URI |
+| RC-04 | Open API身份桥 | 只有服务端换票响应中的`open_id`进入HMAC；首次、同账号重复、错state、重放、提供方错误与缺配置均有明确结果 |
+| RC-05 | Token双向混用 | WorkBuddy Open API Token访问`/mcp`、平台MCP Token访问WorkBuddy端点、任一Token出现在工具参数时全部拒绝且无fallback |
+| RC-06 | 绑定冲突 | 同一查找键已属于其他Account时不覆盖、不泄露对方信息、不签发Connector code，并提供“登录原账号”或受控恢复入口 |
+| RC-07 | 撤销Connector | 撤销后Access Token/Refresh Token在规定失效边界内失败，平台账号、Membership与WorkBuddy绑定保持不变 |
+| RC-08 | 解绑WorkBuddy | 重新认证与明确确认后绑定和依赖grant失效；取消操作零变更；无替代登录方式时安全阻止锁死 |
+| RC-M0 | 0个商家 | 不签发code；创建/加入商家的每一步均需服务端验证，不能自动产生占位租户 |
+| RC-M1 | 1个商家 | 展示唯一商家但仍要求consent；Token只访问该商家，替换对象ID不能跨租户 |
+| RC-MN | 多个商家 | 无默认选择；一次只授权一个商家；切换需重新授权，旧grant不能继续操作原商家 |
+| RC-12 | Membership变化 | consent后、发code前、换Token时或调用时撤销Membership，系统均拒绝且不泄露资源存在性 |
+| RC-13 | 配置矩阵 | 逐项缺少数据库、签名/HMAC key、session/CSRF、Connector回调或WorkBuddy第三方应用配置时对应能力fail closed；页面不显示虚假成功 |
+| RC-14 | 安全展示与审计 | 页面、错误、URL、日志和审计扫描不含Token、code、verifier、secret、`open_id`或HMAC原料；可用trace ID定位结果 |
+
+### 14.8 阶段声明与明确未完成项
+
+只有第14.7节表内全部用例在本地测试配置、MySQL测试库和可编程WorkBuddy提供方模拟器上通过，且非test环境无法装配测试身份/密钥时，才可声明“真实配置接入契约已在本地验证”。该声明仍不等于“真实WorkBuddy账号已接通”。
+
+以下事项在`f81b53a`均未完成，本节也不把它们改写为完成：
+
+- 平台真实账号认证提供方、登录会话、重新认证、CSRF与账号恢复实现。
+- 服务端OAuth consent记录、单商家grant、0商家创建/邀请以及多商家选择实现。
+- MySQL生产OAuth仓储、正式签名/JWKS/HMAC密钥托管、撤销端点与失效传播。
+- WorkBuddy真实第三方应用client/secret、回调、Open API scope、服务端换票和真实`open_id`验证。
+- 外部身份解绑、冲突工单、人工迁移/双人审批、账号合并或数据保留政策。
+- 正式HTTPS OAuth/MCP部署、目标WorkBuddy客户端实机、Connector审核、监控告警和生产发布。
+
+对外进度必须分级表达：文档完成后是“接入契约已定义”；实现并通过本地模拟验收后才是“配置可接入的本地实现已验证”；只有未来使用受控非生产真实配置跑通并留存脱敏证据后，才能称“WorkBuddy沙箱/测试环境已接通”；生产可用必须另行验收。
+
+### 14.9 当前实现边界
+
+本轮已经交付第14章的一部分基础能力：Connector OAuth的MySQL摘要仓储与事务轮换、RFC 9207 `iss`、固定官方端点的WorkBuddy服务端换票客户端、一次性bridge state消费契约、`HMAC(issuer, client_id, open_id)`身份派生，以及不把回调参数当成可信登录结果的页面状态模型。没有写入真实凭据，也没有调用真实WorkBuddy。
+
+第14.7节尚未整体通过。平台登录/consent、bridge state与外部绑定MySQL事实、0/1/多商家选择、callback路由、正式签名/JWKS、binding resolver、撤销/解绑/恢复和完整本地E2E仍是下一增量；托管生产MySQL、真实第三方应用、远程部署、实机与审核继续未完成。因此当前只能称“账号与授权接入的首个本地实现增量”，不能称“配置可接入的本地实现已验证”或“WorkBuddy已接通”。

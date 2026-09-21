@@ -1,6 +1,16 @@
-import type { VerifiedExternalIdentity } from '@h5cs/domain';
+import { oauthMcpScope } from '@h5cs/domain';
+import type {
+  OAuthAuthorizationCodeRecord as DomainOAuthAuthorizationCodeRecord,
+  OAuthPublicClient as DomainOAuthPublicClient,
+  OAuthRefreshRotationResult as DomainOAuthRefreshRotationResult,
+  OAuthRefreshTokenContext as DomainOAuthRefreshTokenContext,
+  OAuthRefreshTokenRecord as DomainOAuthRefreshTokenRecord,
+  OAuthRefreshTokenReplacement as DomainOAuthRefreshTokenReplacement,
+  OAuthRepository as DomainOAuthRepository,
+  VerifiedExternalIdentity,
+} from '@h5cs/domain';
 
-export const MCP_SCOPE = 'mcp:tools' as const;
+export const MCP_SCOPE = oauthMcpScope;
 
 export type OAuthServerConfig = Readonly<{
   issuer: string;
@@ -14,51 +24,12 @@ export type OAuthServerConfig = Readonly<{
   refreshTokenTtlSeconds: number;
 }>;
 
-export type OAuthPublicClient = Readonly<{
-  clientId: string;
-  clientName?: string | undefined;
-  redirectUris: readonly string[];
-  createdAt: Date;
-}>;
-
-export type OAuthAuthorizationCodeRecord = Readonly<{
-  codeDigest: Uint8Array;
-  clientId: string;
-  redirectUri: string;
-  resource: string;
-  scope: typeof MCP_SCOPE;
-  codeChallenge: string;
-  bindingId: string;
-  expiresAt: Date;
-  createdAt: Date;
-}>;
-
-export type OAuthRefreshTokenRecord = Readonly<{
-  tokenDigest: Uint8Array;
-  familyId: string;
-  clientId: string;
-  bindingId: string;
-  resource: string;
-  scope: typeof MCP_SCOPE;
-  expiresAt: Date;
-  createdAt: Date;
-}>;
-
-export type OAuthRefreshTokenReplacement = Readonly<{
-  tokenDigest: Uint8Array;
-  expiresAt: Date;
-  createdAt: Date;
-}>;
-
-export type OAuthRefreshTokenContext = Readonly<{
-  clientId: string;
-  resource: string;
-  scope: typeof MCP_SCOPE;
-}>;
-
-export type OAuthRefreshRotationResult =
-  | Readonly<{ status: 'rotated'; previous: OAuthRefreshTokenRecord }>
-  | Readonly<{ status: 'invalid' | 'replayed' }>;
+export type OAuthPublicClient = DomainOAuthPublicClient;
+export type OAuthAuthorizationCodeRecord = DomainOAuthAuthorizationCodeRecord;
+export type OAuthRefreshTokenRecord = DomainOAuthRefreshTokenRecord;
+export type OAuthRefreshTokenReplacement = DomainOAuthRefreshTokenReplacement;
+export type OAuthRefreshTokenContext = DomainOAuthRefreshTokenContext;
+export type OAuthRefreshRotationResult = DomainOAuthRefreshRotationResult;
 
 export type McpAccessTokenClaims = Readonly<{
   subject: string;
@@ -67,28 +38,7 @@ export type McpAccessTokenClaims = Readonly<{
   expiresAt: number;
 }>;
 
-export interface OAuthRepository {
-  assertReady(): Promise<void>;
-  registerPublicClient(client: OAuthPublicClient): Promise<void>;
-  findPublicClient(clientId: string): Promise<OAuthPublicClient | null>;
-  storeAuthorizationCode(record: OAuthAuthorizationCodeRecord): Promise<void>;
-  /** Atomically marks an unexpired code used and returns it at most once. */
-  consumeAuthorizationCode(
-    codeDigest: Uint8Array,
-    now: Date,
-  ): Promise<OAuthAuthorizationCodeRecord | null>;
-  storeRefreshToken(record: OAuthRefreshTokenRecord): Promise<void>;
-  /**
-   * Atomically validates the client/resource/scope and rotates an active token. Reuse or a context
-   * mismatch must revoke the whole family before returning a failure.
-   */
-  rotateRefreshToken(
-    tokenDigest: Uint8Array,
-    replacement: OAuthRefreshTokenReplacement,
-    expected: OAuthRefreshTokenContext,
-    now: Date,
-  ): Promise<OAuthRefreshRotationResult>;
-}
+export type OAuthRepository = DomainOAuthRepository;
 
 export interface OAuthAccessTokenCodec {
   assertReady(): Promise<void>;

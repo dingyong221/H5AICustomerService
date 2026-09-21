@@ -13,6 +13,7 @@ export const oauthAuthorizationServerMetadataSchema = z
     code_challenge_methods_supported: z.tuple([z.literal('S256')]),
     token_endpoint_auth_methods_supported: z.tuple([z.literal('none')]),
     scopes_supported: z.tuple([z.literal('mcp:tools')]),
+    authorization_response_iss_parameter_supported: z.literal(true),
   })
   .strict();
 
