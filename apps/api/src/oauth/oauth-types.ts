@@ -48,7 +48,7 @@ export interface OAuthAccessTokenCodec {
 
 export interface OAuthIdentityBindingResolver {
   assertReady(): Promise<void>;
-  resolve(bindingId: string): Promise<VerifiedExternalIdentity>;
+  resolve(bindingId: string, context: OAuthAuthorizationContext): Promise<VerifiedExternalIdentity>;
 }
 
 export type OAuthAuthorizationContext = Readonly<{

@@ -24,6 +24,7 @@ type OAuthClientRow = RowDataPacket & {
 };
 
 type OAuthCodeRow = RowDataPacket & {
+  consent_grant_id: Buffer;
   client_id: string;
   redirect_uri: string;
   resource: string;
@@ -33,11 +34,26 @@ type OAuthCodeRow = RowDataPacket & {
   expires_at: Date;
   consumed_at: Date | null;
   created_at: Date;
+  grant_binding_id: string;
+  grant_status: string;
+  grant_revoked_at: Date | null;
+  transaction_digest: Buffer;
+  transaction_step: string;
+  transaction_consumed_at: Date | null;
+  transaction_expires_at: Date;
+  transaction_redirect_uri: string;
+  transaction_code_challenge: string;
+  account_status: string;
+  merchant_status: string;
+  membership_status: string;
+  identity_status: string;
+  identity_revoked_at: Date | null;
 };
 
 type OAuthRefreshRow = RowDataPacket & {
   family_id_digest: Buffer;
   family_id: string;
+  consent_grant_id: Buffer;
   client_id: string;
   binding_id: string;
   resource: string;
@@ -46,10 +62,44 @@ type OAuthRefreshRow = RowDataPacket & {
   expires_at: Date;
   used_at: Date | null;
   created_at: Date;
+  grant_binding_id: string;
+  grant_status: string;
+  grant_revoked_at: Date | null;
+  account_status: string;
+  merchant_status: string;
+  membership_status: string;
+  identity_status: string;
+  identity_revoked_at: Date | null;
+};
+
+type GrantContextRow = RowDataPacket & {
+  id: Buffer;
+  binding_id: string;
+  client_id: string;
+  resource: string;
+  scope: string;
+  status: string;
+  revoked_at: Date | null;
+  authorization_transaction_digest: Buffer;
+  transaction_step: string;
+  transaction_consumed_at: Date | null;
+  transaction_expires_at: Date;
+  account_status: string;
+  merchant_status: string;
+  membership_status: string;
+  identity_status: string;
+  identity_revoked_at: Date | null;
 };
 
 const digestOpaqueId = (value: string): Buffer =>
   createHash('sha256').update(value, 'utf8').digest();
+
+const idBuffer = (value: string, field: string): Buffer => {
+  if (!/^[0-9a-f]{32}$/iu.test(value)) {
+    throw new OAuthPersistenceError(`${field} must be a 32-character hex ID`);
+  }
+  return Buffer.from(value, 'hex');
+};
 
 const strictDigest = (value: Uint8Array, field: string): Buffer => {
   if (value.byteLength !== 32) {
@@ -95,6 +145,7 @@ const rowToCode = (row: OAuthCodeRow, codeDigest: Uint8Array): OAuthAuthorizatio
   scope: requireScope(row.scope),
   codeChallenge: row.code_challenge,
   bindingId: row.binding_id,
+  consentGrantId: row.consent_grant_id.toString('hex'),
   expiresAt: row.expires_at,
   createdAt: row.created_at,
 });
@@ -104,6 +155,7 @@ const rowToRefresh = (row: OAuthRefreshRow, tokenDigest: Uint8Array): OAuthRefre
   familyId: row.family_id,
   clientId: row.client_id,
   bindingId: row.binding_id,
+  consentGrantId: row.consent_grant_id.toString('hex'),
   resource: row.resource,
   scope: requireScope(row.scope),
   expiresAt: row.expires_at,
@@ -178,27 +230,12 @@ export class MySqlOAuthRepository implements OAuthRepository {
   }
 
   public async storeAuthorizationCode(record: OAuthAuthorizationCodeRecord): Promise<void> {
-    const codeDigest = strictDigest(record.codeDigest, 'codeDigest');
+    strictDigest(record.codeDigest, 'codeDigest');
     this.#validateAuthorizationCode(record);
-    await this.#withConnection(async (connection) => {
-      await connection.execute(
-        `INSERT INTO oauth_authorization_code
-           (code_digest, client_id_digest, redirect_uri, resource, scope, code_challenge,
-            binding_id, expires_at, consumed_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
-        [
-          codeDigest,
-          digestOpaqueId(record.clientId),
-          record.redirectUri,
-          record.resource,
-          record.scope,
-          record.codeChallenge,
-          record.bindingId,
-          record.expiresAt,
-          record.createdAt,
-        ],
-      );
-    });
+    idBuffer(record.consentGrantId ?? '', 'consentGrantId');
+    throw new OAuthPersistenceError(
+      'Authorization code issuance requires atomic consent activation',
+    );
   }
 
   public async consumeAuthorizationCode(
@@ -209,10 +246,33 @@ export class MySqlOAuthRepository implements OAuthRepository {
     validDate(now, 'now');
     return this.#withTransaction(async (connection) => {
       const [rows] = await connection.execute<OAuthCodeRow[]>(
-        `SELECT c.client_id, a.redirect_uri, a.resource, a.scope, a.code_challenge,
-                a.binding_id, a.expires_at, a.consumed_at, a.created_at
+        `SELECT a.consent_grant_id, c.client_id, a.redirect_uri, a.resource, a.scope,
+                a.code_challenge, a.binding_id, a.expires_at, a.consumed_at, a.created_at,
+                g.binding_id AS grant_binding_id, g.status AS grant_status,
+                g.revoked_at AS grant_revoked_at,
+                t.transaction_digest, t.step AS transaction_step,
+                t.consumed_at AS transaction_consumed_at,
+                t.expires_at AS transaction_expires_at,
+                u.status AS account_status, m.status AS merchant_status,
+                mm.status AS membership_status, e.status AS identity_status,
+                e.revoked_at AS identity_revoked_at
            FROM oauth_authorization_code a
            JOIN oauth_public_client c ON c.client_id_digest = a.client_id_digest
+           JOIN connector_consent_grant g
+             ON g.id = a.consent_grant_id
+            AND g.client_id_digest = a.client_id_digest
+            AND g.binding_id = a.binding_id AND g.resource = a.resource AND g.scope = a.scope
+           JOIN connector_authorization_transaction t
+             ON t.transaction_digest = g.authorization_transaction_digest
+            AND t.client_id_digest = a.client_id_digest
+            AND t.redirect_uri = a.redirect_uri AND t.resource = a.resource
+            AND t.scope = a.scope AND t.code_challenge = a.code_challenge
+           JOIN merchant_user u ON u.id = g.merchant_user_id
+           JOIN merchant m ON m.id = g.merchant_id
+           JOIN merchant_membership mm
+             ON mm.merchant_id = g.merchant_id AND mm.merchant_user_id = g.merchant_user_id
+           JOIN external_identity e
+             ON e.id = g.external_identity_id AND e.merchant_user_id = g.merchant_user_id
           WHERE a.code_digest = ?
           LIMIT 1
           FOR UPDATE`,
@@ -222,7 +282,18 @@ export class MySqlOAuthRepository implements OAuthRepository {
       if (
         row === undefined ||
         row.consumed_at !== null ||
-        row.expires_at.getTime() <= now.getTime()
+        row.expires_at.getTime() <= now.getTime() ||
+        row.grant_binding_id !== row.binding_id ||
+        row.grant_status !== 'active' ||
+        row.grant_revoked_at !== null ||
+        row.transaction_step !== 'code_issued' ||
+        row.transaction_consumed_at !== null ||
+        row.transaction_expires_at.getTime() <= now.getTime() ||
+        row.account_status !== 'active' ||
+        row.merchant_status !== 'active' ||
+        row.membership_status !== 'active' ||
+        row.identity_status !== 'active' ||
+        row.identity_revoked_at !== null
       ) {
         return null;
       }
@@ -233,6 +304,15 @@ export class MySqlOAuthRepository implements OAuthRepository {
         [now, codeDigest],
       );
       if (result.affectedRows !== 1) return null;
+      const [transactionResult] = await connection.execute<ResultSetHeader>(
+        `UPDATE connector_authorization_transaction
+            SET step = 'consumed', consumed_at = ?, updated_at = ?
+          WHERE transaction_digest = ? AND step = 'code_issued' AND consumed_at IS NULL`,
+        [now, now, row.transaction_digest],
+      );
+      if (transactionResult.affectedRows !== 1) {
+        throw new OAuthPersistenceError('Authorization transaction changed during code consume');
+      }
       return rowToCode(row, Uint8Array.from(codeDigest));
     });
   }
@@ -241,16 +321,29 @@ export class MySqlOAuthRepository implements OAuthRepository {
     const tokenDigest = strictDigest(record.tokenDigest, 'tokenDigest');
     this.#validateRefreshRecord(record);
     const familyIdDigest = digestOpaqueId(record.familyId);
+    const consentGrantId = idBuffer(record.consentGrantId ?? '', 'consentGrantId');
     await this.#withTransaction(async (connection) => {
+      const grant = await this.#lockGrant(connection, consentGrantId);
+      if (
+        grant === null ||
+        !this.#isActiveGrant(grant) ||
+        grant.binding_id !== record.bindingId ||
+        grant.client_id !== record.clientId ||
+        grant.resource !== record.resource ||
+        grant.scope !== record.scope
+      ) {
+        throw new OAuthPersistenceError('Refresh-token grant is unavailable');
+      }
       await connection.execute(
         `INSERT INTO oauth_refresh_token_family
-           (family_id_digest, family_id, client_id_digest, binding_id, resource, scope,
-            revoked_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`,
+           (family_id_digest, family_id, client_id_digest, consent_grant_id, binding_id,
+            resource, scope, revoked_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
         [
           familyIdDigest,
           record.familyId,
           digestOpaqueId(record.clientId),
+          consentGrantId,
           record.bindingId,
           record.resource,
           record.scope,
@@ -285,11 +378,27 @@ export class MySqlOAuthRepository implements OAuthRepository {
 
     return this.#withTransaction(async (connection) => {
       const [rows] = await connection.execute<OAuthRefreshRow[]>(
-        `SELECT t.family_id_digest, f.family_id, c.client_id, f.binding_id, f.resource, f.scope,
-                f.revoked_at AS family_revoked_at, t.expires_at, t.used_at, t.created_at
+        `SELECT t.family_id_digest, f.family_id, f.consent_grant_id, c.client_id,
+                f.binding_id, f.resource, f.scope, f.revoked_at AS family_revoked_at,
+                t.expires_at, t.used_at, t.created_at,
+                g.binding_id AS grant_binding_id, g.status AS grant_status,
+                g.revoked_at AS grant_revoked_at,
+                u.status AS account_status, m.status AS merchant_status,
+                mm.status AS membership_status, e.status AS identity_status,
+                e.revoked_at AS identity_revoked_at
            FROM oauth_refresh_token t
            JOIN oauth_refresh_token_family f ON f.family_id_digest = t.family_id_digest
            JOIN oauth_public_client c ON c.client_id_digest = f.client_id_digest
+           JOIN connector_consent_grant g
+             ON g.id = f.consent_grant_id
+            AND g.client_id_digest = f.client_id_digest
+            AND g.binding_id = f.binding_id AND g.resource = f.resource AND g.scope = f.scope
+           JOIN merchant_user u ON u.id = g.merchant_user_id
+           JOIN merchant m ON m.id = g.merchant_id
+           JOIN merchant_membership mm
+             ON mm.merchant_id = g.merchant_id AND mm.merchant_user_id = g.merchant_user_id
+           JOIN external_identity e
+             ON e.id = g.external_identity_id AND e.merchant_user_id = g.merchant_user_id
           WHERE t.token_digest = ?
           LIMIT 1
           FOR UPDATE`,
@@ -303,6 +412,14 @@ export class MySqlOAuthRepository implements OAuthRepository {
         return { status: 'replayed' };
       }
       if (
+        row.grant_binding_id !== row.binding_id ||
+        row.grant_status !== 'active' ||
+        row.grant_revoked_at !== null ||
+        row.account_status !== 'active' ||
+        row.merchant_status !== 'active' ||
+        row.membership_status !== 'active' ||
+        row.identity_status !== 'active' ||
+        row.identity_revoked_at !== null ||
         row.client_id !== expected.clientId ||
         row.resource !== expected.resource ||
         row.scope !== expected.scope
@@ -333,6 +450,47 @@ export class MySqlOAuthRepository implements OAuthRepository {
         previous: rowToRefresh(row, Uint8Array.from(tokenDigest)),
       };
     });
+  }
+
+  async #lockGrant(connection: Connection, grantId: Buffer): Promise<GrantContextRow | null> {
+    const [rows] = await connection.execute<GrantContextRow[]>(
+      `SELECT g.id, g.binding_id, c.client_id, g.resource, g.scope, g.status, g.revoked_at,
+              g.authorization_transaction_digest, t.step AS transaction_step,
+              t.consumed_at AS transaction_consumed_at,
+              t.expires_at AS transaction_expires_at,
+              t.redirect_uri AS transaction_redirect_uri,
+              t.code_challenge AS transaction_code_challenge,
+              u.status AS account_status, m.status AS merchant_status,
+              mm.status AS membership_status, e.status AS identity_status,
+              e.revoked_at AS identity_revoked_at
+         FROM connector_consent_grant g
+         JOIN connector_authorization_transaction t
+           ON t.transaction_digest = g.authorization_transaction_digest
+         JOIN oauth_public_client c ON c.client_id_digest = g.client_id_digest
+         JOIN merchant_user u ON u.id = g.merchant_user_id
+         JOIN merchant m ON m.id = g.merchant_id
+         JOIN merchant_membership mm
+           ON mm.merchant_id = g.merchant_id AND mm.merchant_user_id = g.merchant_user_id
+         JOIN external_identity e
+           ON e.id = g.external_identity_id AND e.merchant_user_id = g.merchant_user_id
+        WHERE g.id = ?
+        LIMIT 1
+        FOR UPDATE`,
+      [grantId],
+    );
+    return rows[0] ?? null;
+  }
+
+  #isActiveGrant(grant: GrantContextRow): boolean {
+    return (
+      grant.status === 'active' &&
+      grant.revoked_at === null &&
+      grant.account_status === 'active' &&
+      grant.merchant_status === 'active' &&
+      grant.membership_status === 'active' &&
+      grant.identity_status === 'active' &&
+      grant.identity_revoked_at === null
+    );
   }
 
   #validateAuthorizationCode(record: OAuthAuthorizationCodeRecord): void {

@@ -22,6 +22,8 @@ export type OAuthAuthorizationCodeRecord = Readonly<{
   scope: typeof oauthMcpScope;
   codeChallenge: string;
   bindingId: string;
+  /** Required by durable MySQL persistence; omitted callers must fail closed. */
+  consentGrantId?: string | undefined;
   expiresAt: Date;
   createdAt: Date;
 }>;
@@ -31,6 +33,8 @@ export type OAuthRefreshTokenRecord = Readonly<{
   familyId: string;
   clientId: string;
   bindingId: string;
+  /** Required by durable MySQL persistence; omitted callers must fail closed. */
+  consentGrantId?: string | undefined;
   resource: string;
   scope: typeof oauthMcpScope;
   expiresAt: Date;

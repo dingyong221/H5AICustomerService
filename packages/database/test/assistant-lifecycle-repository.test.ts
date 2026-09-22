@@ -1,0 +1,443 @@
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+
+import { describe, expect, it, vi } from 'vitest';
+
+import {
+  AssistantIdempotencyConflictError,
+  AssistantRevisionConflictError,
+  toAssistantId,
+  toMerchantId,
+  toMerchantUserId,
+  toOnboardingSessionId,
+} from '@h5cs/domain';
+import type { AssistantDraftConfig } from '@h5cs/domain';
+import type { Connection, ResultSetHeader } from 'mysql2/promise';
+
+import type { DatabaseConnectionConfig } from '../src/config.js';
+import { MySqlAssistantLifecycleRepository } from '../src/assistant-lifecycle-repository.js';
+
+type SqlCall = Readonly<{ statement: string; values: readonly unknown[] }>;
+
+const digest = (fill: number): Uint8Array => new Uint8Array(32).fill(fill);
+const now = new Date('2026-09-21T12:00:00.000Z');
+const later = new Date('2026-09-22T12:00:00.000Z');
+const merchantId = toMerchantId('11'.repeat(16));
+const merchantUserId = toMerchantUserId('22'.repeat(16));
+const onboardingSessionId = toOnboardingSessionId('33'.repeat(16));
+const assistantId = toAssistantId('44'.repeat(16));
+const releaseId = '55'.repeat(16);
+const activeReleaseId = Buffer.from('99'.repeat(16), 'hex');
+const publicSlug = 'a-abcdefghijklmnop';
+
+const idem = {
+  actorScopeDigest: digest(1),
+  keyDigest: digest(2),
+  requestHash: digest(3),
+  expiresAt: later,
+};
+
+const resultHeader = (affectedRows = 1): ResultSetHeader => ({ affectedRows }) as ResultSetHeader;
+
+const managementRow = (overrides: Record<string, unknown> = {}) => ({
+  assistant_id: Buffer.from(assistantId, 'hex'),
+  merchant_id: Buffer.from(merchantId, 'hex'),
+  display_name: '蓝天服务客服',
+  public_slug: publicSlug,
+  status: 'draft_only',
+  draft_revision: 1,
+  config: {
+    industry: 'home-service',
+    businessScope: '空调清洗服务咨询',
+    materialsSummary: '空调清洗服务手册',
+    pricingSummary: '挂机清洗：100 CNY',
+    promotionSummary: '已确认暂无优惠信息',
+    welcomeMessage: '你好，我是蓝天服务客服。',
+    insufficientInfoMessage: '当前资料不足，请联系商家确认。',
+  },
+  active_release_id: null,
+  created_at: now,
+  updated_at: now,
+  membership_status: 'active',
+  merchant_status: 'active',
+  ...overrides,
+});
+
+const repositoryWith = (
+  handler: (statement: string, values: readonly unknown[]) => Promise<unknown>,
+  ids: readonly Buffer[] = [],
+) => {
+  const calls: SqlCall[] = [];
+  const beginTransaction = vi.fn(async () => undefined);
+  const commit = vi.fn(async () => undefined);
+  const rollback = vi.fn(async () => undefined);
+  const end = vi.fn(async () => undefined);
+  const connection = {
+    execute: async (statement: string, values: readonly unknown[] = []) => {
+      calls.push({ statement, values });
+      return handler(statement, values);
+    },
+    beginTransaction,
+    commit,
+    rollback,
+    end,
+  } as unknown as Connection;
+  const config: DatabaseConnectionConfig = {
+    openConnection: async () => connection,
+    summary: { host: 'test', database: 'test', tlsRequested: false },
+    toJSON: () => ({ host: 'test', database: 'test', tlsRequested: false }),
+  };
+  const queue = [...ids];
+  return {
+    repository: new MySqlAssistantLifecycleRepository(config, {
+      id: () => queue.shift() ?? Buffer.from('fe'.repeat(16), 'hex'),
+      slug: () => publicSlug,
+    }),
+    calls,
+    beginTransaction,
+    commit,
+    rollback,
+  };
+};
+
+describe('MySQL assistant lifecycle repository', () => {
+  it('adds safe display/slug facts and a composite active-release mapping', async () => {
+    const sql = await readFile(
+      resolve(process.cwd(), 'migrations/0005_striped_jack_murdock.sql'),
+      'utf8',
+    );
+
+    expect(sql).toContain('`display_name` varchar(200) NOT NULL');
+    expect(sql).toContain('`public_slug_digest` binary(32) NOT NULL');
+    expect(sql).toContain('`draft_revision` int unsigned NOT NULL');
+    expect(sql).toContain('fk_assistant_active_release_assistant');
+    expect(sql).toContain('fk_assistant_active_release_release');
+    expect(sql).toContain('ENGINE=InnoDB');
+  });
+
+  it('creates one assistant and draft from a complete locked onboarding session', async () => {
+    const { repository, calls, commit } = repositoryWith(
+      async (statement) => {
+        if (statement.includes('SELECT s.answers')) {
+          return [
+            [
+              {
+                answers: {
+                  businessName: '蓝天服务',
+                  businessDescription: '空调清洗服务咨询',
+                  industryCode: 'home-service',
+                  materials: [{ summary: '空调清洗服务手册' }],
+                  pricingPolicy: {
+                    availability: 'provided',
+                    facts: [{ offeringName: '挂机清洗', amount: '100', currency: 'CNY' }],
+                  },
+                  promotionPolicy: { availability: 'none_confirmed', facts: [] },
+                  insufficientFactPolicy: 'contact_merchant',
+                  merchantConfirmed: true,
+                },
+                missing_items: [],
+                version: 7,
+              },
+            ],
+            [],
+          ];
+        }
+        return [resultHeader(), []];
+      },
+      [
+        Buffer.from('66'.repeat(16), 'hex'),
+        Buffer.from(assistantId, 'hex'),
+        Buffer.from('77'.repeat(16), 'hex'),
+      ],
+    );
+
+    await expect(
+      repository.generateDraftFromOnboarding({
+        merchantUserId,
+        merchantId,
+        onboardingSessionId,
+        idempotency: idem,
+        now,
+      }),
+    ).resolves.toMatchObject({
+      assistantId,
+      merchantId,
+      displayName: '蓝天服务客服',
+      publicSlug,
+      status: 'draft_only',
+      draftRevision: 1,
+      draft: {
+        industry: 'home-service',
+        materialsSummary: '空调清洗服务手册',
+        pricingSummary: '挂机清洗：100 CNY',
+        promotionSummary: '已确认暂无优惠信息',
+      },
+    });
+    expect(publicSlug).toMatch(/^[a-z0-9-]{1,63}$/u);
+
+    expect(calls[0]?.statement).toMatch(/INSERT INTO idempotency_record/u);
+    expect(calls[1]?.statement).toMatch(/state = 'generating'[\s\S]*FOR UPDATE/u);
+    expect(calls[2]?.statement).toMatch(/INSERT INTO assistant/u);
+    expect(calls[3]?.statement).toMatch(/INSERT INTO assistant_draft/u);
+    expect(calls[4]?.statement).toMatch(/state = 'manageable'/u);
+    expect(calls[5]?.statement).toMatch(/state = 'succeeded'/u);
+    expect(calls[6]?.statement).toMatch(/INSERT INTO outbox_event/u);
+    expect(commit).toHaveBeenCalledOnce();
+  });
+
+  it('returns the original generated assistant after an idempotency race', async () => {
+    const duplicate = Object.assign(new Error('duplicate'), { code: 'ER_DUP_ENTRY' });
+    const { repository, calls, rollback } = repositoryWith(async (statement) => {
+      if (statement.includes('INSERT INTO idempotency_record')) throw duplicate;
+      if (statement.includes('SELECT request_hash')) {
+        return [
+          [
+            {
+              request_hash: Buffer.from(idem.requestHash),
+              state: 'succeeded',
+              resource_id: Buffer.from(assistantId, 'hex'),
+              response_body: { assistantId },
+            },
+          ],
+          [],
+        ];
+      }
+      if (statement.includes('FROM assistant a')) return [[managementRow()], []];
+      throw new Error('unexpected SQL');
+    });
+
+    await expect(
+      repository.generateDraftFromOnboarding({
+        merchantUserId,
+        merchantId,
+        onboardingSessionId,
+        idempotency: idem,
+        now,
+      }),
+    ).resolves.toMatchObject({ assistantId, draftRevision: 1 });
+    expect(calls.some((call) => call.statement.includes('INSERT INTO assistant'))).toBe(false);
+    expect(rollback).toHaveBeenCalledOnce();
+  });
+
+  it('rejects an idempotency key reused with another request hash', async () => {
+    const duplicate = Object.assign(new Error('duplicate'), { code: 'ER_DUP_ENTRY' });
+    const { repository } = repositoryWith(async (statement) => {
+      if (statement.includes('INSERT INTO idempotency_record')) throw duplicate;
+      return [
+        [
+          {
+            request_hash: Buffer.from(digest(99)),
+            state: 'succeeded',
+            resource_id: Buffer.from(assistantId, 'hex'),
+            response_body: { assistantId },
+          },
+        ],
+        [],
+      ];
+    });
+
+    await expect(
+      repository.generateDraftFromOnboarding({
+        merchantUserId,
+        merchantId,
+        onboardingSessionId,
+        idempotency: idem,
+        now,
+      }),
+    ).rejects.toBeInstanceOf(AssistantIdempotencyConflictError);
+  });
+
+  it('uses tenant-qualified management reads and rejects stale draft revisions', async () => {
+    const { repository, calls, rollback } = repositoryWith(async (statement) => {
+      if (statement.includes('FOR UPDATE')) return [[managementRow({ draft_revision: 2 })], []];
+      return [[], []];
+    });
+
+    await expect(repository.findManagementSnapshot(merchantId, assistantId)).resolves.toBeNull();
+    await expect(
+      repository.saveDraft({
+        merchantUserId,
+        merchantId,
+        assistantId,
+        expectedRevision: 1,
+        draft: managementRow().config as AssistantDraftConfig,
+        now,
+      }),
+    ).rejects.toBeInstanceOf(AssistantRevisionConflictError);
+    expect(calls[0]?.statement).toMatch(/a\.merchant_id = \? AND a\.id = \?/u);
+    expect(rollback).toHaveBeenCalledOnce();
+  });
+
+  it('saves a draft with an optimistic revision without changing active release', async () => {
+    const { repository, calls } = repositoryWith(async (statement) => {
+      if (statement.includes('FOR UPDATE')) {
+        return [[managementRow({ active_release_id: activeReleaseId, status: 'active' })], []];
+      }
+      return [resultHeader(), []];
+    });
+
+    await expect(
+      repository.saveDraft({
+        merchantUserId,
+        merchantId,
+        assistantId,
+        expectedRevision: 1,
+        draft: {
+          industry: 'home-service',
+          businessScope: '更新后的业务范围',
+          materialsSummary: '空调清洗服务手册',
+          pricingSummary: '挂机清洗：100 CNY',
+          promotionSummary: '已确认暂无优惠信息',
+          welcomeMessage: '欢迎咨询。',
+          insufficientInfoMessage: '资料不足时请联系商家。',
+        },
+        now,
+      }),
+    ).resolves.toMatchObject({
+      draftRevision: 2,
+      activeReleaseId: activeReleaseId.toString('hex'),
+    });
+    expect(calls[1]?.statement).toMatch(
+      /WHERE merchant_id = \? AND assistant_id = \? AND revision = \?/u,
+    );
+    expect(calls[2]?.statement).not.toMatch(/active_release_id/u);
+  });
+
+  it('publishes an immutable monotonic release and switches the active mapping atomically', async () => {
+    const { repository, calls, commit } = repositoryWith(
+      async (statement) => {
+        if (statement.includes('FROM assistant a') && statement.includes('FOR UPDATE')) {
+          return [[managementRow({ active_release_id: activeReleaseId, status: 'active' })], []];
+        }
+        if (statement.includes('SELECT release_no')) return [[{ release_no: 2 }], []];
+        return [resultHeader(), []];
+      },
+      [
+        Buffer.from('66'.repeat(16), 'hex'),
+        Buffer.from(releaseId, 'hex'),
+        Buffer.from('77'.repeat(16), 'hex'),
+      ],
+    );
+
+    await expect(
+      repository.publish({
+        merchantUserId,
+        merchantId,
+        assistantId,
+        expectedDraftRevision: 1,
+        promptTemplateVersion: 'prompt-v1',
+        retrievalPolicyVersion: 'retrieval-v1',
+        modelPolicyVersion: 'model-v1',
+        idempotency: idem,
+        now,
+      }),
+    ).resolves.toMatchObject({ releaseId, releaseNo: 3, draftRevision: 1, status: 'active' });
+
+    expect(calls[1]?.statement).toMatch(/merchant_membership[\s\S]*FOR UPDATE/u);
+    expect(calls[2]?.statement).toMatch(/ORDER BY release_no DESC[\s\S]*FOR UPDATE/u);
+    expect(calls[4]?.statement).toMatch(/INSERT INTO assistant_release/u);
+    expect(calls[5]?.statement).toMatch(/INSERT INTO assistant_active_release/u);
+    expect(calls[6]?.statement).toMatch(/SET active_release_id = \?, status = 'active'/u);
+    expect(calls[7]?.statement).toMatch(/state = 'succeeded'/u);
+    expect(calls[8]?.statement).toMatch(/INSERT INTO outbox_event/u);
+    expect(commit).toHaveBeenCalledOnce();
+  });
+
+  it('returns the same release for a repeated publish idempotency key', async () => {
+    const duplicate = Object.assign(new Error('duplicate'), { code: 'ER_DUP_ENTRY' });
+    const { repository, calls, rollback } = repositoryWith(async (statement) => {
+      if (statement.includes('INSERT INTO idempotency_record')) throw duplicate;
+      if (statement.includes('SELECT request_hash')) {
+        return [
+          [
+            {
+              request_hash: Buffer.from(idem.requestHash),
+              state: 'succeeded',
+              resource_id: Buffer.from(releaseId, 'hex'),
+              response_body: { releaseId },
+            },
+          ],
+          [],
+        ];
+      }
+      if (statement.includes('FROM assistant_release')) {
+        return [
+          [
+            {
+              release_id: Buffer.from(releaseId, 'hex'),
+              merchant_id: Buffer.from(merchantId, 'hex'),
+              assistant_id: Buffer.from(assistantId, 'hex'),
+              release_no: 3,
+              draft_revision: 1,
+              created_at: now,
+              activated_at: now,
+            },
+          ],
+          [],
+        ];
+      }
+      throw new Error('unexpected SQL');
+    });
+
+    await expect(
+      repository.publish({
+        merchantUserId,
+        merchantId,
+        assistantId,
+        expectedDraftRevision: 1,
+        promptTemplateVersion: 'prompt-v1',
+        retrievalPolicyVersion: 'retrieval-v1',
+        modelPolicyVersion: 'model-v1',
+        idempotency: idem,
+        now,
+      }),
+    ).resolves.toMatchObject({ releaseId, releaseNo: 3, draftRevision: 1 });
+    expect(calls.some((call) => call.statement.includes('INSERT INTO assistant_release'))).toBe(
+      false,
+    );
+    expect(rollback).toHaveBeenCalledOnce();
+  });
+
+  it('returns only an active published public snapshot and unifies negative lookups as null', async () => {
+    let returnPublic = true;
+    const { repository, calls } = repositoryWith(async (statement) => {
+      if (statement.includes('FROM assistant a') && returnPublic) {
+        return [
+          [
+            {
+              public_slug: publicSlug,
+              release_id: Buffer.from(releaseId, 'hex'),
+              merchant_name: '蓝天服务',
+              display_name: '蓝天服务客服',
+              config_snapshot: {
+                displayName: '蓝天服务客服',
+                industry: 'home-service',
+                businessScope: '空调清洗服务咨询',
+                materialsSummary: '空调清洗服务手册',
+                pricingSummary: '挂机清洗：100 CNY',
+                promotionSummary: '已确认暂无优惠信息',
+                welcomeMessage: '你好，我是蓝天服务客服。',
+                insufficientInfoMessage: '当前资料不足，请联系商家确认。',
+              },
+            },
+          ],
+          [],
+        ];
+      }
+      return [[], []];
+    });
+
+    await expect(repository.findPublicSnapshot(publicSlug)).resolves.toMatchObject({
+      publicAssistantId: publicSlug,
+      releaseRef: releaseId,
+      merchantName: '蓝天服务',
+      availability: 'online',
+    });
+    returnPublic = false;
+    await expect(repository.findPublicSnapshot(publicSlug)).resolves.toBeNull();
+    await expect(repository.findPublicSnapshot('A_INVALID_UPPERCASE')).resolves.toBeNull();
+    expect(calls[0]?.statement).toMatch(
+      /assistant_active_release[\s\S]*a\.status = 'active'[\s\S]*r\.status = 'active'[\s\S]*m\.status = 'active'/u,
+    );
+  });
+});

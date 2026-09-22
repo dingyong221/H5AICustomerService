@@ -11,6 +11,10 @@ import {
   skillIntentRequestSchema,
   skillIntentResultSchema,
   tenantContextSchema,
+  workBuddyAuthorizationCallbackQuerySchema,
+  workBuddyAuthorizationResultSchema,
+  workBuddyConsentRequestSchema,
+  workBuddyMerchantSelectionRequestSchema,
 } from '../src/index.js';
 
 describe('shared contracts', () => {
@@ -143,6 +147,73 @@ describe('shared contracts', () => {
         redirect_uri: 'http://127.0.0.1:43123/callback',
         code_verifier: 'v'.repeat(43),
         resource: 'https://h5cs.example.test/mcp',
+      }),
+    ).toThrow();
+  });
+
+  it('accepts only opaque WorkBuddy transaction references on actionable results', () => {
+    const transactionRef = 'a'.repeat(64);
+
+    expect(
+      workBuddyAuthorizationResultSchema.parse({
+        authorization_url: 'https://www.workbuddy.cn/openapi/v2/oauth/authorize?state=opaque-state',
+        status: 'signed_in',
+        transaction_ref: transactionRef,
+      }),
+    ).toMatchObject({ status: 'signed_in', transaction_ref: transactionRef });
+    expect(
+      workBuddyAuthorizationResultSchema.parse({
+        candidates: [
+          { candidate_ref: 'candidate_one', display_name: '蓝天家电服务' },
+          { candidate_ref: 'candidate_two', display_name: '青山维修' },
+        ],
+        status: 'merchant_selection_required',
+        transaction_ref: transactionRef,
+      }),
+    ).toMatchObject({
+      candidates: [{ candidate_ref: 'candidate_one' }, { candidate_ref: 'candidate_two' }],
+      status: 'merchant_selection_required',
+    });
+
+    for (const invalidReference of ['transaction_01', 'A'.repeat(64), 'a'.repeat(63)]) {
+      expect(() =>
+        workBuddyAuthorizationResultSchema.parse({
+          status: 'consent_required',
+          transaction_ref: invalidReference,
+        }),
+      ).toThrow();
+    }
+  });
+
+  it('rejects duplicate candidates and mutation bodies without an exact transaction reference', () => {
+    const transactionRef = 'b'.repeat(64);
+    const duplicateCandidate = { candidate_ref: 'candidate_one', display_name: '蓝天家电服务' };
+
+    expect(() =>
+      workBuddyAuthorizationResultSchema.parse({
+        candidates: [duplicateCandidate, duplicateCandidate],
+        status: 'merchant_selection_required',
+        transaction_ref: transactionRef,
+      }),
+    ).toThrow();
+    expect(() => workBuddyConsentRequestSchema.parse({ decision: 'grant' })).toThrow();
+    expect(() =>
+      workBuddyMerchantSelectionRequestSchema.parse({ candidate_ref: 'candidate_one' }),
+    ).toThrow();
+  });
+
+  it('keeps callback parameters separate from trusted authorization state', () => {
+    expect(
+      workBuddyAuthorizationCallbackQuerySchema.parse({
+        code: 'one-time-code',
+        state: 's'.repeat(32),
+      }),
+    ).toEqual({ code: 'one-time-code', state: 's'.repeat(32) });
+    expect(() =>
+      workBuddyAuthorizationCallbackQuerySchema.parse({
+        code: 'one-time-code',
+        open_id: 'caller-controlled',
+        state: 's'.repeat(32),
       }),
     ).toThrow();
   });

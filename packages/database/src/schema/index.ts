@@ -58,6 +58,40 @@ export const merchantUsers = mysqlTable(
   ],
 );
 
+export const platformLoginSessions = mysqlTable(
+  'platform_login_session',
+  {
+    sessionDigest: digest('session_digest').notNull(),
+    merchantUserId: id('merchant_user_id').notNull(),
+    csrfDigest: digest('csrf_digest').notNull(),
+    authenticationLevel: varchar('authentication_level', { length: 32 }).notNull(),
+    authenticatedAt: utcDateTime('authenticated_at').notNull(),
+    expiresAt: utcDateTime('expires_at').notNull(),
+    revokedAt: utcDateTime('revoked_at'),
+    createdAt: utcDateTime('created_at').notNull(),
+    updatedAt: utcDateTime('updated_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sessionDigest], name: 'pk_platform_login_session' }),
+    uniqueIndex('uq_platform_login_session_account').on(table.sessionDigest, table.merchantUserId),
+    index('idx_platform_login_session_user').on(
+      table.merchantUserId,
+      table.revokedAt,
+      table.expiresAt,
+    ),
+    index('idx_platform_login_session_expiry').on(
+      table.revokedAt,
+      table.expiresAt,
+      table.sessionDigest,
+    ),
+    foreignKey({
+      columns: [table.merchantUserId],
+      foreignColumns: [merchantUsers.id],
+      name: 'fk_platform_login_session_user',
+    }).onDelete('restrict'),
+  ],
+);
+
 export const externalIdentities = mysqlTable(
   'external_identity',
   {
@@ -81,6 +115,7 @@ export const externalIdentities = mysqlTable(
   },
   (table) => [
     primaryKey({ columns: [table.id], name: 'pk_external_identity' }),
+    uniqueIndex('uq_external_identity_account').on(table.id, table.merchantUserId),
     uniqueIndex('uq_external_identity_subject').on(
       table.provider,
       table.issuer,
@@ -160,6 +195,7 @@ export const connectorAuthorizationTransactions = mysqlTable(
     connectorStateDigest: digest('connector_state_digest').notNull(),
     step: varchar('step', { length: 64 }).notNull(),
     merchantUserId: id('merchant_user_id'),
+    externalIdentityId: id('external_identity_id'),
     merchantId: id('merchant_id'),
     candidateVersion: int('candidate_version', { unsigned: true }).notNull().default(0),
     expiresAt: utcDateTime('expires_at').notNull(),
@@ -195,6 +231,16 @@ export const connectorAuthorizationTransactions = mysqlTable(
       name: 'fk_connector_authorization_user',
     }).onDelete('restrict'),
     foreignKey({
+      columns: [table.loginSessionDigest, table.merchantUserId],
+      foreignColumns: [platformLoginSessions.sessionDigest, platformLoginSessions.merchantUserId],
+      name: 'fk_connector_authorization_session',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.externalIdentityId, table.merchantUserId],
+      foreignColumns: [externalIdentities.id, externalIdentities.merchantUserId],
+      name: 'fk_connector_authorization_identity',
+    }).onDelete('restrict'),
+    foreignKey({
       columns: [table.merchantId],
       foreignColumns: [merchants.id],
       name: 'fk_connector_authorization_merchant',
@@ -211,6 +257,7 @@ export const connectorConsentGrants = mysqlTable(
     activeKeyDigest: digest('active_key_digest'),
     authorizationTransactionDigest: digest('authorization_transaction_digest').notNull(),
     merchantUserId: id('merchant_user_id').notNull(),
+    externalIdentityId: id('external_identity_id').notNull(),
     merchantId: id('merchant_id').notNull(),
     clientIdDigest: digest('client_id_digest').notNull(),
     resource: varchar('resource', { length: 2048 }).notNull(),
@@ -253,6 +300,11 @@ export const connectorConsentGrants = mysqlTable(
       foreignColumns: [merchantMemberships.merchantId, merchantMemberships.merchantUserId],
       name: 'fk_connector_consent_membership',
     }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.externalIdentityId, table.merchantUserId],
+      foreignColumns: [externalIdentities.id, externalIdentities.merchantUserId],
+      name: 'fk_connector_consent_identity',
+    }).onDelete('restrict'),
   ],
 );
 
@@ -291,6 +343,11 @@ export const workbuddyBridgeStates = mysqlTable(
       foreignColumns: [merchantUsers.id],
       name: 'fk_workbuddy_bridge_user',
     }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.loginSessionDigest, table.merchantUserId],
+      foreignColumns: [platformLoginSessions.sessionDigest, platformLoginSessions.merchantUserId],
+      name: 'fk_workbuddy_bridge_session',
+    }).onDelete('restrict'),
   ],
 );
 
@@ -299,7 +356,7 @@ export const oauthAuthorizationCodes = mysqlTable(
   {
     codeDigest: digest('code_digest').notNull(),
     clientIdDigest: digest('client_id_digest').notNull(),
-    consentGrantId: id('consent_grant_id'),
+    consentGrantId: id('consent_grant_id').notNull(),
     redirectUri: varchar('redirect_uri', { length: 2048 }).notNull(),
     resource: varchar('resource', { length: 2048 }).notNull(),
     scope: varchar('scope', { length: 64 }).notNull(),
@@ -335,7 +392,7 @@ export const oauthRefreshTokenFamilies = mysqlTable(
     familyIdDigest: digest('family_id_digest').notNull(),
     familyId: varchar('family_id', { length: 128 }).notNull(),
     clientIdDigest: digest('client_id_digest').notNull(),
-    consentGrantId: id('consent_grant_id'),
+    consentGrantId: id('consent_grant_id').notNull(),
     bindingId: varchar('binding_id', { length: 191 }).notNull(),
     resource: varchar('resource', { length: 2048 }).notNull(),
     scope: varchar('scope', { length: 64 }).notNull(),
@@ -407,7 +464,9 @@ export const assistants = mysqlTable(
   {
     id: id('id').notNull(),
     merchantId: id('merchant_id').notNull(),
+    displayName: varchar('display_name', { length: 200 }).notNull(),
     publicSlug: varchar('public_slug', { length: 128 }).notNull(),
+    publicSlugDigest: digest('public_slug_digest').notNull(),
     status: varchar('status', { length: 32 }).notNull().default('draft_only'),
     activeReleaseId: id('active_release_id'),
     draftRevision: int('draft_revision', { unsigned: true }).notNull().default(1),
@@ -418,6 +477,7 @@ export const assistants = mysqlTable(
     primaryKey({ columns: [table.id], name: 'pk_assistant' }),
     uniqueIndex('uq_assistant_scope').on(table.merchantId, table.id),
     uniqueIndex('uq_assistant_public_slug').on(table.publicSlug),
+    uniqueIndex('uq_assistant_public_slug_digest').on(table.publicSlugDigest),
     index('idx_assistant_merchant_status').on(table.merchantId, table.status, table.id),
     foreignKey({
       columns: [table.merchantId],
@@ -502,6 +562,7 @@ export const releases = mysqlTable(
     merchantId: id('merchant_id').notNull(),
     assistantId: id('assistant_id').notNull(),
     releaseNo: int('release_no', { unsigned: true }).notNull(),
+    draftRevision: int('draft_revision', { unsigned: true }).notNull(),
     status: varchar('status', { length: 32 }).notNull(),
     configSnapshot: json('config_snapshot').$type<Record<string, unknown>>().notNull(),
     promptTemplateVersion: varchar('prompt_template_version', { length: 64 }).notNull(),
@@ -520,6 +581,37 @@ export const releases = mysqlTable(
       columns: [table.merchantId, table.assistantId],
       foreignColumns: [assistants.merchantId, assistants.id],
       name: 'fk_release_assistant',
+    }).onDelete('restrict'),
+  ],
+);
+
+export const assistantActiveReleases = mysqlTable(
+  'assistant_active_release',
+  {
+    merchantId: id('merchant_id').notNull(),
+    assistantId: id('assistant_id').notNull(),
+    releaseId: id('release_id').notNull(),
+    activatedAt: utcDateTime('activated_at').notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.merchantId, table.assistantId],
+      name: 'pk_assistant_active_release',
+    }),
+    uniqueIndex('uq_assistant_active_release_release').on(
+      table.merchantId,
+      table.assistantId,
+      table.releaseId,
+    ),
+    foreignKey({
+      columns: [table.merchantId, table.assistantId],
+      foreignColumns: [assistants.merchantId, assistants.id],
+      name: 'fk_assistant_active_release_assistant',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.merchantId, table.assistantId, table.releaseId],
+      foreignColumns: [releases.merchantId, releases.assistantId, releases.id],
+      name: 'fk_assistant_active_release_release',
     }).onDelete('restrict'),
   ],
 );

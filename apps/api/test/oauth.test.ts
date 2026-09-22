@@ -155,9 +155,16 @@ class TestBindingResolver implements OAuthIdentityBindingResolver {
     await Promise.resolve();
   }
 
-  public async resolve(bindingId: string): Promise<VerifiedExternalIdentity> {
+  public async resolve(
+    bindingId: string,
+    context: OAuthAuthorizationContext,
+  ): Promise<VerifiedExternalIdentity> {
     await Promise.resolve();
-    if (bindingId !== 'binding_server_controlled_123') {
+    if (
+      bindingId !== 'binding_server_controlled_123' ||
+      context.resource !== config.resource ||
+      context.scope !== 'mcp:tools'
+    ) {
       throw new WorkBuddyAuthenticationRequiredError();
     }
     return identity;
@@ -329,7 +336,11 @@ describe('OAuth 2.1 and MCP bearer boundary', () => {
       code_verifier: verifier,
       resource: config.resource,
     });
-    const authenticator = new McpAccessTokenAuthenticator(codec, new TestBindingResolver());
+    const authenticator = new McpAccessTokenAuthenticator(
+      codec,
+      new TestBindingResolver(),
+      config.resource,
+    );
     await expect(
       authenticator.authenticateAccessToken(`Bearer ${token.access_token}`),
     ).resolves.toEqual(identity);

@@ -1,54 +1,55 @@
-import { Button, StatusBadge } from '@h5cs/ui';
+import { OnlineCustomerService } from './online-customer-service';
+import type { PublicAssistantLoadResult } from './public-api-client';
 
-function MoreIcon() {
-  return (
-    <svg aria-hidden="true" fill="currentColor" viewBox="0 0 24 24">
-      <circle cx="5" cy="12" r="1.6" />
-      <circle cx="12" cy="12" r="1.6" />
-      <circle cx="19" cy="12" r="1.6" />
-    </svg>
-  );
+interface CustomerServiceShellProps {
+  apiBaseUrl?: string | undefined;
+  publicSlug?: string | undefined;
+  result: PublicAssistantLoadResult;
 }
 
-function SendIcon() {
-  return (
-    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
-      <path
-        d="m4 5 16 7-16 7 3-7-3-7Zm3 7h13"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.7"
+function unavailableCopy(result: PublicAssistantLoadResult): {
+  detail: string;
+  heading: string;
+} {
+  if (
+    result.status === 'unavailable' &&
+    (result.reason === 'api_unavailable' ||
+      result.reason === 'invalid_response' ||
+      result.reason === 'unsafe_configuration')
+  ) {
+    return {
+      detail: '我们无法安全确认客服当前状态，请稍后刷新页面重试。',
+      heading: '咨询服务暂时不可用',
+    };
+  }
+  return {
+    detail: '此客服当前未开放咨询，请通过商家公布的其他方式联系。',
+    heading: '咨询服务未开放',
+  };
+}
+
+export function CustomerServiceShell({
+  apiBaseUrl,
+  publicSlug,
+  result,
+}: CustomerServiceShellProps) {
+  if (result.status === 'online' && apiBaseUrl !== undefined && publicSlug !== undefined) {
+    return (
+      <OnlineCustomerService
+        apiBaseUrl={apiBaseUrl}
+        publicSlug={publicSlug}
+        snapshot={result.snapshot}
       />
-    </svg>
-  );
-}
+    );
+  }
 
-const serviceStates = [
-  {
-    detail: '知识不足时应说明无法确认，并引导补充条件或联系商家。',
-    label: '资料不足',
-    tone: 'warning' as const,
-  },
-  {
-    detail: '商家暂停服务时停止发送，保留清晰说明和真实联系入口。',
-    label: '客服暂停',
-    tone: 'neutral' as const,
-  },
-  {
-    detail: '网络或模型异常时保留输入，只有确认状态后才能安全重试。',
-    label: '服务异常',
-    tone: 'danger' as const,
-  },
-];
-
-export function CustomerServiceShell() {
+  const copy = unavailableCopy(result);
   return (
     <main className="consumer-page">
-      <section aria-label="AI 客服咨询窗口" className="chat-shell">
+      <section aria-label="客服咨询状态" className="chat-shell chat-shell--unavailable">
         <header className="chat-header">
           <div className="assistant-identity">
-            <div aria-hidden="true" className="assistant-avatar">
+            <div aria-hidden="true" className="assistant-avatar assistant-avatar--muted">
               AI
             </div>
             <div>
@@ -56,87 +57,30 @@ export function CustomerServiceShell() {
                 <h1>商家客服</h1>
                 <span className="ai-label">AI</span>
               </div>
-              <p>客服配置尚未载入</p>
+              <p>状态未确认</p>
             </div>
           </div>
-          <button aria-label="更多咨询选项" className="icon-button" disabled type="button">
-            <MoreIcon />
-          </button>
         </header>
-
-        <div className="offline-notice" role="alert">
-          <span aria-hidden="true" className="offline-notice__icon">
+        <div className="unavailable-panel" role="alert">
+          <span aria-hidden="true" className="unavailable-panel__icon">
             !
           </span>
-          <div>
-            <strong>咨询服务尚未连接</strong>
-            <p>当前是前端界面骨架，无法创建 Session 或发送消息。</p>
-          </div>
+          <h2>{copy.heading}</h2>
+          <p>{copy.detail}</p>
+          <p className="unavailable-panel__safety">
+            本页面不会根据链接参数或本地记录开启会话，也不会生成模拟回复。
+          </p>
         </div>
-
-        <div aria-label="咨询消息" aria-live="polite" className="message-list" role="log">
-          <p className="timeline-label">当前咨询</p>
-          <article className="message-row">
-            <div aria-hidden="true" className="message-avatar">
-              AI
-            </div>
-            <div>
-              <div className="message-bubble">
-                <p>欢迎来到在线咨询。</p>
-                <p>
-                  当前页面尚未连接商家配置和会话服务，因此不会生成业务回答。服务连接后，你可以直接在这里提问。
-                </p>
-              </div>
-              <time className="message-time">状态说明</time>
-            </div>
-          </article>
-
-          <section aria-labelledby="state-preview-heading" className="state-preview">
-            <div className="state-preview__heading">
-              <div>
-                <p>可访问状态</p>
-                <h2 id="state-preview-heading">界面会明确区分以下情况</h2>
-              </div>
-              <StatusBadge tone="info">状态预览</StatusBadge>
-            </div>
-            <div className="state-preview__list">
-              {serviceStates.map((state) => (
-                <article key={state.label}>
-                  <StatusBadge tone={state.tone}>{state.label}</StatusBadge>
-                  <p>{state.detail}</p>
-                </article>
-              ))}
-            </div>
-          </section>
-        </div>
-
         <footer className="composer-area">
-          <div aria-label="快捷问题" className="quick-questions">
-            <button disabled type="button">
-              可以咨询什么？
-            </button>
-            <button disabled type="button">
-              如何联系商家？
-            </button>
-          </div>
           <form aria-label="发送咨询消息" className="composer">
             <label className="visually-hidden" htmlFor="message-input">
-              输入想咨询的问题
+              咨询服务不可用
             </label>
-            <textarea
-              aria-describedby="composer-help"
-              disabled
-              id="message-input"
-              placeholder="服务连接后可输入问题"
-              rows={1}
-            />
-            <Button aria-label="发送消息" disabled>
-              <SendIcon />
-            </Button>
+            <textarea disabled id="message-input" placeholder="当前无法发送消息" rows={1} />
+            <button aria-label="发送消息" className="send-button" disabled type="button">
+              发送
+            </button>
           </form>
-          <p id="composer-help" className="composer-help">
-            发送功能尚未启用。AI 回复仅供业务咨询参考。
-          </p>
         </footer>
       </section>
     </main>

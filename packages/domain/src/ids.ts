@@ -11,6 +11,7 @@ export type SessionId = Brand<string, 'SessionId'>;
 export type TurnId = Brand<string, 'TurnId'>;
 export type MessageId = Brand<string, 'MessageId'>;
 export type MerchantUserId = Brand<string, 'MerchantUserId'>;
+export type ExternalIdentityId = Brand<string, 'ExternalIdentityId'>;
 export type OnboardingSessionId = Brand<string, 'OnboardingSessionId'>;
 
 const idPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
@@ -39,5 +40,7 @@ export const toTurnId = (value: string): TurnId => toId<TurnId>('TurnId', value)
 export const toMessageId = (value: string): MessageId => toId<MessageId>('MessageId', value);
 export const toMerchantUserId = (value: string): MerchantUserId =>
   toId<MerchantUserId>('MerchantUserId', value);
+export const toExternalIdentityId = (value: string): ExternalIdentityId =>
+  toId<ExternalIdentityId>('ExternalIdentityId', value);
 export const toOnboardingSessionId = (value: string): OnboardingSessionId =>
   toId<OnboardingSessionId>('OnboardingSessionId', value);

@@ -1,5 +1,6 @@
-import type { MerchantId, MerchantUserId } from './ids.js';
+import type { ExternalIdentityId, MerchantId, MerchantUserId } from './ids.js';
 import type { VerifiedExternalIdentity } from './onboarding-repository.js';
+import type { OAuthAuthorizationCodeRecord } from './oauth-repository.js';
 
 export type WorkBuddyBindingStateRecord = Readonly<{
   transactionId: string;
@@ -28,6 +29,7 @@ export interface WorkBuddyBindingStateRepository {
 
 export type ExternalIdentityBindingResult = Readonly<{
   status: 'created' | 'idempotent';
+  externalIdentityId: ExternalIdentityId;
 }>;
 
 export class ExternalIdentityBindingConflictError extends Error {
@@ -83,6 +85,7 @@ export type ConnectorAuthorizationTransaction = Readonly<{
   connectorStateDigest: Uint8Array;
   step: ConnectorAuthorizationStep;
   merchantUserId: MerchantUserId | null;
+  externalIdentityId: ExternalIdentityId | null;
   merchantId: MerchantId | null;
   candidateVersion: number;
   expiresAt: Date;
@@ -95,6 +98,7 @@ export type ConnectorConsentGrant = Readonly<{
   bindingId: string;
   authorizationTransactionDigest: Uint8Array;
   merchantUserId: MerchantUserId;
+  externalIdentityId: ExternalIdentityId;
   merchantId: MerchantId;
   clientId: string;
   resource: string;
@@ -107,6 +111,30 @@ export type ConnectorConsentGrant = Readonly<{
 
 export interface ConnectorAuthorizationRepository {
   storeAuthorizationTransaction(record: ConnectorAuthorizationTransaction): Promise<void>;
+  acceptExternalIdentity(input: {
+    transactionDigest: Uint8Array;
+    loginSessionDigest: Uint8Array;
+    merchantUserId: MerchantUserId;
+    identity: VerifiedExternalIdentity;
+    now: Date;
+  }): Promise<
+    Readonly<{
+      transaction: ConnectorAuthorizationTransaction;
+      binding: ExternalIdentityBindingResult;
+    }>
+  >;
+  listActiveMerchantCandidates(
+    transactionDigest: Uint8Array,
+    loginSessionDigest: Uint8Array,
+    now: Date,
+  ): Promise<AuthorizationMerchantCandidateSet | null>;
+  selectMerchantForAuthorization(input: {
+    transactionDigest: Uint8Array;
+    loginSessionDigest: Uint8Array;
+    merchantId: MerchantId;
+    expectedCandidateVersion: number;
+    now: Date;
+  }): Promise<ConnectorAuthorizationTransaction | null>;
   consumeAuthorizationTransaction(
     transactionDigest: Uint8Array,
     loginSessionDigest: Uint8Array,
@@ -117,4 +145,63 @@ export interface ConnectorAuthorizationRepository {
     grant: ConnectorConsentGrant,
     now: Date,
   ): Promise<Readonly<{ replacedGrantIds: readonly string[] }>>;
+  /**
+   * Rechecks the session, identity and membership, replaces the active grant and creates exactly
+   * one authorization code in the same database transaction.
+   */
+  approveConsentAndIssueAuthorizationCode(
+    grant: ConnectorConsentGrant,
+    code: OAuthAuthorizationCodeRecord,
+    now: Date,
+  ): Promise<Readonly<{ replacedGrantIds: readonly string[] }>>;
+  resolveActiveBinding(bindingId: string, now: Date): Promise<ConnectorBindingResolution | null>;
+  revokeConsentGrant(bindingId: string, now: Date): Promise<boolean>;
+}
+
+export type AuthorizationMerchantCandidateSet = Readonly<{
+  candidateVersion: number;
+  candidates: readonly Readonly<{ merchantId: MerchantId; displayName: string }>[];
+}>;
+
+export type ConnectorBindingResolution = Readonly<{
+  grantId: string;
+  bindingId: string;
+  merchantUserId: MerchantUserId;
+  externalIdentityId: ExternalIdentityId;
+  merchantId: MerchantId;
+  clientId: string;
+  resource: string;
+  scope: 'mcp:tools';
+  identity: VerifiedExternalIdentity;
+}>;
+
+export const platformAuthenticationLevels = ['primary', 'reauthenticated'] as const;
+
+export type PlatformAuthenticationLevel = (typeof platformAuthenticationLevels)[number];
+
+export type PlatformLoginSessionRecord = Readonly<{
+  sessionDigest: Uint8Array;
+  merchantUserId: MerchantUserId;
+  csrfDigest: Uint8Array;
+  authenticationLevel: PlatformAuthenticationLevel;
+  authenticatedAt: Date;
+  expiresAt: Date;
+  revokedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}>;
+
+export interface PlatformLoginSessionRepository {
+  assertReady(): Promise<void>;
+  storePlatformLoginSession(record: PlatformLoginSessionRecord): Promise<void>;
+  resolvePlatformLoginSession(
+    sessionDigest: Uint8Array,
+    now: Date,
+  ): Promise<PlatformLoginSessionRecord | null>;
+  resolvePlatformMutationSession(
+    sessionDigest: Uint8Array,
+    csrfDigest: Uint8Array,
+    now: Date,
+  ): Promise<PlatformLoginSessionRecord | null>;
+  revokePlatformLoginSession(sessionDigest: Uint8Array, now: Date): Promise<boolean>;
 }

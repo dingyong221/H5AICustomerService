@@ -41,6 +41,7 @@ a {
 
 .merchant-layout {
   min-height: 100vh;
+  min-height: 100dvh;
   padding-left: 16.5rem;
 }
 
@@ -794,6 +795,14 @@ a {
   font-size: 0.84rem;
   min-height: 2.75rem;
   padding: 0.7rem 0.8rem;
+}
+
+.form-grid input:focus-visible,
+.form-grid select:focus-visible,
+.form-grid textarea:focus-visible {
+  border-color: var(--ui-focus);
+  outline: 2px solid var(--ui-focus);
+  outline-offset: 2px;
 }
 
 .form-grid textarea {

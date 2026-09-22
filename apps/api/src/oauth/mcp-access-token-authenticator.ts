@@ -17,10 +17,16 @@ const bearerPattern = /^Bearer ([^\s]{1,4096})$/u;
 export class McpAccessTokenAuthenticator implements WorkBuddyAuthenticator {
   readonly #accessTokens: OAuthAccessTokenCodec;
   readonly #bindings: OAuthIdentityBindingResolver;
+  readonly #resource: string;
 
-  public constructor(accessTokens: OAuthAccessTokenCodec, bindings: OAuthIdentityBindingResolver) {
+  public constructor(
+    accessTokens: OAuthAccessTokenCodec,
+    bindings: OAuthIdentityBindingResolver,
+    resource: string,
+  ) {
     this.#accessTokens = accessTokens;
     this.#bindings = bindings;
+    this.#resource = resource;
   }
 
   public async assertReady(): Promise<void> {
@@ -50,7 +56,11 @@ export class McpAccessTokenAuthenticator implements WorkBuddyAuthenticator {
 
     try {
       const claims = await this.#accessTokens.verify(token);
-      return await this.#bindings.resolve(claims.subject);
+      return await this.#bindings.resolve(claims.subject, {
+        clientId: claims.clientId,
+        resource: this.#resource,
+        scope: claims.scope,
+      });
     } catch (error) {
       if (error instanceof OAuthAccessTokenInvalidError) {
         throw new WorkBuddyAuthenticationRequiredError();

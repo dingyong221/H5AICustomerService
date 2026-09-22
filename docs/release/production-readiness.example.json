@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "releaseVersion": "0.1.0",
+  "gitCommit": "0000000000000000000000000000000000000000",
+  "repositoryEvidence": {
+    "cleanCommit": false,
+    "fullQualityPassed": false,
+    "secretScanPassed": false,
+    "highCriticalAuditPassed": false,
+    "sbomVerified": false,
+    "provenanceVerified": false,
+    "releaseManifestSha256": "sha256:REPLACE_WITH_64_HEX_CHARACTERS",
+    "sbomSha256": "sha256:REPLACE_WITH_64_HEX_CHARACTERS"
+  },
+  "signedArtifacts": [
+    {
+      "name": "api",
+      "digest": "sha256:REPLACE_WITH_64_HEX_CHARACTERS",
+      "signatureVerified": false,
+      "provenanceVerified": false
+    },
+    {
+      "name": "worker",
+      "digest": "sha256:REPLACE_WITH_64_HEX_CHARACTERS",
+      "signatureVerified": false,
+      "provenanceVerified": false
+    },
+    {
+      "name": "merchant-web",
+      "digest": "sha256:REPLACE_WITH_64_HEX_CHARACTERS",
+      "signatureVerified": false,
+      "provenanceVerified": false
+    },
+    {
+      "name": "consumer-h5",
+      "digest": "sha256:REPLACE_WITH_64_HEX_CHARACTERS",
+      "signatureVerified": false,
+      "provenanceVerified": false
+    },
+    {
+      "name": "ops-web",
+      "digest": "sha256:REPLACE_WITH_64_HEX_CHARACTERS",
+      "signatureVerified": false,
+      "provenanceVerified": false
+    }
+  ],
+  "staging": {
+    "sameArtifactDigests": false,
+    "coreE2ePassed": false,
+    "tenantIsolationPassed": false,
+    "evidenceReference": "REPLACE_WITH_NON_SECRET_REFERENCE"
+  },
+  "workBuddy": {
+    "thirdPartyAppApproved": false,
+    "connectorApproved": false,
+    "realClientOauthPassed": false,
+    "tokenBoundaryPassed": false,
+    "evidenceReference": "REPLACE_WITH_NON_SECRET_REFERENCE"
+  },
+  "managedMySql": {
+    "provisioned": false,
+    "privateNetworkVerified": false,
+    "tlsVerified": false,
+    "backupRestoreDrillPassed": false,
+    "evidenceReference": "REPLACE_WITH_NON_SECRET_REFERENCE"
+  },
+  "model": {
+    "formalProviderConfigured": false,
+    "realGenerationSmokePassed": false,
+    "mockFallbackDisabled": false,
+    "evidenceReference": "REPLACE_WITH_NON_SECRET_REFERENCE"
+  },
+  "tls": {
+    "validCertificateInstalled": false,
+    "httpsProbePassed": false,
+    "renewalTestPassed": false,
+    "evidenceReference": "REPLACE_WITH_NON_SECRET_REFERENCE"
+  },
+  "rollback": {
+    "previousArtifactsAvailable": false,
+    "applicationRollbackDrillPassed": false,
+    "databaseCompatibilityVerified": false,
+    "postRollbackSmokePassed": false,
+    "exerciseId": "REPLACE_WITH_EXERCISE_ID",
+    "evidenceReference": "REPLACE_WITH_NON_SECRET_REFERENCE"
+  },
+  "observability": {
+    "alertDeliveryPassed": false,
+    "evidenceReference": "REPLACE_WITH_NON_SECRET_REFERENCE"
+  },
+  "approval": {
+    "approved": false,
+    "changeTicket": "",
+    "approvers": []
+  },
+  "productionBusinessReadiness": false
+}

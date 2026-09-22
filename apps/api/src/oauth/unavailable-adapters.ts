@@ -85,17 +85,23 @@ export class UnavailableOAuthAccessTokenCodec implements OAuthAccessTokenCodec {
 }
 
 export class UnavailableOAuthIdentityBindingResolver implements OAuthIdentityBindingResolver {
+  readonly #reason: string;
+
+  public constructor(reason = 'OAuth identity binding resolution is not configured') {
+    this.#reason = reason;
+  }
+
   public async assertReady(): Promise<never> {
     return this.#fail();
   }
 
-  public async resolve(_bindingId: string): Promise<never> {
+  public async resolve(_bindingId: string, _context: OAuthAuthorizationContext): Promise<never> {
     return this.#fail();
   }
 
   async #fail(): Promise<never> {
     await Promise.resolve();
-    throw new OAuthIdentityBindingUnavailableError();
+    throw new OAuthIdentityBindingUnavailableError(this.#reason);
   }
 }
 

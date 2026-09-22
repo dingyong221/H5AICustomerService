@@ -401,43 +401,15 @@ export class MySqlOnboardingRepository implements OnboardingRepository {
   }
 
   public async saveGenerationResult(
-    session: OnboardingSessionRecord,
-    nextSnapshot: OnboardingSnapshot,
-    merchantId: MerchantId,
-    assistantId: AssistantId,
-  ): Promise<OnboardingSessionRecord> {
-    if (nextSnapshot.state !== 'manageable' || nextSnapshot.generatedAssistantId !== assistantId) {
-      throw new OnboardingPersistenceError('Generation result does not match the onboarding state');
-    }
-
-    const result = await this.#withConnection(async (connection) => {
-      const [header] = await connection.execute<ResultSetHeader>(
-        `UPDATE onboarding_session
-            SET merchant_id = ?, assistant_id = ?, state = 'manageable', answers = ?,
-                missing_items = JSON_ARRAY(), generation_error_code = NULL,
-                version = version + 1, completed_at = UTC_TIMESTAMP(6),
-                updated_at = UTC_TIMESTAMP(6)
-          WHERE id = ? AND merchant_user_id = ? AND version = ?`,
-        [
-          stringToId(merchantId),
-          stringToId(assistantId),
-          JSON.stringify(nextSnapshot.answers),
-          stringToId(session.id),
-          stringToId(session.merchantUserId),
-          session.version,
-        ],
-      );
-      return header;
-    });
-
-    if (result.affectedRows !== 1) throw new OnboardingOptimisticLockError();
-    return {
-      ...session,
-      merchantId,
-      assistantId,
-      snapshot: nextSnapshot,
-      version: session.version + 1,
-    };
+    _session: OnboardingSessionRecord,
+    _nextSnapshot: OnboardingSnapshot,
+    _merchantId: MerchantId,
+    _assistantId: AssistantId,
+  ): Promise<never> {
+    await Promise.resolve();
+    throw new OnboardingPersistenceError(
+      'Generation completion requires the idempotent assistant lifecycle transaction',
+    );
   }
 
   async #findExternalIdentity(

@@ -1,0 +1,88 @@
+name: Repository release candidate
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: SemVer without the v prefix
+        required: true
+        default: 0.1.0
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repository-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  evidence:
+    name: Verify and package repository evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+
+    steps:
+      - name: Check out exact ref
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pnpm 11
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Resolve and validate version
+        id: release
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          version="${INPUT_VERSION:-${GITHUB_REF_NAME#v}}"
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release version: ${version}" >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME}" != "v${version}" ]]; then
+            echo "Tag/version mismatch: ${GITHUB_REF_NAME} versus ${version}" >&2
+            exit 1
+          fi
+          echo "version=${version}" >>"${GITHUB_OUTPUT}"
+
+      - name: Install dependencies from lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Run complete repository release gate
+        run: node scripts/quality/release-gate.mjs repository --version "${{ steps.release.outputs.version }}"
+
+      - name: Generate immutable repository evidence
+        run: node scripts/quality/release-gate.mjs evidence --version "${{ steps.release.outputs.version }}" --output "${{ runner.temp }}/release-evidence"
+
+      - name: Verify release evidence integrity
+        run: node scripts/quality/release-gate.mjs verify --version "${{ steps.release.outputs.version }}" --evidence "${{ runner.temp }}/release-evidence"
+
+      - name: Upload repository evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: h5cs-v${{ steps.release.outputs.version }}-${{ github.sha }}
+          path: ${{ runner.temp }}/release-evidence
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Preserve production boundary
+        shell: bash
+        run: |
+          echo "Repository evidence generated."
+          echo "No deployment was performed. Production business readiness requires separate approved evidence."

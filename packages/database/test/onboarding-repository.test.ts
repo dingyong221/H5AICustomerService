@@ -3,12 +3,18 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   ExternalIdentityBindingConflictError,
   MerchantSelectionRequiredError,
+  toAssistantId,
+  toMerchantId,
   toMerchantUserId,
+  toOnboardingSessionId,
 } from '@h5cs/domain';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 
 import type { DatabaseConnectionConfig } from '../src/config.js';
-import { MySqlOnboardingRepository } from '../src/onboarding-repository.js';
+import {
+  MySqlOnboardingRepository,
+  OnboardingPersistenceError,
+} from '../src/onboarding-repository.js';
 
 const merchantUserId = toMerchantUserId('11111111111111111111111111111111');
 
@@ -90,5 +96,34 @@ describe('MySQL onboarding repository merchant binding', () => {
     ).rejects.toBeInstanceOf(ExternalIdentityBindingConflictError);
     expect(execute).toHaveBeenCalledOnce();
     expect(execute.mock.calls[0]?.[0]).toMatch(/SELECT merchant_user_id, status/u);
+  });
+
+  it('rejects caller-reported generation success outside the lifecycle transaction', async () => {
+    const openConnection = vi.fn(async () => {
+      throw new Error('must not connect');
+    });
+    const repository = new MySqlOnboardingRepository({
+      openConnection,
+      summary: { host: 'test', database: 'test', tlsRequested: false },
+      toJSON: () => ({ host: 'test', database: 'test', tlsRequested: false }),
+    });
+    const assistantId = toAssistantId('44444444444444444444444444444444');
+
+    await expect(
+      repository.saveGenerationResult(
+        {
+          id: toOnboardingSessionId('33333333333333333333333333333333'),
+          merchantUserId,
+          merchantId: null,
+          assistantId: null,
+          snapshot: { state: 'generating', answers: {} },
+          version: 1,
+        },
+        { state: 'manageable', answers: {}, generatedAssistantId: assistantId },
+        toMerchantId('22222222222222222222222222222222'),
+        assistantId,
+      ),
+    ).rejects.toBeInstanceOf(OnboardingPersistenceError);
+    expect(openConnection).not.toHaveBeenCalled();
   });
 });

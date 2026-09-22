@@ -139,11 +139,38 @@ function resolveBaseUrl(apiBaseUrl: string | undefined, origin: string): URL {
 }
 
 function parseContinueResult(payload: unknown): ContinueOnboardingResult {
-  const parsed = apiSuccessEnvelopeSchema(skillIntentResultSchema).safeParse(payload);
-  if (!parsed.success || parsed.data.data.action !== 'continue_onboarding') {
+  const rawEnvelope = record(payload);
+  const rawData = rawEnvelope === undefined ? undefined : record(rawEnvelope['data']);
+  const rawMissingItems = rawData?.['missing_items'];
+  const parsed = apiSuccessEnvelopeSchema(skillIntentResultSchema).strict().safeParse(payload);
+  if (
+    rawEnvelope === undefined ||
+    !exactKeys(rawEnvelope, ['data', 'request_id']) ||
+    rawData === undefined ||
+    !exactKeys(rawData, ['action', 'missing_items', 'onboarding_session_id', 'state']) ||
+    !Array.isArray(rawMissingItems) ||
+    rawMissingItems.some((item) => {
+      const rawItem = record(item);
+      return rawItem === undefined || !exactKeys(rawItem, ['code', 'message']);
+    }) ||
+    !parsed.success ||
+    parsed.data.data.action !== 'continue_onboarding' ||
+    !exactKeys(parsed.data.data, ['action', 'missing_items', 'onboarding_session_id', 'state'])
+  ) {
     throw new OnboardingClientError('invalid_response', '服务端未返回有效的引导状态。');
   }
   return parsed.data.data;
+}
+
+function record(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : undefined;
+}
+
+function exactKeys(value: object, keys: readonly string[]): boolean {
+  const actual = Object.keys(value);
+  return actual.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 }
 
 async function parseError(response: Response): Promise<OnboardingClientError> {
@@ -154,10 +181,31 @@ async function parseError(response: Response): Promise<OnboardingClientError> {
     body = undefined;
   }
 
-  const parsed = apiErrorEnvelopeSchema.safeParse(body);
-  const requestId = parsed.success ? parsed.data.request_id : undefined;
-  const code = parsed.success ? parsed.data.error.code : undefined;
-  const retryable = parsed.success ? parsed.data.error.retryable : response.status >= 500;
+  const rawEnvelope = record(body);
+  const rawError = rawEnvelope === undefined ? undefined : record(rawEnvelope['error']);
+  const parsed = apiErrorEnvelopeSchema.strict().safeParse(body);
+  const trustedError =
+    rawEnvelope !== undefined &&
+    exactKeys(rawEnvelope, ['error', 'request_id']) &&
+    rawError !== undefined &&
+    exactKeys(rawError, [
+      'code',
+      ...(rawError['details'] === undefined ? [] : ['details']),
+      'message',
+      'retryable',
+    ]) &&
+    parsed.success &&
+    exactKeys(parsed.data.error, [
+      'code',
+      ...(parsed.data.error.details === undefined ? [] : ['details']),
+      'message',
+      'retryable',
+    ])
+      ? parsed.data
+      : undefined;
+  const requestId = trustedError?.request_id;
+  const code = trustedError?.error.code;
+  const retryable = trustedError?.error.retryable ?? response.status >= 500;
 
   if (response.status === 401) {
     return new OnboardingClientError('authentication_expired', '登录已过期，请重新安全绑定。', {

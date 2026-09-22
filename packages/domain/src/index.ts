@@ -1,4 +1,5 @@
 export * from './ids.js';
+export * from './assistant-lifecycle-repository.js';
 export * from './identity-authorization-repository.js';
 export * from './onboarding.js';
 export * from './onboarding-repository.js';

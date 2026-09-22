@@ -3,6 +3,7 @@ import { loadDatabaseConfig, MySqlOAuthRepository } from '@h5cs/database';
 import { OAuthAuthorizationServer } from './oauth-authorization-server.js';
 import { McpAccessTokenAuthenticator } from './mcp-access-token-authenticator.js';
 import { McpOAuthTokenVerifier } from './mcp-oauth-token-verifier.js';
+import { loadProductionOAuthAdapters } from './oauth-production-adapters.js';
 import type { OAuthResourceOwnerAuthorizer, OAuthServerConfig } from './oauth-types.js';
 import {
   UnavailableOAuthAccessTokenCodec,
@@ -100,13 +101,16 @@ export const createRuntimeOAuth = (environment: NodeJS.ProcessEnv = process.env)
     ? new MySqlOAuthRepository(database.config)
     : new UnavailableOAuthRepository(database.reason);
   const accessTokens = new UnavailableOAuthAccessTokenCodec();
-  const bindings = new UnavailableOAuthIdentityBindingResolver();
+  const productionAdapters = loadProductionOAuthAdapters(environment);
+  const bindings = productionAdapters.configured
+    ? productionAdapters.identityBindings
+    : new UnavailableOAuthIdentityBindingResolver(productionAdapters.reason);
   const resourceOwner = new UnavailableOAuthResourceOwnerAuthorizer();
   const protectedResourceMetadataUrl = `${config.issuer}/.well-known/oauth-protected-resource/mcp`;
   return new OAuthRuntime(
     new OAuthAuthorizationServer(config, repository, accessTokens),
     resourceOwner,
-    new McpAccessTokenAuthenticator(accessTokens, bindings),
+    new McpAccessTokenAuthenticator(accessTokens, bindings, config.resource),
     new McpOAuthTokenVerifier(accessTokens, config.resource),
     protectedResourceMetadataUrl,
   );

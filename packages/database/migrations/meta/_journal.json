@@ -29,6 +29,20 @@
       "when": 1790001432388,
       "tag": "0003_woozy_venom",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1790004897577,
+      "tag": "0004_fancy_cassandra_nova",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1790005918359,
+      "tag": "0005_striped_jack_murdock",
+      "breakpoints": true
     }
   ]
 }

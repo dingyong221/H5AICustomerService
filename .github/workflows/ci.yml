@@ -23,16 +23,16 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install pnpm 11
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           version: 11.19.0
           run_install: false
 
       - name: Set up Node.js 24
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -40,24 +40,23 @@ jobs:
       - name: Install dependencies from lockfile
         run: pnpm install --frozen-lockfile
 
-      - name: Scan tracked files for common secret formats
-        shell: bash
-        run: |
-          if git grep -nI -E -- \
-            '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}' \
-            -- ':!*.example' ':!pnpm-lock.yaml'; then
-            echo 'Potential credential material found in tracked files.' >&2
-            exit 1
-          fi
+      - name: Validate release policy and scan for common secrets
+        run: node scripts/quality/release-gate.mjs static --version 0.1.0
 
       - name: Audit dependencies
         run: pnpm audit --audit-level=high
 
       - name: Validate local infrastructure configuration
-        run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml config --quiet
+        shell: bash
+        run: |
+          docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml config --quiet
+          docker compose --env-file infra/compose/release.env.example --file infra/compose/docker-compose.release.yml config --quiet
 
       - name: Check formatting
         run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
 
       - name: Typecheck
         run: pnpm typecheck
@@ -67,3 +66,17 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Generate SBOM and repository release evidence
+        run: node scripts/quality/release-gate.mjs evidence --version 0.1.0 --output "${{ runner.temp }}/release-evidence"
+
+      - name: Verify release evidence integrity
+        run: node scripts/quality/release-gate.mjs verify --version 0.1.0 --evidence "${{ runner.temp }}/release-evidence"
+
+      - name: Upload repository release evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: repository-release-evidence-${{ github.sha }}
+          path: ${{ runner.temp }}/release-evidence
+          if-no-files-found: error
+          retention-days: 14

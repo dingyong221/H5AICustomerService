@@ -18,6 +18,7 @@ type SqlCall = Readonly<{ statement: string; values: readonly unknown[] }>;
 const digest = (fill: number): Uint8Array => new Uint8Array(32).fill(fill);
 const now = new Date('2026-09-21T12:00:00.000Z');
 const later = new Date('2026-09-21T12:10:00.000Z');
+const consentGrantId = '77'.repeat(16);
 
 const codeRecord: OAuthAuthorizationCodeRecord = {
   codeDigest: digest(1),
@@ -27,6 +28,7 @@ const codeRecord: OAuthAuthorizationCodeRecord = {
   scope: 'mcp:tools',
   codeChallenge: 'A'.repeat(43),
   bindingId: 'binding_server_controlled',
+  consentGrantId,
   expiresAt: later,
   createdAt: now,
 };
@@ -36,6 +38,7 @@ const refreshRecord: OAuthRefreshTokenRecord = {
   familyId: 'refresh-family-id',
   clientId: 'public-client-id',
   bindingId: 'binding_server_controlled',
+  consentGrantId,
   resource: 'https://h5cs.example.test/mcp',
   scope: 'mcp:tools',
   expiresAt: later,
@@ -86,6 +89,7 @@ const repositoryWith = (
 const activeRefreshRow = (overrides: Record<string, unknown> = {}) => ({
   family_id_digest: Buffer.from(digest(9)),
   family_id: refreshRecord.familyId,
+  consent_grant_id: Buffer.from(consentGrantId, 'hex'),
   client_id: refreshRecord.clientId,
   binding_id: refreshRecord.bindingId,
   resource: refreshRecord.resource,
@@ -94,6 +98,62 @@ const activeRefreshRow = (overrides: Record<string, unknown> = {}) => ({
   expires_at: refreshRecord.expiresAt,
   used_at: null,
   created_at: refreshRecord.createdAt,
+  grant_binding_id: refreshRecord.bindingId,
+  grant_status: 'active',
+  grant_revoked_at: null,
+  account_status: 'active',
+  merchant_status: 'active',
+  membership_status: 'active',
+  identity_status: 'active',
+  identity_revoked_at: null,
+  ...overrides,
+});
+
+const activeGrantContextRow = (overrides: Record<string, unknown> = {}) => ({
+  id: Buffer.from(consentGrantId, 'hex'),
+  binding_id: codeRecord.bindingId,
+  client_id: codeRecord.clientId,
+  resource: codeRecord.resource,
+  scope: codeRecord.scope,
+  status: 'active',
+  revoked_at: null,
+  authorization_transaction_digest: Buffer.from(digest(8)),
+  transaction_step: 'approved',
+  transaction_consumed_at: null,
+  transaction_expires_at: later,
+  transaction_redirect_uri: codeRecord.redirectUri,
+  transaction_code_challenge: codeRecord.codeChallenge,
+  account_status: 'active',
+  merchant_status: 'active',
+  membership_status: 'active',
+  identity_status: 'active',
+  identity_revoked_at: null,
+  ...overrides,
+});
+
+const activeCodeRow = (overrides: Record<string, unknown> = {}) => ({
+  consent_grant_id: Buffer.from(consentGrantId, 'hex'),
+  client_id: codeRecord.clientId,
+  redirect_uri: codeRecord.redirectUri,
+  resource: codeRecord.resource,
+  scope: codeRecord.scope,
+  code_challenge: codeRecord.codeChallenge,
+  binding_id: codeRecord.bindingId,
+  expires_at: codeRecord.expiresAt,
+  consumed_at: null,
+  created_at: codeRecord.createdAt,
+  grant_binding_id: codeRecord.bindingId,
+  grant_status: 'active',
+  grant_revoked_at: null,
+  transaction_digest: Buffer.from(digest(8)),
+  transaction_step: 'code_issued',
+  transaction_consumed_at: null,
+  transaction_expires_at: later,
+  account_status: 'active',
+  merchant_status: 'active',
+  membership_status: 'active',
+  identity_status: 'active',
+  identity_revoked_at: null,
   ...overrides,
 });
 
@@ -153,23 +213,8 @@ describe('MySQL OAuth repository', () => {
   it('consumes an authorization-code digest once under a row lock', async () => {
     const { repository, calls, beginTransaction, commit, rollback } = repositoryWith(
       async (statement) => {
-        if (statement.includes('SELECT c.client_id')) {
-          return [
-            [
-              {
-                client_id: codeRecord.clientId,
-                redirect_uri: codeRecord.redirectUri,
-                resource: codeRecord.resource,
-                scope: codeRecord.scope,
-                code_challenge: codeRecord.codeChallenge,
-                binding_id: codeRecord.bindingId,
-                expires_at: codeRecord.expiresAt,
-                consumed_at: null,
-                created_at: codeRecord.createdAt,
-              },
-            ],
-            [],
-          ];
+        if (statement.includes('FROM oauth_authorization_code')) {
+          return [[activeCodeRow()], []];
         }
         return [resultHeader(), []];
       },
@@ -182,29 +227,26 @@ describe('MySQL OAuth repository', () => {
     expect(commit).toHaveBeenCalledOnce();
     expect(rollback).not.toHaveBeenCalled();
     expect(calls[0]?.statement).toMatch(/FOR UPDATE/u);
-    expect(calls[1]?.statement).toMatch(/SET consumed_at/u);
+    expect(calls[1]?.statement).toMatch(/oauth_authorization_code[\s\S]*SET consumed_at/u);
+    expect(calls[2]?.statement).toMatch(/connector_authorization_transaction/u);
     expect(calls[0]?.values[0]).toEqual(Buffer.from(codeRecord.codeDigest));
+  });
+
+  it('keeps split authorization-code issuance unavailable', async () => {
+    const { repository, calls } = repositoryWith(async () => {
+      throw new Error('must not connect for split code issuance');
+    });
+
+    await expect(repository.storeAuthorizationCode(codeRecord)).rejects.toThrow(
+      'Authorization code issuance requires atomic consent activation',
+    );
+    expect(calls).toHaveLength(0);
   });
 
   it('does not update an already consumed authorization code', async () => {
     const { repository, calls } = repositoryWith(async (statement) => {
-      if (statement.includes('SELECT c.client_id')) {
-        return [
-          [
-            {
-              client_id: codeRecord.clientId,
-              redirect_uri: codeRecord.redirectUri,
-              resource: codeRecord.resource,
-              scope: codeRecord.scope,
-              code_challenge: codeRecord.codeChallenge,
-              binding_id: codeRecord.bindingId,
-              expires_at: codeRecord.expiresAt,
-              consumed_at: now,
-              created_at: codeRecord.createdAt,
-            },
-          ],
-          [],
-        ];
+      if (statement.includes('FROM oauth_authorization_code')) {
+        return [[activeCodeRow({ consumed_at: now })], []];
       }
       throw new Error('must not update a consumed code');
     });
@@ -215,16 +257,36 @@ describe('MySQL OAuth repository', () => {
     expect(calls).toHaveLength(1);
   });
 
+  it('does not consume a code after its membership is revoked', async () => {
+    const { repository, calls } = repositoryWith(async (statement) => {
+      if (statement.includes('FROM oauth_authorization_code')) {
+        return [[activeCodeRow({ membership_status: 'revoked' })], []];
+      }
+      throw new Error('must not update an authorization code with a revoked membership');
+    });
+
+    await expect(
+      repository.consumeAuthorizationCode(codeRecord.codeDigest, now),
+    ).resolves.toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
   it('stores refresh family and token digests atomically without plaintext tokens', async () => {
-    const { repository, calls, commit } = repositoryWith(async () => [resultHeader(), []]);
+    const { repository, calls, commit } = repositoryWith(async (statement) => {
+      if (statement.includes('FROM connector_consent_grant')) {
+        return [[activeGrantContextRow({ transaction_step: 'consumed' })], []];
+      }
+      return [resultHeader(), []];
+    });
 
     await repository.storeRefreshToken(refreshRecord);
 
     expect(commit).toHaveBeenCalledOnce();
-    expect(calls).toHaveLength(2);
-    expect(calls[0]?.statement).toContain('oauth_refresh_token_family');
-    expect(calls[1]?.statement).toContain('oauth_refresh_token');
-    expect(calls[1]?.values[0]).toEqual(Buffer.from(refreshRecord.tokenDigest));
+    expect(calls).toHaveLength(3);
+    expect(calls[0]?.statement).toMatch(/connector_consent_grant[\s\S]*FOR UPDATE/u);
+    expect(calls[1]?.statement).toContain('oauth_refresh_token_family');
+    expect(calls[2]?.statement).toContain('oauth_refresh_token');
+    expect(calls[2]?.values[0]).toEqual(Buffer.from(refreshRecord.tokenDigest));
     expect(calls.flatMap((call) => call.values)).not.toContain('raw-refresh-token');
   });
 

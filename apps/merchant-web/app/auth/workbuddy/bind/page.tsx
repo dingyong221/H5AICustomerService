@@ -2,44 +2,19 @@ import type { Metadata } from 'next';
 
 import { PageShell, StatusBadge } from '@h5cs/ui';
 
-import { WorkBuddyAuthorizationStatePanel } from '../authorization-state-panel';
-import { buildWorkBuddyConnectionViewModel } from '../connection-view-model';
-import { loadTrustedWorkBuddyAuthorizationSnapshot } from '../trusted-server-state';
+import { WorkBuddyAuthorizationFlow } from '../authorization-flow';
 
 export const metadata: Metadata = {
   description: '由可信服务端状态驱动的WorkBuddy身份绑定与商家确认页面。',
   title: 'WorkBuddy 安全绑定',
 };
 
-type SearchParameters = Record<string, string | readonly string[] | undefined>;
-
-export default async function WorkBuddyBindingPage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParameters>;
-}) {
-  const untrustedCallbackPresent = Object.keys(await searchParams).length > 0;
-  const trustedServerSnapshot = await loadTrustedWorkBuddyAuthorizationSnapshot();
-  const connection = buildWorkBuddyConnectionViewModel({
-    applicationOrigin: process.env['MERCHANT_WEB_ORIGIN'],
-    trustedServerSnapshot,
-    untrustedCallbackPresent,
-  });
-
+export default function WorkBuddyBindingPage() {
   return (
     <PageShell
-      aside={<StatusBadge tone={connection.tone}>{connection.label}</StatusBadge>}
+      aside={<StatusBadge tone="info">服务端状态检查</StatusBadge>}
       description={<p>身份绑定与商家候选只能来自服务端会话和权威Membership。</p>}
       eyebrow="Secure Binding"
-      notice={
-        <div className="connection-banner" role="status">
-          <span aria-hidden="true" className="connection-banner__pulse" />
-          <div>
-            <strong>{connection.label}</strong>
-            <span>{connection.description}</span>
-          </div>
-        </div>
-      }
       title="绑定身份并确认授权商家"
     >
       <section className="login-gate">
@@ -51,7 +26,10 @@ export default async function WorkBuddyBindingPage({
           </p>
         </div>
       </section>
-      <WorkBuddyAuthorizationStatePanel backHref="/login" model={connection} />
+      <WorkBuddyAuthorizationFlow
+        apiBaseUrl={process.env['NEXT_PUBLIC_MERCHANT_API_BASE_URL']}
+        backHref="/login"
+      />
     </PageShell>
   );
 }

@@ -143,6 +143,57 @@ describe('onboarding API client boundary', () => {
     ).rejects.toMatchObject({ kind: 'request_failed', requestId: undefined });
   });
 
+  it('rejects unknown fields in success and error envelopes instead of stripping them', async () => {
+    const successClient = createOnboardingApiClient({
+      apiBaseUrl: '/api/v1/skill',
+      fetchImpl: vi.fn<typeof fetch>(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                action: 'continue_onboarding',
+                internal: 'must-not-be-trusted',
+                missing_items: [],
+                onboarding_session_id: sessionId,
+                state: 'industry',
+              },
+              request_id: 'request-extra-success',
+            }),
+            { status: 200 },
+          ),
+      ),
+      getAccessToken: () => 'token',
+      origin: 'https://merchant.test',
+    });
+    await expect(
+      successClient.startOrResume({ idempotencyKey: 'reserved-key' }),
+    ).rejects.toMatchObject({ kind: 'invalid_response' });
+
+    const errorClient = createOnboardingApiClient({
+      apiBaseUrl: '/api/v1/skill',
+      fetchImpl: vi.fn<typeof fetch>(
+        async () =>
+          new Response(
+            JSON.stringify({
+              error: {
+                code: 'VERSION_CONFLICT',
+                internal: 'must-not-be-trusted',
+                message: 'stale',
+                retryable: false,
+              },
+              request_id: 'request-extra-error',
+            }),
+            { status: 409 },
+          ),
+      ),
+      getAccessToken: () => 'token',
+      origin: 'https://merchant.test',
+    });
+    await expect(
+      errorClient.startOrResume({ idempotencyKey: 'reserved-key' }),
+    ).rejects.toMatchObject({ kind: 'request_failed', requestId: undefined });
+  });
+
   it('keeps binding, merchant selection and generation availability distinct from conflicts', async () => {
     const cases = [
       ['BINDING_REQUIRED', 'binding_required'],
