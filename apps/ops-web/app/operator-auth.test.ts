@@ -24,7 +24,9 @@ describe('platform operator authentication', () => {
   it('fails closed without all four production configuration values', () => {
     const values = environment();
     expect(loadOperatorAuthConfig({ ...values, OPS_ADMIN_PASSWORD_HASH: '' })).toBeNull();
-    expect(loadOperatorAuthConfig({ ...values, OPS_PUBLIC_ORIGIN: 'http://ops.example.test' })).toBeNull();
+    expect(
+      loadOperatorAuthConfig({ ...values, OPS_PUBLIC_ORIGIN: 'http://ops.example.test' }),
+    ).toBeNull();
   });
 
   it('verifies the configured credential and rejects changed credentials', () => {

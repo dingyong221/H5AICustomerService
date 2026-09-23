@@ -22,14 +22,28 @@ export function SetupForm() {
       <p>领取链接绑定一位商家负责人；已有平台账号可用原手机号和密码领取。</p>
       <label>
         负责人手机号
-        <input autoComplete="tel" inputMode="tel" name="phone" placeholder="中国大陆手机号" required />
+        <input
+          autoComplete="tel"
+          inputMode="tel"
+          name="phone"
+          placeholder="中国大陆手机号"
+          required
+        />
       </label>
       <label>
         {`平台登录密码（至少 12 位）`}
-        <input autoComplete="new-password" minLength={12} name="password" required type="password" />
+        <input
+          autoComplete="new-password"
+          minLength={12}
+          name="password"
+          required
+          type="password"
+        />
       </label>
       {state.error ? <p role="alert">{state.error}</p> : null}
-      {!setupToken ? <p role="alert">领取链接无效或已从地址栏移除，请向平台运营重新获取。</p> : null}
+      {!setupToken ? (
+        <p role="alert">领取链接无效或已从地址栏移除，请向平台运营重新获取。</p>
+      ) : null}
       <button disabled={pending || !setupToken} type="submit">
         {pending ? '正在领取…' : '领取商家后台'}
       </button>

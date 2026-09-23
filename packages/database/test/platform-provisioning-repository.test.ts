@@ -34,23 +34,33 @@ const repositoryWith = (failOn?: string) => {
 describe('platform merchant provisioning', () => {
   it('commits a pending merchant, one-time digest, and audit record together', async () => {
     const { repository, calls, commit, rollback } = repositoryWith();
-    const created = await repository.provisionMerchant({ name: '  示例商家  ', operatorId: 'ops-1' });
+    const created = await repository.provisionMerchant({
+      name: '  示例商家  ',
+      operatorId: 'ops-1',
+    });
 
     expect(created).toMatchObject({ name: '示例商家', status: 'pending_owner' });
     expect(created.setupToken).toMatch(/^[A-Za-z0-9_-]{43}$/u);
     const invite = calls.find((call) => call.sql.includes('INSERT INTO merchant_setup_invitation'));
     expect(invite).toBeDefined();
-    expect(invite!.values[0]).toEqual(createHash('sha256').update(created.setupToken, 'ascii').digest());
-    expect(calls.some((call) => JSON.stringify(call.values).includes(created.setupToken))).toBe(false);
+    expect(invite!.values[0]).toEqual(
+      createHash('sha256').update(created.setupToken, 'ascii').digest(),
+    );
+    expect(calls.some((call) => JSON.stringify(call.values).includes(created.setupToken))).toBe(
+      false,
+    );
     expect(calls.some((call) => call.sql.includes('INSERT INTO audit_log'))).toBe(true);
     expect(commit).toHaveBeenCalledOnce();
     expect(rollback).not.toHaveBeenCalled();
   });
 
   it('rolls back if the invitation cannot be inserted', async () => {
-    const { repository, commit, rollback } = repositoryWith('INSERT INTO merchant_setup_invitation');
-    await expect(repository.provisionMerchant({ name: '示例商家', operatorId: 'ops-1' }))
-      .rejects.toThrow('simulated database failure');
+    const { repository, commit, rollback } = repositoryWith(
+      'INSERT INTO merchant_setup_invitation',
+    );
+    await expect(
+      repository.provisionMerchant({ name: '示例商家', operatorId: 'ops-1' }),
+    ).rejects.toThrow('simulated database failure');
     expect(commit).not.toHaveBeenCalled();
     expect(rollback).toHaveBeenCalledOnce();
   });

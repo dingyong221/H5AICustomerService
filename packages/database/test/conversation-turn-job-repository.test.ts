@@ -18,14 +18,20 @@ const visitorMessageId = id('77');
 const now = new Date('2026-09-24T00:00:00.000Z');
 const resultHeader = { affectedRows: 1 } as ResultSetHeader;
 const payload = {
-  merchantId: merchantId.toString('hex'), assistantId: assistantId.toString('hex'),
-  sessionId: sessionId.toString('hex'), releaseId: releaseId.toString('hex'),
+  merchantId: merchantId.toString('hex'),
+  assistantId: assistantId.toString('hex'),
+  sessionId: sessionId.toString('hex'),
+  releaseId: releaseId.toString('hex'),
   turnId: `t_${turnId.toString('hex')}`,
 };
 const facts = {
-  displayName: '蓝天客服', industry: '家庭服务', businessScope: '空调清洗',
-  materialsSummary: '提供挂机清洗', pricingSummary: '100 元/台',
-  promotionSummary: '暂无优惠', insufficientInfoMessage: '请联系商家确认',
+  displayName: '蓝天客服',
+  industry: '家庭服务',
+  businessScope: '空调清洗',
+  materialsSummary: '提供挂机清洗',
+  pricingSummary: '100 元/台',
+  promotionSummary: '暂无优惠',
+  insufficientInfoMessage: '请联系商家确认',
 };
 
 const repositoryWith = (
@@ -53,11 +59,17 @@ const repositoryWith = (
 };
 
 const acceptedClaim: ConversationTurnClaim = {
-  jobId: jobId.toString('hex'), leaseOwner: 'worker_test_01',
-  merchantId: merchantId.toString('hex'), assistantId: assistantId.toString('hex'),
-  sessionId: sessionId.toString('hex'), releaseId: releaseId.toString('hex'),
-  turnId: turnId.toString('hex'), visitorMessageId: visitorMessageId.toString('hex'),
-  question: '清洗多少钱？', facts, context: [],
+  jobId: jobId.toString('hex'),
+  leaseOwner: 'worker_test_01',
+  merchantId: merchantId.toString('hex'),
+  assistantId: assistantId.toString('hex'),
+  sessionId: sessionId.toString('hex'),
+  releaseId: releaseId.toString('hex'),
+  turnId: turnId.toString('hex'),
+  visitorMessageId: visitorMessageId.toString('hex'),
+  question: '清洗多少钱？',
+  facts,
+  context: [],
 };
 
 describe('MySQL conversation turn jobs', () => {
@@ -67,26 +79,49 @@ describe('MySQL conversation turn jobs', () => {
         return [[{ id: jobId, merchant_id: merchantId, payload, attempt: 0, max_attempts: 5 }], []];
       }
       if (statement.includes('FROM conversation_session')) {
-        return [[{
-          merchant_id: merchantId, assistant_id: assistantId, release_id: releaseId,
-          active_turn_id: turnId, next_sequence: 2, status: 'active',
-          expires_at: new Date(now.getTime() + 60_000),
-          merchant_status: 'active', assistant_status: 'active', config_snapshot: facts,
-        }], []];
+        return [
+          [
+            {
+              merchant_id: merchantId,
+              assistant_id: assistantId,
+              release_id: releaseId,
+              active_turn_id: turnId,
+              next_sequence: 2,
+              status: 'active',
+              expires_at: new Date(now.getTime() + 60_000),
+              merchant_status: 'active',
+              assistant_status: 'active',
+              config_snapshot: facts,
+            },
+          ],
+          [],
+        ];
       }
       if (statement.includes("role = 'visitor'")) {
-        return [[{ id: visitorMessageId, seq_no: 1, content: '清洗多少钱？', state: 'accepted' }], []];
+        return [
+          [{ id: visitorMessageId, seq_no: 1, content: '清洗多少钱？', state: 'accepted' }],
+          [],
+        ];
       }
       if (statement.includes("state = 'completed'")) {
-        return [[{ role: 'assistant', content: '你好' }, { role: 'visitor', content: '你好' }], []];
+        return [
+          [
+            { role: 'assistant', content: '你好' },
+            { role: 'visitor', content: '你好' },
+          ],
+          [],
+        ];
       }
       return [resultHeader, []];
     });
     const claim = await repository.claimNext(now, 'worker_test_01');
     expect(claim).toMatchObject({
-      jobId: jobId.toString('hex'), releaseId: releaseId.toString('hex'),
-      question: '清洗多少钱？', context: [
-        { role: 'visitor', content: '你好' }, { role: 'assistant', content: '你好' },
+      jobId: jobId.toString('hex'),
+      releaseId: releaseId.toString('hex'),
+      question: '清洗多少钱？',
+      context: [
+        { role: 'visitor', content: '你好' },
+        { role: 'assistant', content: '你好' },
       ],
     });
     expect(calls[0]?.statement).toContain('FOR UPDATE SKIP LOCKED');
@@ -100,12 +135,23 @@ describe('MySQL conversation turn jobs', () => {
         return [[{ id: jobId, merchant_id: merchantId, payload, attempt: 0, max_attempts: 5 }], []];
       }
       if (statement.includes('FROM conversation_session')) {
-        return [[{
-          merchant_id: merchantId, assistant_id: assistantId, release_id: releaseId,
-          active_turn_id: turnId, next_sequence: 2, status: 'active',
-          expires_at: new Date(now.getTime() + 60_000),
-          merchant_status: 'active', assistant_status: 'active', config_snapshot: {},
-        }], []];
+        return [
+          [
+            {
+              merchant_id: merchantId,
+              assistant_id: assistantId,
+              release_id: releaseId,
+              active_turn_id: turnId,
+              next_sequence: 2,
+              status: 'active',
+              expires_at: new Date(now.getTime() + 60_000),
+              merchant_status: 'active',
+              assistant_status: 'active',
+              config_snapshot: {},
+            },
+          ],
+          [],
+        ];
       }
       if (statement.includes("role = 'visitor'")) {
         return [[{ id: visitorMessageId, seq_no: 1, content: '问题', state: 'accepted' }], []];
@@ -113,8 +159,13 @@ describe('MySQL conversation turn jobs', () => {
       return [resultHeader, []];
     });
     await expect(repository.claimNext(now, 'worker_test_01')).resolves.toBeNull();
-    expect(calls.some((call) => call.statement.includes("SET state = 'failed'") &&
-      call.values[0] === 'KNOWLEDGE_UNAVAILABLE')).toBe(true);
+    expect(
+      calls.some(
+        (call) =>
+          call.statement.includes("SET state = 'failed'") &&
+          call.values[0] === 'KNOWLEDGE_UNAVAILABLE',
+      ),
+    ).toBe(true);
     expect(calls.some((call) => call.statement.includes('SET active_turn_id = NULL'))).toBe(true);
     expect(commit).toHaveBeenCalledOnce();
   });
@@ -123,16 +174,31 @@ describe('MySQL conversation turn jobs', () => {
     const { repository, calls, commit } = repositoryWith(async (statement) => {
       if (statement.includes('SELECT id FROM job')) return [[{ id: jobId }], []];
       if (statement.includes('SELECT cs.active_turn_id')) {
-        return [[{ active_turn_id: turnId, next_sequence: 2,
-          merchant_status: 'active', assistant_status: 'active' }], []];
+        return [
+          [
+            {
+              active_turn_id: turnId,
+              next_sequence: 2,
+              merchant_status: 'active',
+              assistant_status: 'active',
+            },
+          ],
+          [],
+        ];
       }
       return [resultHeader, []];
     });
     await repository.complete(acceptedClaim, '根据资料，100 元/台。', now);
-    expect(calls.some((call) => call.statement.includes('INSERT INTO message') &&
-      call.statement.includes("'assistant', 'completed'"))).toBe(true);
-    expect(calls.some((call) => call.statement.includes('next_sequence = ?') &&
-      call.values[0] === 3)).toBe(true);
+    expect(
+      calls.some(
+        (call) =>
+          call.statement.includes('INSERT INTO message') &&
+          call.statement.includes("'assistant', 'completed'"),
+      ),
+    ).toBe(true);
+    expect(
+      calls.some((call) => call.statement.includes('next_sequence = ?') && call.values[0] === 3),
+    ).toBe(true);
     expect(commit).toHaveBeenCalledOnce();
   });
 });

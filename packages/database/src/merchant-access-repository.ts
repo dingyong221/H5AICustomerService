@@ -233,7 +233,11 @@ export class MySqlMerchantAccessRepository {
       if (memberships.length !== 1) {
         throw new MerchantAccessError('请选择有权管理的商家');
       }
-      return this.#issueSession(connection, credential.merchant_user_id, memberships[0]!.merchant_id);
+      return this.#issueSession(
+        connection,
+        credential.merchant_user_id,
+        memberships[0]!.merchant_id,
+      );
     } finally {
       await connection.end();
     }
@@ -270,7 +274,11 @@ export class MySqlMerchantAccessRepository {
           LIMIT 2`,
         parameters,
       );
-      if (rows.length !== 1 || rows[0]!.revoked_at !== null || rows[0]!.expires_at.getTime() <= Date.now()) {
+      if (
+        rows.length !== 1 ||
+        rows[0]!.revoked_at !== null ||
+        rows[0]!.expires_at.getTime() <= Date.now()
+      ) {
         return null;
       }
       return {

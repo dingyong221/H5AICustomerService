@@ -30,7 +30,9 @@ export function ConfirmKnowledgeForm({
         我已逐项核对以上资料，确认其真实、有效，并同意将其作为客服回答的业务依据。
       </label>
       {state.error ? <p role="alert">{state.error}</p> : null}
-      {confirmed ? <p role="status">当前草稿资料已确认；正式发布仍需完成对话服务与发布检查。</p> : null}
+      {confirmed ? (
+        <p role="status">当前草稿资料已确认；正式发布仍需完成对话服务与发布检查。</p>
+      ) : null}
       <button disabled={confirmed || pending} type="submit">
         {pending ? '正在确认…' : '确认当前草稿资料'}
       </button>

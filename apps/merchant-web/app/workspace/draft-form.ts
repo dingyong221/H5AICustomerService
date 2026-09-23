@@ -5,11 +5,13 @@ export function parseAssistantDraftForm(formData: FormData): AssistantDraftConfi
     const value = formData.get(name);
     if (typeof value !== 'string') return null;
     const normalized = (multiline ? value.replace(/\r\n?/gu, '\n') : value).trim();
-    return normalized.length > 0 && normalized.length <= maximum &&
+    return normalized.length > 0 &&
+      normalized.length <= maximum &&
       !(multiline
         ? /[\u0000-\u0009\u000b-\u001f\u007f]/u.test(normalized)
         : /[\u0000-\u001f\u007f]/u.test(normalized))
-      ? normalized : null;
+      ? normalized
+      : null;
   };
   const industry = field('industry', 128);
   const businessScope = field('businessScope', 2_000, true);
@@ -19,9 +21,15 @@ export function parseAssistantDraftForm(formData: FormData): AssistantDraftConfi
   const welcomeMessage = field('welcomeMessage', 500);
   const insufficientInfoMessage = field('insufficientInfoMessage', 500);
   if (
-    !industry || !businessScope || !materialsSummary || !pricingSummary ||
-    !promotionSummary || !welcomeMessage || !insufficientInfoMessage
-  ) return null;
+    !industry ||
+    !businessScope ||
+    !materialsSummary ||
+    !pricingSummary ||
+    !promotionSummary ||
+    !welcomeMessage ||
+    !insufficientInfoMessage
+  )
+    return null;
   return {
     industry,
     businessScope,

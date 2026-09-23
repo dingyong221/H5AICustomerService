@@ -4,7 +4,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Connection, ResultSetHeader } from 'mysql2/promise';
 
 import type { DatabaseConnectionConfig } from '../src/config.js';
-import { MerchantAccessError, MySqlMerchantAccessRepository } from '../src/merchant-access-repository.js';
+import {
+  MerchantAccessError,
+  MySqlMerchantAccessRepository,
+} from '../src/merchant-access-repository.js';
 
 const merchantId = Buffer.from('11'.repeat(16), 'hex');
 const merchantUserId = Buffer.from('22'.repeat(16), 'hex');
@@ -21,21 +24,31 @@ const repositoryWith = (invitationExpired = false) => {
     execute: async (sql: string, values: readonly unknown[] = []) => {
       calls.push({ sql, values });
       if (sql.includes('FROM merchant_setup_invitation')) {
-        return [[{
-          merchant_id: merchantId,
-          status: 'pending_owner',
-          expires_at: new Date(Date.now() + (invitationExpired ? -1 : 60_000)),
-          claimed_at: null,
-        }], []];
+        return [
+          [
+            {
+              merchant_id: merchantId,
+              status: 'pending_owner',
+              expires_at: new Date(Date.now() + (invitationExpired ? -1 : 60_000)),
+              claimed_at: null,
+            },
+          ],
+          [],
+        ];
       }
       if (sql.includes('FROM merchant_password_credential')) return [[], []];
       if (sql.includes('FROM platform_login_session')) {
-        return [[{
-          merchant_user_id: merchantUserId,
-          merchant_id: merchantId,
-          expires_at: new Date(Date.now() + 60_000),
-          revoked_at: null,
-        }], []];
+        return [
+          [
+            {
+              merchant_user_id: merchantUserId,
+              merchant_id: merchantId,
+              expires_at: new Date(Date.now() + 60_000),
+              revoked_at: null,
+            },
+          ],
+          [],
+        ];
       }
       return [resultHeader, []];
     },
@@ -49,19 +62,32 @@ const repositoryWith = (invitationExpired = false) => {
     summary: { host: 'test', database: 'test', tlsRequested: false },
     toJSON: () => ({ host: 'test', database: 'test', tlsRequested: false }),
   } satisfies DatabaseConnectionConfig;
-  return { repository: new MySqlMerchantAccessRepository(database, phoneKey), calls, commit, rollback };
+  return {
+    repository: new MySqlMerchantAccessRepository(database, phoneKey),
+    calls,
+    commit,
+    rollback,
+  };
 };
 
 describe('merchant invitation and scoped session', () => {
   it('claims one invitation, activates its merchant, and stores only credential digests', async () => {
     const { repository, calls, commit, rollback } = repositoryWith();
-    const session = await repository.claimInvitation({ setupToken, phone: '13800138000', password });
+    const session = await repository.claimInvitation({
+      setupToken,
+      phone: '13800138000',
+      password,
+    });
 
     expect(session.merchantId).toBe(merchantId.toString('hex'));
     expect(session.sessionToken).toMatch(/^[A-Za-z0-9_-]{43}$/u);
-    expect(calls.some((call) => call.sql.includes("INSERT INTO merchant_membership"))).toBe(true);
-    expect(calls.some((call) => call.sql.includes("UPDATE merchant SET status = 'active'"))).toBe(true);
-    const sessionInsert = calls.find((call) => call.sql.includes('INSERT INTO platform_login_session'));
+    expect(calls.some((call) => call.sql.includes('INSERT INTO merchant_membership'))).toBe(true);
+    expect(calls.some((call) => call.sql.includes("UPDATE merchant SET status = 'active'"))).toBe(
+      true,
+    );
+    const sessionInsert = calls.find((call) =>
+      call.sql.includes('INSERT INTO platform_login_session'),
+    );
     expect(sessionInsert?.sql).toContain('merchant_id');
     expect(sessionInsert?.values[2]).toEqual(merchantId);
     expect(calls.some((call) => JSON.stringify(call.values).includes(setupToken))).toBe(false);
@@ -73,8 +99,9 @@ describe('merchant invitation and scoped session', () => {
 
   it('does not consume an expired invitation', async () => {
     const { repository, calls, commit, rollback } = repositoryWith(true);
-    await expect(repository.claimInvitation({ setupToken, phone: '13800138000', password }))
-      .rejects.toBeInstanceOf(MerchantAccessError);
+    await expect(
+      repository.claimInvitation({ setupToken, phone: '13800138000', password }),
+    ).rejects.toBeInstanceOf(MerchantAccessError);
     expect(calls.some((call) => call.sql.includes('INSERT INTO merchant_membership'))).toBe(false);
     expect(commit).not.toHaveBeenCalled();
     expect(rollback).toHaveBeenCalledOnce();
@@ -100,7 +127,8 @@ describe('merchant invitation and scoped session', () => {
     expect(lookup?.sql).toContain('s.csrf_digest = ?');
     expect(lookup?.values[1]).toEqual(createHash('sha256').update(csrfToken, 'ascii').digest());
     expect(lookup?.values[2]).toEqual(merchantId);
-    expect(await repository.resolveSession(sessionToken, merchantId.toString('hex'), 'invalid'))
-      .toBeNull();
+    expect(
+      await repository.resolveSession(sessionToken, merchantId.toString('hex'), 'invalid'),
+    ).toBeNull();
   });
 });

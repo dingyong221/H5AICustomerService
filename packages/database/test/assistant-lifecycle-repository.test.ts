@@ -51,7 +51,9 @@ const sampleDraft: AssistantDraftConfig = {
   welcomeMessage: '你好，我是蓝天服务客服。',
   insufficientInfoMessage: '当前资料不足，请联系商家确认。',
 };
-const sampleContentHash = createHash('sha256').update(JSON.stringify(sampleDraft), 'utf8').digest('hex');
+const sampleContentHash = createHash('sha256')
+  .update(JSON.stringify(sampleDraft), 'utf8')
+  .digest('hex');
 
 const managementRow = (overrides: Record<string, unknown> = {}) => ({
   assistant_id: Buffer.from(assistantId, 'hex'),
@@ -191,7 +193,9 @@ describe('MySQL assistant lifecycle repository', () => {
     expect(calls[1]?.statement).toMatch(/state = 'generating'[\s\S]*FOR UPDATE/u);
     expect(calls[2]?.statement).toMatch(/INSERT INTO assistant/u);
     expect(calls[3]?.statement).toMatch(/INSERT INTO assistant_draft/u);
-    expect(calls[3]?.values).toContain(JSON.stringify({ publishable: false, reason: 'knowledge_not_verified' }));
+    expect(calls[3]?.values).toContain(
+      JSON.stringify({ publishable: false, reason: 'knowledge_not_verified' }),
+    );
     expect(calls[4]?.statement).toMatch(/state = 'manageable'/u);
     expect(calls[5]?.statement).toMatch(/state = 'succeeded'/u);
     expect(calls[6]?.statement).toMatch(/INSERT INTO outbox_event/u);
@@ -201,7 +205,8 @@ describe('MySQL assistant lifecycle repository', () => {
   it('creates a merchant-scoped manual draft but keeps it unpublishable', async () => {
     const { repository, calls, commit } = repositoryWith(
       async (statement) => {
-        if (statement.includes('FROM merchant_membership mm')) return [[{ merchant_id: Buffer.from(merchantId, 'hex') }], []];
+        if (statement.includes('FROM merchant_membership mm'))
+          return [[{ merchant_id: Buffer.from(merchantId, 'hex') }], []];
         return [resultHeader(), []];
       },
       [
@@ -211,41 +216,57 @@ describe('MySQL assistant lifecycle repository', () => {
       ],
     );
 
-    await expect(repository.createManualDraft({
-      merchantUserId,
-      merchantId,
-      displayName: '蓝天服务客服',
-      draft: managementRow().config as AssistantDraftConfig,
-      idempotency: idem,
-      now,
-    })).resolves.toMatchObject({ assistantId, status: 'draft_only', draftRevision: 1 });
+    await expect(
+      repository.createManualDraft({
+        merchantUserId,
+        merchantId,
+        displayName: '蓝天服务客服',
+        draft: managementRow().config as AssistantDraftConfig,
+        idempotency: idem,
+        now,
+      }),
+    ).resolves.toMatchObject({ assistantId, status: 'draft_only', draftRevision: 1 });
 
     expect(calls[0]?.statement).toMatch(/merchant_membership[\s\S]*FOR UPDATE/u);
     expect(calls[1]?.statement).toMatch(/INSERT INTO idempotency_record/u);
     expect(calls[2]?.statement).toMatch(/INSERT INTO assistant/u);
-    expect(calls[3]?.values).toContain(JSON.stringify({ publishable: false, reason: 'knowledge_not_verified' }));
+    expect(calls[3]?.values).toContain(
+      JSON.stringify({ publishable: false, reason: 'knowledge_not_verified' }),
+    );
     expect(commit).toHaveBeenCalledOnce();
   });
 
   it('records merchant-confirmed text as ready knowledge for the exact draft revision', async () => {
-    const { repository, calls, commit } = repositoryWith(async (statement) => {
-      if (statement.includes('FROM assistant a') && statement.includes('FOR UPDATE')) {
-        return [[managementRow({ validation: { publishable: false, reason: 'knowledge_not_verified' } })], []];
-      }
-      return [resultHeader(), []];
-    }, [
-      Buffer.from('bb'.repeat(16), 'hex'),
-      Buffer.from(knowledgeRevisionId, 'hex'),
-      Buffer.from('cc'.repeat(16), 'hex'),
-    ]);
+    const { repository, calls, commit } = repositoryWith(
+      async (statement) => {
+        if (statement.includes('FROM assistant a') && statement.includes('FOR UPDATE')) {
+          return [
+            [
+              managementRow({
+                validation: { publishable: false, reason: 'knowledge_not_verified' },
+              }),
+            ],
+            [],
+          ];
+        }
+        return [resultHeader(), []];
+      },
+      [
+        Buffer.from('bb'.repeat(16), 'hex'),
+        Buffer.from(knowledgeRevisionId, 'hex'),
+        Buffer.from('cc'.repeat(16), 'hex'),
+      ],
+    );
 
-    await expect(repository.confirmDraftKnowledge({
-      merchantUserId,
-      merchantId,
-      assistantId,
-      expectedDraftRevision: 1,
-      now,
-    })).resolves.toEqual({ knowledgeRevisionId, draftRevision: 1 });
+    await expect(
+      repository.confirmDraftKnowledge({
+        merchantUserId,
+        merchantId,
+        assistantId,
+        expectedDraftRevision: 1,
+        now,
+      }),
+    ).resolves.toEqual({ knowledgeRevisionId, draftRevision: 1 });
     expect(calls[1]?.statement).toContain('INSERT INTO knowledge_source');
     expect(calls[2]?.statement).toContain('INSERT INTO knowledge_revision');
     expect(calls[2]?.values).toContain('merchant-confirmed-v1');
@@ -265,13 +286,15 @@ describe('MySQL assistant lifecycle repository', () => {
       throw new Error('unexpected write after confirmation');
     });
 
-    await expect(repository.confirmDraftKnowledge({
-      merchantUserId,
-      merchantId,
-      assistantId,
-      expectedDraftRevision: 1,
-      now,
-    })).resolves.toEqual({ knowledgeRevisionId, draftRevision: 1 });
+    await expect(
+      repository.confirmDraftKnowledge({
+        merchantUserId,
+        merchantId,
+        assistantId,
+        expectedDraftRevision: 1,
+        now,
+      }),
+    ).resolves.toEqual({ knowledgeRevisionId, draftRevision: 1 });
     expect(calls).toHaveLength(2);
     expect(commit).toHaveBeenCalledOnce();
   });
@@ -441,7 +464,10 @@ describe('MySQL assistant lifecycle repository', () => {
   it('does not publish an unverified manual draft', async () => {
     const { repository, calls, rollback } = repositoryWith(async (statement) => {
       if (statement.includes('FROM assistant a') && statement.includes('FOR UPDATE')) {
-        return [[managementRow({ validation: { publishable: false, reason: 'knowledge_not_verified' } })], []];
+        return [
+          [managementRow({ validation: { publishable: false, reason: 'knowledge_not_verified' } })],
+          [],
+        ];
       }
       return [resultHeader(), []];
     });
@@ -459,7 +485,9 @@ describe('MySQL assistant lifecycle repository', () => {
         now,
       }),
     ).rejects.toBeInstanceOf(AssistantPublishValidationError);
-    expect(calls.some((call) => call.statement.includes('INSERT INTO assistant_release'))).toBe(false);
+    expect(calls.some((call) => call.statement.includes('INSERT INTO assistant_release'))).toBe(
+      false,
+    );
     expect(rollback).toHaveBeenCalledOnce();
   });
 
@@ -472,18 +500,22 @@ describe('MySQL assistant lifecycle repository', () => {
       return [resultHeader(), []];
     });
 
-    await expect(repository.publish({
-      merchantUserId,
-      merchantId,
-      assistantId,
-      expectedDraftRevision: 1,
-      promptTemplateVersion: 'prompt-v1',
-      retrievalPolicyVersion: 'retrieval-v1',
-      modelPolicyVersion: 'model-v1',
-      idempotency: idem,
-      now,
-    })).rejects.toBeInstanceOf(AssistantPublishValidationError);
-    expect(calls.some((call) => call.statement.includes('INSERT INTO assistant_release'))).toBe(false);
+    await expect(
+      repository.publish({
+        merchantUserId,
+        merchantId,
+        assistantId,
+        expectedDraftRevision: 1,
+        promptTemplateVersion: 'prompt-v1',
+        retrievalPolicyVersion: 'retrieval-v1',
+        modelPolicyVersion: 'model-v1',
+        idempotency: idem,
+        now,
+      }),
+    ).rejects.toBeInstanceOf(AssistantPublishValidationError);
+    expect(calls.some((call) => call.statement.includes('INSERT INTO assistant_release'))).toBe(
+      false,
+    );
     expect(rollback).toHaveBeenCalledOnce();
   });
 

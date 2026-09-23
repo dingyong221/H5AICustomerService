@@ -29,22 +29,24 @@ export default async function AssistantDraftPage({
   if (!database.configured) return <p role="alert">数据库尚未配置，无法读取客服草稿。</p>;
   let assistant;
   try {
-    assistant = await new MySqlAssistantLifecycleRepository(database.config)
-      .findManagementSnapshot(toMerchantId(merchantId), toAssistantId(assistantId));
+    assistant = await new MySqlAssistantLifecycleRepository(database.config).findManagementSnapshot(
+      toMerchantId(merchantId),
+      toAssistantId(assistantId),
+    );
   } catch {
     return <p role="alert">客服草稿暂不可用，请稍后重试。</p>;
   }
   if (!assistant) notFound();
   const policy = publicationPolicy();
   const merchantOrigin = process.env['MERCHANT_PUBLIC_ORIGIN'];
-  const csrfCookieName = merchantOrigin?.startsWith('https:')
-    ? '__Host-h5cs-csrf' : 'h5cs_csrf';
+  const csrfCookieName = merchantOrigin?.startsWith('https:') ? '__Host-h5cs-csrf' : 'h5cs_csrf';
   const csrfToken = (await cookies()).get(csrfCookieName)?.value ?? '';
   let verifiedPublicUrl: string | null = null;
   if (policy.ready && assistant.status === 'active' && assistant.activeReleaseId) {
     try {
-      const publicSnapshot = await new MySqlAssistantLifecycleRepository(database.config)
-        .findPublicSnapshot(assistant.publicSlug);
+      const publicSnapshot = await new MySqlAssistantLifecycleRepository(
+        database.config,
+      ).findPublicSnapshot(assistant.publicSlug);
       if (publicSnapshot?.releaseRef === assistant.activeReleaseId) {
         verifiedPublicUrl = publicAssistantUrl(policy.consumerOrigin, assistant.publicSlug);
       }
@@ -52,7 +54,8 @@ export default async function AssistantDraftPage({
       verifiedPublicUrl = null;
     }
   }
-  const publishReady = policy.ready && assistant.knowledgeConfirmed && assistant.status !== 'paused';
+  const publishReady =
+    policy.ready && assistant.knowledgeConfirmed && assistant.status !== 'paused';
   const publishReason = !policy.ready
     ? policy.reason
     : !assistant.knowledgeConfirmed
@@ -85,7 +88,10 @@ export default async function AssistantDraftPage({
         </div>
         <dl className="assistant-facts">
           {facts.map(([label, value]) => (
-            <div key={label}><dt>{label}</dt><dd>{value}</dd></div>
+            <div key={label}>
+              <dt>{label}</dt>
+              <dd>{value}</dd>
+            </div>
           ))}
         </dl>
       </section>
@@ -112,12 +118,20 @@ export default async function AssistantDraftPage({
       <section className="merchant-account-card assistant-detail-card">
         <h2>发布与消费者链接</h2>
         {assistant.activeReleaseId ? (
-          <p>已有线上版本：{assistant.activeReleaseId}。
-            {verifiedPublicUrl
-              ? <> 消费者链接：<a href={verifiedPublicUrl}>{verifiedPublicUrl}</a></>
-              : ' 当前公开服务未通过运行态校验，请勿分享链接。'}
+          <p>
+            已有线上版本：{assistant.activeReleaseId}。
+            {verifiedPublicUrl ? (
+              <>
+                {' '}
+                消费者链接：<a href={verifiedPublicUrl}>{verifiedPublicUrl}</a>
+              </>
+            ) : (
+              ' 当前公开服务未通过运行态校验，请勿分享链接。'
+            )}
           </p>
-        ) : <p>尚未发布。确认资料不会自动开放消费者咨询。</p>}
+        ) : (
+          <p>尚未发布。确认资料不会自动开放消费者咨询。</p>
+        )}
         <PublishAssistantForm
           merchantId={merchantId}
           assistantId={assistantId}

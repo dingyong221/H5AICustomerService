@@ -90,7 +90,9 @@ export default async function OperationsDashboardPage() {
     <PageShell
       aside={
         <form action={logoutOperator}>
-          <button className="ops-logout" type="submit">退出登录</button>
+          <button className="ops-logout" type="submit">
+            退出登录
+          </button>
         </form>
       }
       description={<p>聚焦商家状态、后台任务与敏感操作审计。消费者内容默认不在运营总览展示。</p>}
@@ -116,7 +118,11 @@ export default async function OperationsDashboardPage() {
         <div className="ops-metrics">
           <article>
             <span>活跃商家</span>
-            <strong>{databaseReady ? merchants.filter((merchant) => merchant.status === 'active').length : '—'}</strong>
+            <strong>
+              {databaseReady
+                ? merchants.filter((merchant) => merchant.status === 'active').length
+                : '—'}
+            </strong>
             <small>{databaseReady ? '当前已载入列表' : '尚未查询'}</small>
           </article>
           <article>
@@ -147,12 +153,16 @@ export default async function OperationsDashboardPage() {
         {databaseReady ? (
           <div className="ops-merchant-list" id="merchants">
             <h3>最近商家</h3>
-            {merchants.length === 0 ? <p>尚无商家记录。</p> : (
+            {merchants.length === 0 ? (
+              <p>尚无商家记录。</p>
+            ) : (
               <ul>
                 {merchants.map((merchant) => (
                   <li key={merchant.id}>
                     <strong>{merchant.name}</strong>
-                    <span>{merchant.status === 'pending_owner' ? '等待领取' : merchant.status}</span>
+                    <span>
+                      {merchant.status === 'pending_owner' ? '等待领取' : merchant.status}
+                    </span>
                     <small>{merchant.id}</small>
                   </li>
                 ))}

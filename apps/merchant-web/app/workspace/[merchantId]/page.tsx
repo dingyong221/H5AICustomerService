@@ -22,12 +22,14 @@ export default async function MerchantWorkspacePage({
   const session = await currentMerchant(merchantId);
   if (!session) redirect(`/account/login?merchant=${merchantId}`);
   const database = loadDatabaseConfig();
-  let assistants: Awaited<ReturnType<MySqlAssistantLifecycleRepository['listMerchantAssistants']>> = [];
+  let assistants: Awaited<ReturnType<MySqlAssistantLifecycleRepository['listMerchantAssistants']>> =
+    [];
   let ready = false;
   if (database.configured) {
     try {
-      assistants = await new MySqlAssistantLifecycleRepository(database.config)
-        .listMerchantAssistants(toMerchantUserId(session.merchantUserId), toMerchantId(merchantId));
+      assistants = await new MySqlAssistantLifecycleRepository(
+        database.config,
+      ).listMerchantAssistants(toMerchantUserId(session.merchantUserId), toMerchantId(merchantId));
       ready = true;
     } catch {
       ready = false;
@@ -35,8 +37,14 @@ export default async function MerchantWorkspacePage({
   }
   return (
     <PageShell
-      aside={<StatusBadge tone={ready ? 'info' : 'warning'}>{ready ? '已连接商家数据' : '数据暂不可用'}</StatusBadge>}
-      description={<p>先用真实业务资料生成可编辑客服草稿。完成知识、试聊和发布校验后才会开放消费者链接。</p>}
+      aside={
+        <StatusBadge tone={ready ? 'info' : 'warning'}>
+          {ready ? '已连接商家数据' : '数据暂不可用'}
+        </StatusBadge>
+      }
+      description={
+        <p>先用真实业务资料生成可编辑客服草稿。完成知识、试聊和发布校验后才会开放消费者链接。</p>
+      }
       eyebrow="Merchant Workspace"
       title="创建你的 AI 客服"
     >
@@ -48,14 +56,20 @@ export default async function MerchantWorkspacePage({
           </section>
           <section className="merchant-account-card assistant-create-card">
             <h2>已创建的客服</h2>
-            {assistants.length === 0 ? <p>还没有客服草稿。</p> : (
+            {assistants.length === 0 ? (
+              <p>还没有客服草稿。</p>
+            ) : (
               <ul className="assistant-workspace-list">
                 {assistants.map((assistant) => (
                   <li key={assistant.assistantId}>
                     <Link href={`/workspace/${merchantId}/assistants/${assistant.assistantId}`}>
                       <strong>{assistant.displayName}</strong>
                     </Link>
-                    <span>{assistant.knowledgeConfirmed ? '商家资料已确认，尚未发布' : '草稿，资料待确认'}</span>
+                    <span>
+                      {assistant.knowledgeConfirmed
+                        ? '商家资料已确认，尚未发布'
+                        : '草稿，资料待确认'}
+                    </span>
                     <small>客服编号：{assistant.assistantId}</small>
                   </li>
                 ))}
@@ -63,7 +77,9 @@ export default async function MerchantWorkspacePage({
             )}
           </section>
         </>
-      ) : <p role="alert">数据库暂不可用，无法读取或创建客服。</p>}
+      ) : (
+        <p role="alert">数据库暂不可用，无法读取或创建客服。</p>
+      )}
     </PageShell>
   );
 }

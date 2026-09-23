@@ -91,7 +91,8 @@ const parseObject = (value: string | Record<string, unknown>): Record<string, un
 const parsePayload = (value: string | Record<string, unknown>) => {
   const payload = parseObject(value);
   const names = ['merchantId', 'assistantId', 'sessionId', 'releaseId'] as const;
-  for (const name of names) if (typeof payload[name] !== 'string') throw new ConversationTurnJobError();
+  for (const name of names)
+    if (typeof payload[name] !== 'string') throw new ConversationTurnJobError();
   if (typeof payload['turnId'] !== 'string' || !/^t_[0-9a-f]{32}$/u.test(payload['turnId'])) {
     throw new ConversationTurnJobError();
   }
@@ -107,8 +108,13 @@ const parsePayload = (value: string | Record<string, unknown>) => {
 const factsFrom = (value: string | Record<string, unknown>): ConversationFacts => {
   const snapshot = parseObject(value);
   const fields = [
-    'displayName', 'industry', 'businessScope', 'materialsSummary',
-    'pricingSummary', 'promotionSummary', 'insufficientInfoMessage',
+    'displayName',
+    'industry',
+    'businessScope',
+    'materialsSummary',
+    'pricingSummary',
+    'promotionSummary',
+    'insufficientInfoMessage',
   ] as const;
   for (const field of fields) {
     if (typeof snapshot[field] !== 'string' || snapshot[field].trim().length === 0) {
@@ -164,10 +170,15 @@ export class MySqlConversationTurnJobRepository {
         [payload.sessionId, payload.merchantId, payload.assistantId],
       );
       const session = sessions[0];
-      if (!session || !session.release_id.equals(payload.releaseId) ||
-          !session.active_turn_id?.equals(payload.turnId) ||
-          session.status !== 'active' || session.expires_at.getTime() <= now.getTime() ||
-          session.merchant_status !== 'active' || session.assistant_status !== 'active') {
+      if (
+        !session ||
+        !session.release_id.equals(payload.releaseId) ||
+        !session.active_turn_id?.equals(payload.turnId) ||
+        session.status !== 'active' ||
+        session.expires_at.getTime() <= now.getTime() ||
+        session.merchant_status !== 'active' ||
+        session.assistant_status !== 'active'
+      ) {
         if (session) {
           await this.#failLocked(connection, job.id, payload, now, 'SESSION_UNAVAILABLE');
         } else {
@@ -184,8 +195,12 @@ export class MySqlConversationTurnJobRepository {
         [payload.merchantId, payload.assistantId, payload.sessionId, payload.turnId],
       );
       const message = messages[0];
-      if (!message || (message.state !== 'accepted' && message.state !== 'processing') ||
-          !Number.isSafeInteger(session.next_sequence) || session.next_sequence < 2) {
+      if (
+        !message ||
+        (message.state !== 'accepted' && message.state !== 'processing') ||
+        !Number.isSafeInteger(session.next_sequence) ||
+        session.next_sequence < 2
+      ) {
         await this.#failLocked(connection, job.id, payload, now, 'MESSAGE_UNAVAILABLE');
         return null;
       }
@@ -212,7 +227,8 @@ export class MySqlConversationTurnJobRepository {
         return null;
       }
       const context = contextRows.reverse().map((row) => ({
-        role: row.role as 'visitor' | 'assistant', content: row.content,
+        role: row.role as 'visitor' | 'assistant',
+        content: row.content,
       }));
       const leaseUntil = new Date(now.getTime() + 2 * 60 * 1_000);
       const [jobResult] = await connection.execute<ResultSetHeader>(
@@ -231,11 +247,17 @@ export class MySqlConversationTurnJobRepository {
         throw new ConversationTurnJobError();
       }
       return {
-        jobId: hex(job.id), leaseOwner,
-        merchantId: hex(payload.merchantId), assistantId: hex(payload.assistantId),
-        sessionId: hex(payload.sessionId), releaseId: hex(payload.releaseId),
-        turnId: hex(payload.turnId), visitorMessageId: hex(message.id),
-        question: message.content, facts, context,
+        jobId: hex(job.id),
+        leaseOwner,
+        merchantId: hex(payload.merchantId),
+        assistantId: hex(payload.assistantId),
+        sessionId: hex(payload.sessionId),
+        releaseId: hex(payload.releaseId),
+        turnId: hex(payload.turnId),
+        visitorMessageId: hex(message.id),
+        question: message.content,
+        facts,
+        context,
       };
     });
   }
@@ -253,10 +275,14 @@ export class MySqlConversationTurnJobRepository {
         [payload.jobId, claim.leaseOwner, now],
       );
       if (!jobs[0]) throw new ConversationTurnJobError();
-      const [sessions] = await connection.execute<(RowDataPacket & {
-        active_turn_id: Buffer | null; next_sequence: number;
-        merchant_status: string; assistant_status: string;
-      })[]>(
+      const [sessions] = await connection.execute<
+        (RowDataPacket & {
+          active_turn_id: Buffer | null;
+          next_sequence: number;
+          merchant_status: string;
+          assistant_status: string;
+        })[]
+      >(
         `SELECT cs.active_turn_id, cs.next_sequence,
                 m.status AS merchant_status, a.status AS assistant_status
            FROM conversation_session cs
@@ -267,9 +293,13 @@ export class MySqlConversationTurnJobRepository {
         [payload.sessionId, payload.merchantId, payload.assistantId, payload.releaseId],
       );
       const session = sessions[0];
-      if (!session?.active_turn_id?.equals(payload.turnId) ||
-          session.merchant_status !== 'active' || session.assistant_status !== 'active' ||
-          !Number.isSafeInteger(session.next_sequence) || session.next_sequence >= 4_294_967_295) {
+      if (
+        !session?.active_turn_id?.equals(payload.turnId) ||
+        session.merchant_status !== 'active' ||
+        session.assistant_status !== 'active' ||
+        !Number.isSafeInteger(session.next_sequence) ||
+        session.next_sequence >= 4_294_967_295
+      ) {
         throw new ConversationTurnJobError();
       }
       const assistantMessageId = randomBytes(16);
@@ -278,22 +308,44 @@ export class MySqlConversationTurnJobRepository {
            (id, merchant_id, assistant_id, session_id, turn_id, seq_no,
             role, state, client_request_id, content, error_code, created_at, completed_at)
          VALUES (?, ?, ?, ?, ?, ?, 'assistant', 'completed', NULL, ?, NULL, ?, ?)`,
-        [assistantMessageId, payload.merchantId, payload.assistantId, payload.sessionId,
-          payload.turnId, session.next_sequence, answer, now, now],
+        [
+          assistantMessageId,
+          payload.merchantId,
+          payload.assistantId,
+          payload.sessionId,
+          payload.turnId,
+          session.next_sequence,
+          answer,
+          now,
+          now,
+        ],
       );
       const [visitorResult] = await connection.execute<ResultSetHeader>(
         `UPDATE message SET state = 'completed', completed_at = ?
           WHERE id = ? AND merchant_id = ? AND assistant_id = ? AND session_id = ?
             AND turn_id = ? AND role = 'visitor' AND state = 'processing'`,
-        [now, payload.visitorMessageId, payload.merchantId, payload.assistantId,
-          payload.sessionId, payload.turnId],
+        [
+          now,
+          payload.visitorMessageId,
+          payload.merchantId,
+          payload.assistantId,
+          payload.sessionId,
+          payload.turnId,
+        ],
       );
       const [sessionResult] = await connection.execute<ResultSetHeader>(
         `UPDATE conversation_session SET active_turn_id = NULL, next_sequence = ?,
             last_activity_at = ?, updated_at = ?, version = version + 1
           WHERE id = ? AND merchant_id = ? AND assistant_id = ? AND active_turn_id = ?`,
-        [session.next_sequence + 1, now, now, payload.sessionId, payload.merchantId,
-          payload.assistantId, payload.turnId],
+        [
+          session.next_sequence + 1,
+          now,
+          now,
+          payload.sessionId,
+          payload.merchantId,
+          payload.assistantId,
+          payload.turnId,
+        ],
       );
       const [jobResult] = await connection.execute<ResultSetHeader>(
         `UPDATE job SET state = 'completed', lease_owner = NULL, lease_until = NULL,
@@ -301,8 +353,12 @@ export class MySqlConversationTurnJobRepository {
           WHERE id = ? AND state = 'processing' AND lease_owner = ?`,
         [now, now, payload.jobId, claim.leaseOwner],
       );
-      if (visitorResult.affectedRows !== 1 || sessionResult.affectedRows !== 1 ||
-          jobResult.affectedRows !== 1) throw new ConversationTurnJobError();
+      if (
+        visitorResult.affectedRows !== 1 ||
+        sessionResult.affectedRows !== 1 ||
+        jobResult.affectedRows !== 1
+      )
+        throw new ConversationTurnJobError();
     });
   }
 
@@ -326,14 +382,22 @@ export class MySqlConversationTurnJobRepository {
   #claimIds(claim: ConversationTurnClaim) {
     if (!/^[A-Za-z0-9_-]{8,128}$/u.test(claim.leaseOwner)) throw new ConversationTurnJobError();
     return {
-      jobId: bytes(claim.jobId), merchantId: bytes(claim.merchantId),
-      assistantId: bytes(claim.assistantId), sessionId: bytes(claim.sessionId),
-      releaseId: bytes(claim.releaseId), turnId: bytes(claim.turnId),
+      jobId: bytes(claim.jobId),
+      merchantId: bytes(claim.merchantId),
+      assistantId: bytes(claim.assistantId),
+      sessionId: bytes(claim.sessionId),
+      releaseId: bytes(claim.releaseId),
+      turnId: bytes(claim.turnId),
       visitorMessageId: bytes(claim.visitorMessageId),
     };
   }
 
-  async #rejectJob(connection: Connection, jobId: Buffer, now: Date, errorCode: string): Promise<void> {
+  async #rejectJob(
+    connection: Connection,
+    jobId: Buffer,
+    now: Date,
+    errorCode: string,
+  ): Promise<void> {
     const [result] = await connection.execute<ResultSetHeader>(
       `UPDATE job SET state = 'failed', last_error_code = ?, lease_owner = NULL,
           lease_until = NULL, updated_at = ?, completed_at = ? WHERE id = ?`,
@@ -363,7 +427,9 @@ export class MySqlConversationTurnJobRepository {
     await this.#rejectJob(connection, jobId, now, errorCode);
   }
 
-  async #withTransaction<TResult>(operation: (connection: Connection) => Promise<TResult>): Promise<TResult> {
+  async #withTransaction<TResult>(
+    operation: (connection: Connection) => Promise<TResult>,
+  ): Promise<TResult> {
     const connection = await this.database.openConnection();
     try {
       await connection.beginTransaction();

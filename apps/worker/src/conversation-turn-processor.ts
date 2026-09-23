@@ -28,14 +28,23 @@ export class ConversationTurnProcessor {
     try {
       answer = await this.generator.generate(buildConversationPrompt(claim), turnSignal);
       if (turnSignal.aborted) throw new Error('Turn interrupted');
-      if (answer.trim().length === 0 || answer.length > 8_000 ||
-          /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(answer)) {
+      if (
+        answer.trim().length === 0 ||
+        answer.length > 8_000 ||
+        /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(answer)
+      ) {
         throw new Error('Invalid model output');
       }
     } catch {
-      await this.store.fail(claim,
-        signal.aborted ? 'WORKER_INTERRUPTED' : turnSignal.aborted ? 'MODEL_TIMEOUT' : 'MODEL_UNAVAILABLE',
-        new Date());
+      await this.store.fail(
+        claim,
+        signal.aborted
+          ? 'WORKER_INTERRUPTED'
+          : turnSignal.aborted
+            ? 'MODEL_TIMEOUT'
+            : 'MODEL_UNAVAILABLE',
+        new Date(),
+      );
       return true;
     }
     try {

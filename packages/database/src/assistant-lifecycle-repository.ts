@@ -169,7 +169,8 @@ const paragraphText = (value: unknown, field: string, maximum: number): string =
     normalized.length === 0 ||
     normalized.length > maximum ||
     /[\u0000-\u0009\u000b-\u001f\u007f]/u.test(normalized)
-  ) throw new AssistantLifecyclePersistenceError(`${field} is invalid`);
+  )
+    throw new AssistantLifecyclePersistenceError(`${field} is invalid`);
   return normalized;
 };
 
@@ -206,11 +207,14 @@ const draftConfirmed = (
   revision: number,
 ): boolean => {
   const validation = parseObject(validationValue, 'draft validation');
-  return validation['publishable'] === true &&
+  return (
+    validation['publishable'] === true &&
     validation['confirmedRevision'] === revision &&
-    validation['contentHash'] === createHash('sha256').update(JSON.stringify(draft), 'utf8').digest('hex') &&
+    validation['contentHash'] ===
+      createHash('sha256').update(JSON.stringify(draft), 'utf8').digest('hex') &&
     typeof validation['knowledgeRevisionId'] === 'string' &&
-    /^[0-9a-f]{32}$/u.test(validation['knowledgeRevisionId']);
+    /^[0-9a-f]{32}$/u.test(validation['knowledgeRevisionId'])
+  );
 };
 
 const parseStatus = (value: string): AssistantManagementSnapshot['status'] => {
@@ -675,12 +679,18 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
     const merchantId = idBuffer(input.merchantId, 'merchantId');
     const assistantId = idBuffer(input.assistantId, 'assistantId');
     return this.#withTransaction(async (connection) => {
-      const current = await this.#lockManagement(connection, merchantUserId, merchantId, assistantId);
+      const current = await this.#lockManagement(
+        connection,
+        merchantUserId,
+        merchantId,
+        assistantId,
+      );
       if (
         current === null ||
         current.draft_revision !== input.expectedDraftRevision ||
         current.status === 'paused'
-      ) throw new AssistantRevisionConflictError();
+      )
+        throw new AssistantRevisionConflictError();
       const draft = parseDraft(current.config);
       const contentHash = createHash('sha256').update(JSON.stringify(draft), 'utf8').digest();
       const previous = parseObject(current.validation, 'draft validation');
@@ -690,14 +700,14 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
         previous['contentHash'] === contentHash.toString('hex') &&
         typeof previous['knowledgeRevisionId'] === 'string' &&
         /^[0-9a-f]{32}$/u.test(previous['knowledgeRevisionId']) &&
-        await this.#knowledgeReady(
+        (await this.#knowledgeReady(
           connection,
           merchantId,
           assistantId,
           idBuffer(previous['knowledgeRevisionId'], 'knowledgeRevisionId'),
           contentHash,
           input.now,
-        )
+        ))
       ) {
         return {
           knowledgeRevisionId: previous['knowledgeRevisionId'],
@@ -711,7 +721,14 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
            (id, merchant_id, assistant_id, type, title, status, current_revision_no,
             created_at, updated_at)
          VALUES (?, ?, ?, 'merchant_confirmed_text', ?, 'active', 1, ?, ?)`,
-        [sourceId, merchantId, assistantId, `${current.display_name}：商家确认资料`, input.now, input.now],
+        [
+          sourceId,
+          merchantId,
+          assistantId,
+          `${current.display_name}：商家确认资料`,
+          input.now,
+          input.now,
+        ],
       );
       await connection.execute(
         `INSERT INTO knowledge_revision
@@ -724,7 +741,11 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
           assistantId,
           sourceId,
           contentHash,
-          JSON.stringify({ kind: 'merchant_confirmed_text', draftRevision: input.expectedDraftRevision, facts: draft }),
+          JSON.stringify({
+            kind: 'merchant_confirmed_text',
+            draftRevision: input.expectedDraftRevision,
+            facts: draft,
+          }),
           MANUAL_KNOWLEDGE_PARSER,
           input.now,
           input.now,
@@ -759,7 +780,10 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
         { assistantId: input.assistantId, draftRevision: input.expectedDraftRevision },
         input.now,
       );
-      return { knowledgeRevisionId: knowledgeRevisionId.toString('hex'), draftRevision: input.expectedDraftRevision };
+      return {
+        knowledgeRevisionId: knowledgeRevisionId.toString('hex'),
+        draftRevision: input.expectedDraftRevision,
+      };
     });
   }
 
@@ -823,10 +847,21 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
         ) {
           throw new AssistantPublishValidationError();
         }
-        const knowledgeRevisionId = idBuffer(validation['knowledgeRevisionId'], 'knowledgeRevisionId');
-        if (!(await this.#knowledgeReady(
-          connection, merchantId, assistantId, knowledgeRevisionId, contentHash, input.now,
-        ))) throw new AssistantPublishValidationError();
+        const knowledgeRevisionId = idBuffer(
+          validation['knowledgeRevisionId'],
+          'knowledgeRevisionId',
+        );
+        if (
+          !(await this.#knowledgeReady(
+            connection,
+            merchantId,
+            assistantId,
+            knowledgeRevisionId,
+            contentHash,
+            input.now,
+          ))
+        )
+          throw new AssistantPublishValidationError();
         const [releaseRows] = await connection.execute<(RowDataPacket & { release_no: number })[]>(
           `SELECT release_no
              FROM assistant_release

@@ -64,10 +64,7 @@ export const verifyOperatorPassword = (
 const signature = (config: OperatorAuthConfig, payload: string): Buffer =>
   createHmac('sha256', config.sessionKey).update(payload, 'ascii').digest();
 
-export const createOperatorSession = (
-  config: OperatorAuthConfig,
-  now = Date.now(),
-): string => {
+export const createOperatorSession = (config: OperatorAuthConfig, now = Date.now()): string => {
   const payload = `${config.username}.${Math.floor(now / 1_000) + SESSION_SECONDS}.${randomBytes(16).toString('base64url')}`;
   return `${payload}.${signature(config, payload).toString('base64url')}`;
 };
@@ -93,6 +90,6 @@ export const resolveOperatorSession = (
   const expected = signature(config, `${username}.${expires}.${nonce}`);
   const supplied = Buffer.from(suppliedSignature ?? '', 'base64url');
   return supplied.byteLength === expected.byteLength && timingSafeEqual(supplied, expected)
-    ? username ?? null
+    ? (username ?? null)
     : null;
 };

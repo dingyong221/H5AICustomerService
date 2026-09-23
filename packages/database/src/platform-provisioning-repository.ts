@@ -146,7 +146,13 @@ export class MySqlPlatformProvisioningRepository {
           result, request_id, occurred_at, created_at)
        VALUES (?, ?, 'platform_operator', ?, 'merchant.provision', 'merchant', ?,
                'success', ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
-      [randomBytes(16), input.merchantId, input.operatorId, input.merchantId.toString('hex'), input.requestId],
+      [
+        randomBytes(16),
+        input.merchantId,
+        input.operatorId,
+        input.merchantId.toString('hex'),
+        input.requestId,
+      ],
     );
   }
 }

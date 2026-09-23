@@ -10,7 +10,9 @@ const publicSlugPattern = /^[a-z0-9][a-z0-9-]{0,62}$/u;
 export class PublicAssistantService {
   public constructor(private readonly reader: PublicAssistantReader | null) {}
 
-  public static fromEnvironment(environment: NodeJS.ProcessEnv = process.env): PublicAssistantService {
+  public static fromEnvironment(
+    environment: NodeJS.ProcessEnv = process.env,
+  ): PublicAssistantService {
     if (environment['PUBLIC_CONVERSATION_ENABLED'] !== 'true') {
       return new PublicAssistantService(null);
     }

@@ -5,7 +5,11 @@ import { timingSafeEqual } from 'node:crypto';
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
-import { loadDatabaseConfig, MerchantAccessError, MySqlMerchantAccessRepository } from '@h5cs/database';
+import {
+  loadDatabaseConfig,
+  MerchantAccessError,
+  MySqlMerchantAccessRepository,
+} from '@h5cs/database';
 
 export type MerchantAccessState = Readonly<{ error: string | null }>;
 
@@ -29,7 +33,8 @@ const merchantOrigin = (): URL | null => {
     if (
       url.origin !== value ||
       (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback))
-    ) return null;
+    )
+      return null;
     return url;
   } catch {
     return null;
@@ -42,8 +47,7 @@ const sameOrigin = async (expected: URL): Promise<boolean> =>
 const sessionCookieName = (secure: boolean): string =>
   secure ? '__Host-h5cs_session' : 'h5cs_session';
 
-const csrfCookieName = (secure: boolean): string =>
-  secure ? '__Host-h5cs-csrf' : 'h5cs_csrf';
+const csrfCookieName = (secure: boolean): string => (secure ? '__Host-h5cs-csrf' : 'h5cs_csrf');
 
 const setSession = async (session: { sessionToken: string; csrfToken: string }): Promise<void> => {
   const origin = merchantOrigin();
@@ -90,8 +94,12 @@ export async function currentMerchantForWrite(merchantId: string, formCsrfToken:
   if (!token || !cookieCsrfToken || !/^[A-Za-z0-9_-]{43}$/u.test(cookieCsrfToken)) return null;
   const formBytes = Buffer.from(formCsrfToken, 'base64url');
   const cookieBytes = Buffer.from(cookieCsrfToken, 'base64url');
-  if (formBytes.byteLength !== 32 || cookieBytes.byteLength !== 32 ||
-      !timingSafeEqual(formBytes, cookieBytes)) return null;
+  if (
+    formBytes.byteLength !== 32 ||
+    cookieBytes.byteLength !== 32 ||
+    !timingSafeEqual(formBytes, cookieBytes)
+  )
+    return null;
   try {
     return await repository.resolveSession(token, merchantId, formCsrfToken);
   } catch {
@@ -110,18 +118,17 @@ export async function claimMerchant(
   const setupToken = formData.get('setupToken');
   const phone = formData.get('phone');
   const password = formData.get('password');
-  if (
-    typeof setupToken !== 'string' ||
-    typeof phone !== 'string' ||
-    typeof password !== 'string'
-  ) return { error: '请填写完整的领取信息。' };
+  if (typeof setupToken !== 'string' || typeof phone !== 'string' || typeof password !== 'string')
+    return { error: '请填写完整的领取信息。' };
   let merchantId: string;
   try {
     const session = await repository.claimInvitation({ setupToken, phone, password });
     await setSession(session);
     merchantId = session.merchantId;
   } catch (error) {
-    return { error: error instanceof MerchantAccessError ? error.message : '领取失败，请稍后重试。' };
+    return {
+      error: error instanceof MerchantAccessError ? error.message : '领取失败，请稍后重试。',
+    };
   }
   redirect(`/workspace/${merchantId}`);
 }
@@ -152,7 +159,9 @@ export async function loginMerchant(
     await setSession(session);
     merchantId = session.merchantId;
   } catch (error) {
-    return { error: error instanceof MerchantAccessError ? error.message : '登录失败，请稍后重试。' };
+    return {
+      error: error instanceof MerchantAccessError ? error.message : '登录失败，请稍后重试。',
+    };
   }
   redirect(`/workspace/${merchantId}`);
 }

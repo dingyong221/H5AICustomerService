@@ -1,10 +1,15 @@
 import {
-  BadRequestException, ConflictException, NotFoundException, ServiceUnavailableException,
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 
 import {
-  loadDatabaseConfig, MySqlPublicSessionRepository,
-  PublicSessionUnavailableError, PublicTurnConflictError,
+  loadDatabaseConfig,
+  MySqlPublicSessionRepository,
+  PublicSessionUnavailableError,
+  PublicTurnConflictError,
 } from '@h5cs/database';
 import type { PublicTurnResult } from '@h5cs/database';
 
@@ -15,8 +20,11 @@ const originFrom = (value: string | undefined, production: boolean): string | nu
   try {
     const origin = new URL(value);
     const loopback = origin.hostname === 'localhost' || origin.hostname === '127.0.0.1';
-    if (origin.origin !== value || (origin.protocol !== 'https:' &&
-      (production || origin.protocol !== 'http:' || !loopback))) return null;
+    if (
+      origin.origin !== value ||
+      (origin.protocol !== 'https:' && (production || origin.protocol !== 'http:' || !loopback))
+    )
+      return null;
     return origin.origin;
   } catch {
     return null;
@@ -30,7 +38,10 @@ export class PublicTurnService {
   ) {}
 
   public static fromEnvironment(environment: NodeJS.ProcessEnv = process.env): PublicTurnService {
-    const origin = originFrom(environment['CONSUMER_H5_ORIGIN'], environment['NODE_ENV'] === 'production');
+    const origin = originFrom(
+      environment['CONSUMER_H5_ORIGIN'],
+      environment['NODE_ENV'] === 'production',
+    );
     if (environment['PUBLIC_CONVERSATION_ENABLED'] !== 'true' || !origin) {
       return new PublicTurnService(null, null);
     }
@@ -55,7 +66,8 @@ export class PublicTurnService {
     eventsUrl: string;
     resultUrl: string;
   }> {
-    if (!this.store || !this.origin) throw new ServiceUnavailableException('Conversation service unavailable');
+    if (!this.store || !this.origin)
+      throw new ServiceUnavailableException('Conversation service unavailable');
     if (typeof input.body !== 'object' || input.body === null || Array.isArray(input.body)) {
       throw new BadRequestException('Invalid message');
     }
@@ -66,8 +78,10 @@ export class PublicTurnService {
       typeof body['content'] !== 'string' ||
       !/^message_[0-9a-f]{32}$/u.test(body['clientMessageId']) ||
       input.idempotencyKey !== body['clientMessageId'] ||
-      body['content'].trim().length < 1 || body['content'].length > 2_000
-    ) throw new BadRequestException('Invalid message');
+      body['content'].trim().length < 1 ||
+      body['content'].length > 2_000
+    )
+      throw new BadRequestException('Invalid message');
     try {
       const accepted = await this.store.acceptTurn({
         sessionHandle: input.sessionHandle,
@@ -77,13 +91,15 @@ export class PublicTurnService {
       });
       const path = `/api/v1/public/sessions/${encodeURIComponent(input.sessionHandle)}/turns/${accepted.turnId}`;
       return {
-        ...accepted, state: 'accepted',
+        ...accepted,
+        state: 'accepted',
         eventsUrl: `${this.origin}${path}/events`,
         resultUrl: `${this.origin}${path}`,
       };
     } catch (error) {
       if (error instanceof PublicTurnConflictError) throw new ConflictException(error.code);
-      if (error instanceof PublicSessionUnavailableError) throw new NotFoundException('Session not available');
+      if (error instanceof PublicSessionUnavailableError)
+        throw new NotFoundException('Session not available');
       throw new ServiceUnavailableException('Conversation service unavailable');
     }
   }

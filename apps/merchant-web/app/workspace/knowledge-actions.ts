@@ -24,11 +24,15 @@ export async function saveAssistantDraftAction(
   const revisionValue = formData.get('draftRevision');
   const draft = parseAssistantDraftForm(formData);
   if (
-    typeof merchantId !== 'string' || !/^[0-9a-f]{32}$/u.test(merchantId) ||
-    typeof assistantId !== 'string' || !/^[0-9a-f]{32}$/u.test(assistantId) ||
-    typeof revisionValue !== 'string' || !/^[1-9][0-9]{0,9}$/u.test(revisionValue) ||
+    typeof merchantId !== 'string' ||
+    !/^[0-9a-f]{32}$/u.test(merchantId) ||
+    typeof assistantId !== 'string' ||
+    !/^[0-9a-f]{32}$/u.test(assistantId) ||
+    typeof revisionValue !== 'string' ||
+    !/^[1-9][0-9]{0,9}$/u.test(revisionValue) ||
     !draft
-  ) return { error: '草稿参数无效，请检查字段。', saved: false };
+  )
+    return { error: '草稿参数无效，请检查字段。', saved: false };
   const session = await currentMerchant(merchantId);
   if (!session) return { error: '登录已失效或无权管理此商家。', saved: false };
   const database = loadDatabaseConfig();
@@ -62,11 +66,15 @@ export async function confirmKnowledgeAction(
   const assistantId = formData.get('assistantId');
   const revisionValue = formData.get('draftRevision');
   if (
-    typeof merchantId !== 'string' || !/^[0-9a-f]{32}$/u.test(merchantId) ||
-    typeof assistantId !== 'string' || !/^[0-9a-f]{32}$/u.test(assistantId) ||
-    typeof revisionValue !== 'string' || !/^[1-9][0-9]{0,9}$/u.test(revisionValue) ||
+    typeof merchantId !== 'string' ||
+    !/^[0-9a-f]{32}$/u.test(merchantId) ||
+    typeof assistantId !== 'string' ||
+    !/^[0-9a-f]{32}$/u.test(assistantId) ||
+    typeof revisionValue !== 'string' ||
+    !/^[1-9][0-9]{0,9}$/u.test(revisionValue) ||
     formData.get('merchantConfirmed') !== 'yes'
-  ) return { error: '请阅读并确认当前资料。', confirmed: false };
+  )
+    return { error: '请阅读并确认当前资料。', confirmed: false };
   const session = await currentMerchant(merchantId);
   if (!session) return { error: '登录已失效或无权管理此商家。', confirmed: false };
   const database = loadDatabaseConfig();

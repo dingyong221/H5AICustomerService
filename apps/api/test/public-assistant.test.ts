@@ -42,16 +42,22 @@ describe('public assistant snapshot', () => {
   });
 
   it('fails closed when MySQL or the repository is unavailable', async () => {
-    await expect(PublicAssistantService.fromEnvironment({
-      NODE_ENV: 'test',
-      PUBLIC_CONVERSATION_ENABLED: 'false',
-    }).load('a-valid')).rejects.toMatchObject({ status: HttpStatus.SERVICE_UNAVAILABLE });
-    await expect(new PublicAssistantService(null).load('a-valid'))
-      .rejects.toMatchObject({ status: HttpStatus.SERVICE_UNAVAILABLE });
-    const service = new PublicAssistantService({
-      findPublicSnapshot: async () => { throw new Error('database is down'); },
+    await expect(
+      PublicAssistantService.fromEnvironment({
+        NODE_ENV: 'test',
+        PUBLIC_CONVERSATION_ENABLED: 'false',
+      }).load('a-valid'),
+    ).rejects.toMatchObject({ status: HttpStatus.SERVICE_UNAVAILABLE });
+    await expect(new PublicAssistantService(null).load('a-valid')).rejects.toMatchObject({
+      status: HttpStatus.SERVICE_UNAVAILABLE,
     });
-    await expect(service.load('a-valid'))
-      .rejects.toMatchObject({ status: HttpStatus.SERVICE_UNAVAILABLE });
+    const service = new PublicAssistantService({
+      findPublicSnapshot: async () => {
+        throw new Error('database is down');
+      },
+    });
+    await expect(service.load('a-valid')).rejects.toMatchObject({
+      status: HttpStatus.SERVICE_UNAVAILABLE,
+    });
   });
 });

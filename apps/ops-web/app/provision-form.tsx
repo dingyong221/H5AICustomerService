@@ -14,7 +14,13 @@ export function ProvisionForm() {
       <form action={action} className="ops-form">
         <label>
           商家名称
-          <input maxLength={200} minLength={2} name="name" placeholder="例如：广州示例餐饮" required />
+          <input
+            maxLength={200}
+            minLength={2}
+            name="name"
+            placeholder="例如：广州示例餐饮"
+            required
+          />
         </label>
         <button disabled={pending} type="submit">
           {pending ? '正在创建…' : '创建商家并生成领取链接'}
