@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 
 import { currentOperator, logoutOperator } from './operator-actions';
 import { ProvisionForm } from './provision-form';
+import { ReissueInvitationForm } from './reissue-invitation-form';
 
 export const dynamic = 'force-dynamic';
 
@@ -164,6 +165,9 @@ export default async function OperationsDashboardPage() {
                       {merchant.status === 'pending_owner' ? '等待领取' : merchant.status}
                     </span>
                     <small>{merchant.id}</small>
+                    {merchant.status === 'pending_owner' ? (
+                      <ReissueInvitationForm merchantId={merchant.id} />
+                    ) : null}
                   </li>
                 ))}
               </ul>

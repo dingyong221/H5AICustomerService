@@ -98,7 +98,31 @@ a {
 
 .ops-created output {
   font-family: ui-monospace, monospace;
+  overflow-wrap: anywhere;
   user-select: all;
+}
+
+.ops-reissue {
+  flex-basis: 100%;
+}
+
+.ops-reissue .ops-form {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0;
+  max-width: none;
+}
+
+.ops-reissue .ops-form label {
+  align-items: center;
+  display: flex;
+  font-weight: 500;
+}
+
+.ops-reissue .ops-form input[type='checkbox'] {
+  padding: 0;
 }
 
 .ops-merchant-list {

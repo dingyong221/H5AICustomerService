@@ -4,11 +4,14 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Connection, ResultSetHeader } from 'mysql2/promise';
 
 import type { DatabaseConnectionConfig } from '../src/config.js';
-import { MySqlPlatformProvisioningRepository } from '../src/platform-provisioning-repository.js';
+import {
+  MerchantInvitationNotReissuableError,
+  MySqlPlatformProvisioningRepository,
+} from '../src/platform-provisioning-repository.js';
 
 const resultHeader = { affectedRows: 1 } as ResultSetHeader;
 
-const repositoryWith = (failOn?: string) => {
+const repositoryWith = (failOn?: string, merchantStatus = 'pending_owner') => {
   const calls: Array<{ sql: string; values: readonly unknown[] }> = [];
   const commit = vi.fn(async () => undefined);
   const rollback = vi.fn(async () => undefined);
@@ -16,6 +19,9 @@ const repositoryWith = (failOn?: string) => {
     execute: async (sql: string, values: readonly unknown[] = []) => {
       calls.push({ sql, values });
       if (failOn && sql.includes(failOn)) throw new Error('simulated database failure');
+      if (sql.includes('SELECT name, status FROM merchant')) {
+        return [[{ name: '示例商家', status: merchantStatus }], []];
+      }
       return [resultHeader, []];
     },
     beginTransaction: vi.fn(async () => undefined),
@@ -60,6 +66,60 @@ describe('platform merchant provisioning', () => {
     );
     await expect(
       repository.provisionMerchant({ name: '示例商家', operatorId: 'ops-1' }),
+    ).rejects.toThrow('simulated database failure');
+    expect(commit).not.toHaveBeenCalled();
+    expect(rollback).toHaveBeenCalledOnce();
+  });
+
+  it('reissues a pending invitation by expiring old links and auditing the new digest atomically', async () => {
+    const { repository, calls, commit, rollback } = repositoryWith();
+    const merchantId = '22222222222222222222222222222222';
+    const created = await repository.reissueInvitation({ merchantId, operatorId: 'ops-1' });
+
+    expect(created).toMatchObject({ id: merchantId, name: '示例商家', status: 'pending_owner' });
+    expect(created.setupToken).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    const expiryIndex = calls.findIndex((call) =>
+      call.sql.includes('UPDATE merchant_setup_invitation'),
+    );
+    const insertIndex = calls.findIndex((call) =>
+      call.sql.includes('INSERT INTO merchant_setup_invitation'),
+    );
+    expect(calls[0]?.sql).toContain('FOR UPDATE');
+    expect(expiryIndex).toBeGreaterThan(0);
+    expect(insertIndex).toBeGreaterThan(expiryIndex);
+    expect(calls[insertIndex]?.values[0]).toEqual(
+      createHash('sha256').update(created.setupToken, 'ascii').digest(),
+    );
+    expect(calls.some((call) => JSON.stringify(call.values).includes(created.setupToken))).toBe(
+      false,
+    );
+    expect(calls.some((call) => call.sql.includes('merchant.invitation.reissue'))).toBe(true);
+    expect(commit).toHaveBeenCalledOnce();
+    expect(rollback).not.toHaveBeenCalled();
+  });
+
+  it('refuses to reissue after the merchant has already been claimed', async () => {
+    const { repository, calls, commit, rollback } = repositoryWith(undefined, 'active');
+    await expect(
+      repository.reissueInvitation({
+        merchantId: '22222222222222222222222222222222',
+        operatorId: 'ops-1',
+      }),
+    ).rejects.toThrow(MerchantInvitationNotReissuableError);
+    expect(calls).toHaveLength(1);
+    expect(commit).not.toHaveBeenCalled();
+    expect(rollback).toHaveBeenCalledOnce();
+  });
+
+  it('rolls back old-link invalidation if the new invitation cannot be inserted', async () => {
+    const { repository, commit, rollback } = repositoryWith(
+      'INSERT INTO merchant_setup_invitation',
+    );
+    await expect(
+      repository.reissueInvitation({
+        merchantId: '22222222222222222222222222222222',
+        operatorId: 'ops-1',
+      }),
     ).rejects.toThrow('simulated database failure');
     expect(commit).not.toHaveBeenCalled();
     expect(rollback).toHaveBeenCalledOnce();

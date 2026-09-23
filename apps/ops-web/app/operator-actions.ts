@@ -3,7 +3,11 @@
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
-import { loadDatabaseConfig, MySqlPlatformProvisioningRepository } from '@h5cs/database';
+import {
+  loadDatabaseConfig,
+  MerchantInvitationNotReissuableError,
+  MySqlPlatformProvisioningRepository,
+} from '@h5cs/database';
 
 import {
   createOperatorSession,
@@ -23,6 +27,30 @@ const requestOriginValid = async (expected: string): Promise<boolean> => {
   const origin = (await headers()).get('origin');
   return origin === expected;
 };
+
+const managementBaseUrl = (): URL | null => {
+  const value = process.env['MANAGEMENT_CONSOLE_URL'];
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (
+      url.pathname !== '/' ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      (url.protocol !== 'https:' &&
+        !(url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname)))
+    ) {
+      return null;
+    }
+    return url;
+  } catch {
+    return null;
+  }
+};
+
+const setupUrl = (base: URL, token: string): string => `${base.origin}/setup#${token}`;
 
 export async function currentOperator(): Promise<string | null> {
   const config = loadOperatorAuthConfig();
@@ -82,34 +110,66 @@ export async function provisionMerchant(
   }
   const database = loadDatabaseConfig();
   if (!database.configured) return { error: '数据库尚未配置，无法创建商家。', created: null };
-  const managementUrl = process.env['MANAGEMENT_CONSOLE_URL'];
-  if (!managementUrl) return { error: '商家后台地址尚未配置。', created: null };
-  let base: URL;
-  try {
-    base = new URL(managementUrl);
-    if (
-      base.username ||
-      base.password ||
-      base.search ||
-      base.hash ||
-      (base.protocol !== 'https:' &&
-        !(base.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(base.hostname)))
-    ) {
-      throw new Error('Invalid management URL');
-    }
-  } catch {
-    return { error: '商家后台地址配置无效。', created: null };
-  }
+  const base = managementBaseUrl();
+  if (!base) return { error: '商家后台地址尚未正确配置。', created: null };
 
   try {
     const repository = new MySqlPlatformProvisioningRepository(database.config);
     const created = await repository.provisionMerchant({ name, operatorId: operator });
-    const setupUrl = `${base.toString().replace(/\/$/u, '')}/setup#${created.setupToken}`;
     return {
       error: null,
-      created: { name: created.name, setupUrl, expiresAt: created.setupExpiresAt.toISOString() },
+      created: {
+        name: created.name,
+        setupUrl: setupUrl(base, created.setupToken),
+        expiresAt: created.setupExpiresAt.toISOString(),
+      },
     };
   } catch {
     return { error: '创建商家失败，未生成有效链接。请检查数据库连接并重试。', created: null };
+  }
+}
+
+export async function reissueMerchantInvitation(
+  _previous: ProvisionActionState,
+  formData: FormData,
+): Promise<ProvisionActionState> {
+  const config = loadOperatorAuthConfig();
+  const operator = await currentOperator();
+  if (!config || !operator) return { error: '登录已失效，请重新登录。', created: null };
+  if (!(await requestOriginValid(config.publicOrigin))) {
+    return { error: '请求来源校验失败。', created: null };
+  }
+  const merchantId = formData.get('merchantId');
+  const confirmation = formData.get('confirm');
+  if (
+    typeof merchantId !== 'string' ||
+    !/^[0-9a-f]{32}$/u.test(merchantId) ||
+    confirmation !== 'invalidate_previous'
+  ) {
+    return { error: '请选择未领取的商家并确认旧链接立即失效。', created: null };
+  }
+  const database = loadDatabaseConfig();
+  if (!database.configured) return { error: '数据库暂不可用。', created: null };
+  const base = managementBaseUrl();
+  if (!base) return { error: '商家后台地址尚未正确配置。', created: null };
+  try {
+    const repository = new MySqlPlatformProvisioningRepository(database.config);
+    const created = await repository.reissueInvitation({ merchantId, operatorId: operator });
+    return {
+      error: null,
+      created: {
+        name: created.name,
+        setupUrl: setupUrl(base, created.setupToken),
+        expiresAt: created.setupExpiresAt.toISOString(),
+      },
+    };
+  } catch (error) {
+    return {
+      error:
+        error instanceof MerchantInvitationNotReissuableError
+          ? '商家已领取或不存在，不能重新签发。'
+          : '重新签发失败；如结果不确定，请刷新商家状态后再操作。',
+      created: null,
+    };
   }
 }
