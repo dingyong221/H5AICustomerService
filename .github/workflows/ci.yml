@@ -183,3 +183,28 @@ jobs:
       - name: Stop disposable MySQL
         if: always()
         run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml down
+
+  image-packaging:
+    name: Build five release container targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Build image targets without publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          for spec in 'api api' 'worker worker' 'web merchant-web' 'web consumer-h5' 'web ops-web'; do
+            read -r kind name <<< "$spec"
+            docker build \
+              --file infra/docker/workspace.Dockerfile \
+              --target "$kind" \
+              --build-arg "APP_KIND=$kind" \
+              --build-arg "APP_NAME=$name" \
+              --tag "h5cs-$name:ci" \
+              .
+            docker image inspect "h5cs-$name:ci" \
+              --format 'image={{.RepoTags}} user={{.Config.User}} command={{.Config.Cmd}}'
+          done
