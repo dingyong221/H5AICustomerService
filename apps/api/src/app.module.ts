@@ -16,6 +16,9 @@ import { createRuntimeWorkBuddyLocalAuthorization } from './oauth/workbuddy-loca
 import { WorkBuddyLocalAuthorizationService } from './oauth/workbuddy-local-authorization.service.js';
 import { PublicAssistantController } from './public/public-assistant.controller.js';
 import { PublicAssistantService } from './public/public-assistant.service.js';
+import { PublicSessionService } from './public/public-session.service.js';
+import { PublicTurnController } from './public/public-turn.controller.js';
+import { PublicTurnService } from './public/public-turn.service.js';
 import { RequestIdMiddleware } from './request-id.js';
 import { SkillOnboardingApplicationService } from './skill/skill-onboarding.service.js';
 import { createRuntimeSkillOnboardingService } from './skill/runtime.js';
@@ -28,12 +31,21 @@ import { SkillController } from './skill/skill.controller.js';
     OAuthController,
     WorkBuddyLocalAuthorizationController,
     PublicAssistantController,
+    PublicTurnController,
   ],
   providers: [
     HealthService,
     {
       provide: PublicAssistantService,
       useFactory: () => PublicAssistantService.fromEnvironment(),
+    },
+    {
+      provide: PublicSessionService,
+      useFactory: () => PublicSessionService.fromEnvironment(),
+    },
+    {
+      provide: PublicTurnService,
+      useFactory: () => PublicTurnService.fromEnvironment(),
     },
     {
       provide: OAuthRuntime,
