@@ -8,5 +8,5 @@
     "types": ["node", "vitest/globals"],
     "useDefineForClassFields": false
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "integration/**/*.ts", "vitest.integration.config.ts"]
 }
