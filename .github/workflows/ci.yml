@@ -208,3 +208,6 @@ jobs:
             docker image inspect "h5cs-$name:ci" \
               --format 'image={{.RepoTags}} user={{.Config.User}} command={{.Config.Cmd}}'
           done
+
+      - name: Smoke packaged runtime under release restrictions
+        run: bash scripts/quality/smoke-release-images.sh
