@@ -122,7 +122,7 @@ describe('onboarding API client boundary', () => {
                   display_name: '售前客服',
                   status: 'active',
                 },
-                url: 'https://merchant.test/workspace',
+                url: 'https://merchant.test/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444',
               },
               request_id: 'request-existing',
             }),
@@ -140,15 +140,17 @@ describe('onboarding API client boundary', () => {
         display_name: '售前客服',
         status: 'active',
       },
-      url: 'https://merchant.test/workspace',
+      url: 'https://merchant.test/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444',
     });
   });
 
   it('rejects cross-origin or embellished management links', async () => {
     for (const url of [
-      'https://foreign.test/workspace',
-      'https://merchant.test/workspace?token=secret',
-      'https://merchant.test/workspace#secret',
+      'https://foreign.test/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444',
+      'https://merchant.test/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444?token=secret',
+      'https://merchant.test/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444#secret',
+      'https://merchant.test/workspace/22222222222222222222222222222222/assistants/55555555555555555555555555555555',
+      'https://merchant.test/setup',
     ]) {
       const client = createOnboardingApiClient({
         apiBaseUrl: '/api/v1/skill',
@@ -202,7 +204,7 @@ describe('onboarding API client boundary', () => {
                   },
                 ],
                 selection_required: true,
-                url: 'https://merchant.test/workspace',
+                url: 'https://merchant.test/workspace/22222222222222222222222222222222',
               },
               request_id: 'request-selection',
             }),

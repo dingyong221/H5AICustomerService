@@ -203,24 +203,33 @@ function parseStartResult(payload: unknown, origin: string): OnboardingStartResu
         !exactKeys(assistant, ['assistant_ref', 'display_name', 'status'])
       );
     }) ||
-    !safeManagementUrl(result.url, origin)
+    !safeManagementUrl(result.url, origin, result)
   ) {
     throw new OnboardingClientError('invalid_response', '服务端返回的管理入口未通过安全校验。');
   }
   return result;
 }
 
-function safeManagementUrl(value: string, origin: string): boolean {
+function safeManagementUrl(
+  value: string,
+  origin: string,
+  result: ExistingAssistantResult,
+): boolean {
   try {
     const target = new URL(value);
     const application = new URL(origin);
-    return (
+    const safeOrigin =
       target.origin === application.origin &&
       target.username === '' &&
       target.password === '' &&
       target.search === '' &&
-      target.hash === ''
-    );
+      target.hash === '';
+    if (!safeOrigin) return false;
+    if (result.action === 'select_assistant') {
+      return /^\/workspace\/[0-9a-f]{32}$/u.test(target.pathname);
+    }
+    const match = /^\/workspace\/[0-9a-f]{32}\/assistants\/([0-9a-f]{32})$/u.exec(target.pathname);
+    return match?.[1] === result.assistant.assistant_ref;
   } catch {
     return false;
   }
