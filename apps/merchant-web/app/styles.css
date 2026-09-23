@@ -25,6 +25,99 @@ a {
   color: inherit;
 }
 
+.merchant-account-card {
+  background: #fff;
+  border: 1px solid #d9e4dc;
+  border-radius: 16px;
+  margin: 1.5rem 0;
+  max-width: 35rem;
+  padding: clamp(1.2rem, 3vw, 2rem);
+}
+
+.merchant-account-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.merchant-account-form label {
+  display: grid;
+  font-weight: 700;
+  gap: 0.4rem;
+}
+
+.merchant-account-form input {
+  border: 1px solid #aebeb4;
+  border-radius: 9px;
+  font: inherit;
+  padding: 0.75rem;
+}
+
+.merchant-account-form button {
+  background: #176f4b;
+  border: 0;
+  border-radius: 9px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0.75rem 1rem;
+}
+
+.merchant-account-form button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.assistant-create-card {
+  max-width: 62rem;
+}
+
+.assistant-create-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.assistant-create-form label {
+  display: grid;
+  font-weight: 700;
+  gap: 0.4rem;
+}
+
+.assistant-create-form input,
+.assistant-create-form textarea {
+  border: 1px solid #aebeb4;
+  border-radius: 9px;
+  font: inherit;
+  padding: 0.75rem;
+}
+
+.assistant-create-form button {
+  background: #176f4b;
+  border: 0;
+  border-radius: 9px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0.75rem 1rem;
+}
+
+.assistant-create-form button:disabled {
+  opacity: 0.6;
+}
+
+.assistant-workspace-list {
+  list-style: none;
+  padding: 0;
+}
+
+.assistant-workspace-list li {
+  border-bottom: 1px solid #e0e9e3;
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.8rem 0;
+}
+
 .skip-link {
   background: #ffffff;
   border: 2px solid var(--ui-focus);

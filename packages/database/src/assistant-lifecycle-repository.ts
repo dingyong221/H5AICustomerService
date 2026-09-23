@@ -48,6 +48,7 @@ type ManagementRow = RowDataPacket & {
 };
 
 type PublishRow = ManagementRow & {
+  validation: string | Record<string, unknown>;
   membership_status: string;
   merchant_status: string;
 };
@@ -78,6 +79,7 @@ type PublicRow = RowDataPacket & {
 };
 
 const OPERATION_GENERATE = 'assistant.generate';
+const OPERATION_CREATE_MANUAL = 'assistant.create_manual';
 const OPERATION_PUBLISH = 'assistant.publish';
 const controlCharacters = /[\u0000-\u001f\u007f]/u;
 
@@ -290,6 +292,124 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
     if (!probe.ok) throw new AssistantLifecyclePersistenceError();
   }
 
+  public async listMerchantAssistants(
+    merchantUserIdValue: MerchantUserId,
+    merchantIdValue: MerchantId,
+  ): Promise<readonly AssistantManagementSnapshot[]> {
+    const merchantUserId = idBuffer(merchantUserIdValue, 'merchantUserId');
+    const merchantId = idBuffer(merchantIdValue, 'merchantId');
+    return this.#withConnection(async (connection) => {
+      const [rows] = await connection.execute<ManagementRow[]>(
+        `SELECT a.id AS assistant_id, a.merchant_id, a.display_name, a.public_slug,
+                a.status, a.draft_revision, d.config, a.active_release_id,
+                a.created_at, a.updated_at
+           FROM assistant a
+           JOIN assistant_draft d ON d.merchant_id = a.merchant_id AND d.assistant_id = a.id
+           JOIN merchant m ON m.id = a.merchant_id
+           JOIN merchant_membership mm ON mm.merchant_id = m.id
+          WHERE a.merchant_id = ? AND mm.merchant_user_id = ?
+            AND m.status = 'active' AND mm.status = 'active'
+          ORDER BY a.created_at DESC, a.id DESC LIMIT 50`,
+        [merchantId, merchantUserId],
+      );
+      return rows.map((row) => this.#managementFromRow(row));
+    });
+  }
+
+  public async createManualDraft(input: {
+    merchantUserId: MerchantUserId;
+    merchantId: MerchantId;
+    displayName: string;
+    draft: AssistantDraftConfig;
+    idempotency: AssistantLifecycleIdempotency;
+    now: Date;
+  }): Promise<AssistantManagementSnapshot> {
+    validDate(input.now, 'now');
+    const merchantUserId = idBuffer(input.merchantUserId, 'merchantUserId');
+    const merchantId = idBuffer(input.merchantId, 'merchantId');
+    const displayName = text(input.displayName, 'displayName', 200);
+    const draft = validateDraft(input.draft);
+    const idem = validateIdempotency(input.idempotency, input.now);
+    try {
+      return await this.#withTransaction(async (connection) => {
+        const [memberships] = await connection.execute<RowDataPacket[]>(
+          `SELECT mm.merchant_id
+             FROM merchant_membership mm
+             JOIN merchant m ON m.id = mm.merchant_id
+             JOIN merchant_user u ON u.id = mm.merchant_user_id
+            WHERE mm.merchant_id = ? AND mm.merchant_user_id = ?
+              AND mm.status = 'active' AND m.status = 'active' AND u.status = 'active'
+            LIMIT 1 FOR UPDATE`,
+          [merchantId, merchantUserId],
+        );
+        if (memberships.length !== 1) throw new AssistantGenerationUnavailableError();
+        const idempotencyId = this.#newId('idempotencyId');
+        await this.#insertIdempotency(
+          connection,
+          idempotencyId,
+          merchantId,
+          OPERATION_CREATE_MANUAL,
+          idem,
+          input.idempotency.expiresAt,
+        );
+        const assistantId = this.#newId('assistantId');
+        const slug = this.#newSlug();
+        await connection.execute(
+          `INSERT INTO assistant
+             (id, merchant_id, display_name, public_slug, public_slug_digest, status,
+              active_release_id, draft_revision, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'draft_only', NULL, 1, ?, ?)`,
+          [assistantId, merchantId, displayName, slug, slugDigest(slug), input.now, input.now],
+        );
+        await connection.execute(
+          `INSERT INTO assistant_draft
+             (assistant_id, merchant_id, revision, config, validation, updated_by, updated_at)
+           VALUES (?, ?, 1, ?, ?, ?, ?)`,
+          [
+            assistantId,
+            merchantId,
+            JSON.stringify(draft),
+            JSON.stringify({ publishable: false, reason: 'knowledge_not_verified' }),
+            merchantUserId,
+            input.now,
+          ],
+        );
+        await this.#completeIdempotency(
+          connection,
+          idempotencyId,
+          assistantId,
+          'assistant',
+          { assistantId: assistantId.toString('hex'), merchantId: input.merchantId },
+          input.now,
+        );
+        await this.#writeOutbox(
+          connection,
+          merchantId,
+          'assistant.created',
+          'assistant',
+          assistantId,
+          { draftRevision: 1 },
+          input.now,
+        );
+        return {
+          assistantId: toAssistantId(assistantId.toString('hex')),
+          merchantId: input.merchantId,
+          displayName,
+          publicSlug: slug,
+          status: 'draft_only',
+          draftRevision: 1,
+          draft,
+          activeReleaseId: null,
+          createdAt: input.now,
+          updatedAt: input.now,
+        };
+      });
+    } catch (error) {
+      if (!isDuplicateKey(error)) throw error;
+      return this.#recoverCreated(OPERATION_CREATE_MANUAL, input, idem);
+    }
+  }
+
   public async generateDraftFromOnboarding(input: {
     merchantUserId: MerchantUserId;
     merchantId: MerchantId;
@@ -367,7 +487,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
             assistantId,
             merchantId,
             JSON.stringify(draft),
-            JSON.stringify({ publishable: true }),
+            JSON.stringify({ publishable: false, reason: 'knowledge_not_verified' }),
             merchantUserId,
             input.now,
           ],
@@ -425,7 +545,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
       });
     } catch (error) {
       if (!isDuplicateKey(error)) throw error;
-      return this.#recoverGenerated(input, idem);
+      return this.#recoverCreated(OPERATION_GENERATE, input, idem);
     }
   }
 
@@ -475,7 +595,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
         [
           nextRevision,
           JSON.stringify(draft),
-          JSON.stringify({ publishable: true }),
+          JSON.stringify({ publishable: false, reason: 'knowledge_not_verified' }),
           merchantUserId,
           input.now,
           merchantId,
@@ -556,6 +676,10 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
           current.draft_revision !== input.expectedDraftRevision ||
           current.status === 'paused'
         ) {
+          throw new AssistantPublishValidationError();
+        }
+        const validation = parseObject(current.validation, 'draft validation');
+        if (validation['publishable'] !== true) {
           throw new AssistantPublishValidationError();
         }
         const draft = parseDraft(current.config);
@@ -730,7 +854,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
   ): Promise<PublishRow | null> {
     const [rows] = await connection.execute<PublishRow[]>(
       `SELECT a.id AS assistant_id, a.merchant_id, a.display_name, a.public_slug,
-              a.status, a.draft_revision, d.config, a.active_release_id,
+              a.status, a.draft_revision, d.config, d.validation, a.active_release_id,
               a.created_at, a.updated_at, mm.status AS membership_status,
               m.status AS merchant_status
          FROM assistant a
@@ -767,14 +891,15 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
     };
   }
 
-  async #recoverGenerated(
+  async #recoverCreated(
+    operation: string,
     input: {
       merchantId: MerchantId;
       idempotency: AssistantLifecycleIdempotency;
     },
     idem: Readonly<{ actorScopeDigest: Buffer; keyDigest: Buffer; requestHash: Buffer }>,
   ): Promise<AssistantManagementSnapshot> {
-    const idempotency = await this.#readIdempotency(OPERATION_GENERATE, idem);
+    const idempotency = await this.#readIdempotency(operation, idem);
     if (idempotency.resource_id === null) throw new AssistantLifecyclePersistenceError();
     const snapshot = await this.findManagementSnapshot(
       input.merchantId,

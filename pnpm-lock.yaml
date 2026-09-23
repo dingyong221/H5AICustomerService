@@ -172,6 +172,12 @@ importers:
       '@h5cs/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@h5cs/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@h5cs/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@h5cs/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -209,6 +215,9 @@ importers:
 
   apps/ops-web:
     dependencies:
+      '@h5cs/database':
+        specifier: workspace:*
+        version: link:../../packages/database
       '@h5cs/ui':
         specifier: workspace:*
         version: link:../../packages/ui

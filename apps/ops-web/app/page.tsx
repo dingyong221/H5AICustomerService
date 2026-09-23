@@ -1,4 +1,11 @@
 import { Button, EmptyState, PageShell, StatusBadge } from '@h5cs/ui';
+import { loadDatabaseConfig, MySqlPlatformProvisioningRepository } from '@h5cs/database';
+import { redirect } from 'next/navigation';
+
+import { currentOperator, logoutOperator } from './operator-actions';
+import { ProvisionForm } from './provision-form';
+
+export const dynamic = 'force-dynamic';
 
 function BuildingIcon() {
   return (
@@ -65,16 +72,37 @@ const operationAreas = [
   },
 ];
 
-export default function OperationsDashboardPage() {
+export default async function OperationsDashboardPage() {
+  const operator = await currentOperator();
+  if (!operator) redirect('/login');
+  const database = loadDatabaseConfig();
+  let merchants: Awaited<ReturnType<MySqlPlatformProvisioningRepository['listMerchants']>> = [];
+  let databaseReady = false;
+  if (database.configured) {
+    try {
+      merchants = await new MySqlPlatformProvisioningRepository(database.config).listMerchants();
+      databaseReady = true;
+    } catch {
+      databaseReady = false;
+    }
+  }
   return (
     <PageShell
-      aside={<StatusBadge tone="warning">API 未连接</StatusBadge>}
+      aside={
+        <form action={logoutOperator}>
+          <button className="ops-logout" type="submit">退出登录</button>
+        </form>
+      }
       description={<p>聚焦商家状态、后台任务与敏感操作审计。消费者内容默认不在运营总览展示。</p>}
       eyebrow="Operations Control"
       notice={
         <div className="ops-connection" role="status">
-          <strong>只读骨架</strong>
-          <span>身份、数据和操作接口均未连接，当前页面不会执行暂停、额度调整或审计访问。</span>
+          <strong>{databaseReady ? `运营账号：${operator}` : '数据库暂不可用'}</strong>
+          <span>
+            {databaseReady
+              ? '商家开通与列表已连接真实数据库；任务和审计面板将在后续接入。'
+              : '商家开通不可用，请核对 MySQL 连接和迁移状态。'}
+          </span>
         </div>
       }
       title="平台运行态，一眼看清"
@@ -82,14 +110,14 @@ export default function OperationsDashboardPage() {
       <section aria-label="运营数据概况" className="ops-overview" id="overview">
         <div className="ops-overview__lead">
           <p>系统概况</p>
-          <strong>等待运行数据</strong>
-          <span>连接运营 API 后展示商家、客服、任务和用量的聚合状态。</span>
+          <strong>{databaseReady ? `${merchants.length} 个商家已载入` : '等待运行数据'}</strong>
+          <span>在这里开通商家，生成商家后台领取链接；客服由商家在自己的后台创建和发布。</span>
         </div>
         <div className="ops-metrics">
           <article>
             <span>活跃商家</span>
-            <strong aria-label="尚未获取">—</strong>
-            <small>尚未查询</small>
+            <strong>{databaseReady ? merchants.filter((merchant) => merchant.status === 'active').length : '—'}</strong>
+            <small>{databaseReady ? '当前已载入列表' : '尚未查询'}</small>
           </article>
           <article>
             <span>运行中任务</span>
@@ -102,6 +130,36 @@ export default function OperationsDashboardPage() {
             <small>尚未查询</small>
           </article>
         </div>
+      </section>
+
+      <section aria-labelledby="provision-heading" className="ops-provision-panel" id="provision">
+        <div className="section-heading">
+          <div>
+            <p>商家开通</p>
+            <h2 id="provision-heading">生成商家后台领取链接</h2>
+          </div>
+          <StatusBadge tone={databaseReady ? 'info' : 'warning'}>
+            {databaseReady ? '数据库已连接' : '暂不可用'}
+          </StatusBadge>
+        </div>
+        <p>创建后商家处于“等待负责人领取”状态；一次性链接不赋予运营以外的管理权限。</p>
+        {databaseReady ? <ProvisionForm /> : null}
+        {databaseReady ? (
+          <div className="ops-merchant-list" id="merchants">
+            <h3>最近商家</h3>
+            {merchants.length === 0 ? <p>尚无商家记录。</p> : (
+              <ul>
+                {merchants.map((merchant) => (
+                  <li key={merchant.id}>
+                    <strong>{merchant.name}</strong>
+                    <span>{merchant.status === 'pending_owner' ? '等待领取' : merchant.status}</span>
+                    <small>{merchant.id}</small>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : null}
       </section>
 
       <section aria-labelledby="areas-heading" className="operation-areas">

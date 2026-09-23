@@ -13,6 +13,8 @@
   },
   "dependencies": {
     "@h5cs/contracts": "workspace:*",
+    "@h5cs/database": "workspace:*",
+    "@h5cs/domain": "workspace:*",
     "@h5cs/ui": "workspace:*",
     "next": "catalog:",
     "react": "catalog:",

@@ -58,11 +58,33 @@ export const merchantUsers = mysqlTable(
   ],
 );
 
+export const merchantPasswordCredentials = mysqlTable(
+  'merchant_password_credential',
+  {
+    merchantUserId: id('merchant_user_id').notNull(),
+    phoneLookupDigest: digest('phone_lookup_digest').notNull(),
+    passwordSalt: binary('password_salt', { length: 16 }).notNull(),
+    passwordHash: binary('password_hash', { length: 64 }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.merchantUserId], name: 'pk_merchant_password_credential' }),
+    uniqueIndex('uq_merchant_password_phone').on(table.phoneLookupDigest),
+    foreignKey({
+      columns: [table.merchantUserId],
+      foreignColumns: [merchantUsers.id],
+      name: 'fk_merchant_password_user',
+    }).onDelete('restrict'),
+  ],
+);
+
 export const platformLoginSessions = mysqlTable(
   'platform_login_session',
   {
     sessionDigest: digest('session_digest').notNull(),
     merchantUserId: id('merchant_user_id').notNull(),
+    merchantId: id('merchant_id'),
     csrfDigest: digest('csrf_digest').notNull(),
     authenticationLevel: varchar('authentication_level', { length: 32 }).notNull(),
     authenticatedAt: utcDateTime('authenticated_at').notNull(),
@@ -88,6 +110,11 @@ export const platformLoginSessions = mysqlTable(
       columns: [table.merchantUserId],
       foreignColumns: [merchantUsers.id],
       name: 'fk_platform_login_session_user',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.merchantId],
+      foreignColumns: [merchants.id],
+      name: 'fk_platform_login_session_merchant',
     }).onDelete('restrict'),
   ],
 );
@@ -162,6 +189,28 @@ export const merchantMemberships = mysqlTable(
       columns: [table.merchantUserId],
       foreignColumns: [merchantUsers.id],
       name: 'fk_merchant_membership_user',
+    }).onDelete('restrict'),
+  ],
+);
+
+export const merchantSetupInvitations = mysqlTable(
+  'merchant_setup_invitation',
+  {
+    tokenDigest: digest('token_digest').notNull(),
+    merchantId: id('merchant_id').notNull(),
+    createdByOperator: varchar('created_by_operator', { length: 128 }).notNull(),
+    expiresAt: utcDateTime('expires_at').notNull(),
+    claimedAt: utcDateTime('claimed_at'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tokenDigest], name: 'pk_merchant_setup_invitation' }),
+    index('idx_merchant_setup_invitation_merchant').on(table.merchantId, table.createdAt),
+    index('idx_merchant_setup_invitation_expiry').on(table.claimedAt, table.expiresAt),
+    foreignKey({
+      columns: [table.merchantId],
+      foreignColumns: [merchants.id],
+      name: 'fk_merchant_setup_invitation_merchant',
     }).onDelete('restrict'),
   ],
 );

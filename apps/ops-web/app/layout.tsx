@@ -35,15 +35,15 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
             <a aria-current="page" href="#overview">
               总览
             </a>
-            <a href="#merchants">商家</a>
+            <a href="#provision">商家开通</a>
             <a href="#tasks">任务</a>
             <a href="#audit">审计</a>
           </nav>
           <div className="ops-identity">
             <span aria-hidden="true">运</span>
             <div>
-              <strong>未登录</strong>
-              <small>等待身份 API</small>
+              <strong>运营后台</strong>
+              <small>会话由服务端验证</small>
             </div>
           </div>
         </header>
