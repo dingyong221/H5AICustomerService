@@ -15,15 +15,18 @@ import {
   shouldContinuePolling,
   toConversationView,
   type ConversationState,
-  type PendingMessage,
 } from './conversation-model';
 import { pollDelayMilliseconds, shouldSubmitComposerKey } from './interaction-policy';
 import {
   createPublicAssistantApiClient,
   PublicApiClientError,
   type OnlinePublicAssistantSnapshot,
-  type PublicSession,
 } from './public-api-client';
+import {
+  clearSessionReference,
+  readSessionReference,
+  saveSessionReference,
+} from './session-reference';
 
 function SendIcon() {
   return (
@@ -76,100 +79,202 @@ export function OnlineCustomerService({
   snapshot,
 }: OnlineCustomerServiceProps) {
   const [conversation, setConversation] = useState<ConversationState>(initialConversationState);
+  const [activeSnapshot, setActiveSnapshot] = useState(snapshot);
   const [draft, setDraft] = useState('');
+  const [restoreStatus, setRestoreStatus] = useState<'restoring' | 'ready' | 'failed'>('restoring');
+  const [restoreAttempt, setRestoreAttempt] = useState(0);
+  const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
+  const sessionRequestIdRef = useRef<string | null>(null);
   const activeController = useRef<AbortController | undefined>(undefined);
   const running = useRef(false);
   const viewMessages = useMemo(
-    () => toConversationView(conversation, snapshot.welcomeMessage),
-    [conversation, snapshot.welcomeMessage],
+    () => toConversationView(conversation, activeSnapshot.welcomeMessage),
+    [conversation, activeSnapshot.welcomeMessage],
   );
 
   useEffect(() => () => activeController.current?.abort(), []);
 
-  async function execute(pending: PendingMessage, startingSession?: PublicSession): Promise<void> {
-    if (running.current) return;
+  useEffect(() => {
+    const controller = new AbortController();
+    let storage: Storage;
+    try {
+      storage = window.sessionStorage;
+    } catch {
+      queueMicrotask(() => {
+        if (!controller.signal.aborted) setRestoreStatus('ready');
+      });
+      return () => controller.abort();
+    }
+    const sessionRequestId = readSessionReference(storage, publicSlug);
+    if (!sessionRequestId) {
+      queueMicrotask(() => {
+        if (!controller.signal.aborted) setRestoreStatus('ready');
+      });
+      return () => controller.abort();
+    }
+    running.current = true;
+    const restore = async () => {
+      try {
+        const client = createPublicAssistantApiClient({
+          apiBaseUrl,
+          origin: window.location.origin,
+        });
+        const session = await client.resumeSession({
+          publicSlug,
+          sessionRequestId,
+          signal: controller.signal,
+        });
+        if (!session) {
+          clearSessionReference(storage, publicSlug);
+          setRecoveryNotice('上次咨询已结束，发送消息将开始新咨询。');
+          setRestoreStatus('ready');
+          return;
+        }
+        const history = await client.loadHistory({
+          sessionHandle: session.sessionHandle,
+          signal: controller.signal,
+        });
+        if (
+          !history ||
+          history.session.sessionHandle !== session.sessionHandle ||
+          history.session.releaseRef !== session.releaseRef ||
+          history.snapshot.publicAssistantId !== publicSlug
+        ) {
+          clearSessionReference(storage, publicSlug);
+          setRecoveryNotice('上次咨询无法恢复，发送消息将开始新咨询。');
+          setRestoreStatus('ready');
+          return;
+        }
+        sessionRequestIdRef.current = sessionRequestId;
+        setActiveSnapshot(history.snapshot);
+        setConversation({
+          session,
+          messages: history.messages,
+          ...(history.activeTurn
+            ? {
+                pending: {
+                  clientMessageId: history.activeTurn.clientMessageId,
+                  content: history.activeTurn.content,
+                  sessionRequestId,
+                  phase: 'sending' as const,
+                  retryable: false,
+                },
+              }
+            : {}),
+        });
+        if (history.hasEarlierMessages) {
+          setRecoveryNotice('已恢复本次咨询，当前仅展示最近 200 条消息。');
+        }
+        setRestoreStatus('ready');
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setRecoveryNotice(
+          error instanceof PublicApiClientError ? error.message : '暂时无法恢复咨询，请重试。',
+        );
+        setRestoreStatus('failed');
+      } finally {
+        running.current = false;
+      }
+    };
+    void restore();
+    return () => controller.abort();
+  }, [apiBaseUrl, publicSlug, restoreAttempt]);
+
+  useEffect(() => {
+    const pending = conversation.pending;
+    if (restoreStatus !== 'ready' || pending?.phase !== 'sending' || running.current) return;
     running.current = true;
     const controller = new AbortController();
     activeController.current?.abort();
     activeController.current = controller;
-    let workingState: ConversationState = {
-      ...conversation,
-      pending,
-      ...(startingSession === undefined ? {} : { session: startingSession }),
-    };
+    let workingState: ConversationState = conversation;
 
-    try {
-      const client = createPublicAssistantApiClient({
-        apiBaseUrl,
-        origin: window.location.origin,
-      });
-      const session =
-        startingSession ??
-        (await client.createSession({
-          publicSlug,
-          sessionRequestId: pending.sessionRequestId,
-          signal: controller.signal,
-          snapshot,
-        }));
-      workingState = attachSession(workingState, session);
-      setConversation(workingState);
+    const execute = async () => {
+      try {
+        const client = createPublicAssistantApiClient({
+          apiBaseUrl,
+          origin: window.location.origin,
+        });
+        const session =
+          workingState.session ??
+          (await client.createSession({
+            publicSlug,
+            sessionRequestId: pending.sessionRequestId,
+            signal: controller.signal,
+            snapshot: activeSnapshot,
+          }));
+        if (!workingState.session) {
+          sessionRequestIdRef.current = pending.sessionRequestId;
+          try {
+            saveSessionReference(window.sessionStorage, publicSlug, pending.sessionRequestId);
+          } catch {
+            // Browser storage is optional for the current conversation.
+          }
+        }
+        workingState = attachSession(workingState, session);
+        setConversation(workingState);
 
-      const accepted = await client.sendMessage({
-        clientMessageId: pending.clientMessageId,
-        content: pending.content,
-        sessionHandle: session.sessionHandle,
-        signal: controller.signal,
-      });
-      workingState = markAccepted(workingState, accepted);
-      setConversation(workingState);
-
-      let completedPolls = 0;
-      while (!controller.signal.aborted) {
-        const result = await client.readTurn({
+        const accepted = await client.sendMessage({
           clientMessageId: pending.clientMessageId,
-          resultUrl: accepted.resultUrl,
+          content: pending.content,
           sessionHandle: session.sessionHandle,
           signal: controller.signal,
-          turnId: accepted.turnId,
         });
-        workingState = applyTurnResult(workingState, result);
+        workingState = markAccepted(workingState, accepted);
         setConversation(workingState);
-        if (!shouldContinuePolling(result.state)) return;
-        await wait(pollDelayMilliseconds(completedPolls), controller.signal);
-        completedPolls += 1;
+
+        let completedPolls = 0;
+        while (!controller.signal.aborted) {
+          const result = await client.readTurn({
+            clientMessageId: pending.clientMessageId,
+            resultUrl: accepted.resultUrl,
+            sessionHandle: session.sessionHandle,
+            signal: controller.signal,
+            turnId: accepted.turnId,
+          });
+          workingState = applyTurnResult(workingState, result);
+          setConversation(workingState);
+          if (!shouldContinuePolling(result.state)) return;
+          await wait(pollDelayMilliseconds(completedPolls), controller.signal);
+          completedPolls += 1;
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        setConversation(failPending(workingState, failureDetails(error)));
+      } finally {
+        if (activeController.current === controller) activeController.current = undefined;
+        running.current = false;
       }
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') return;
-      setConversation(failPending(workingState, failureDetails(error)));
-    } finally {
-      if (activeController.current === controller) activeController.current = undefined;
-      running.current = false;
-    }
-  }
+    };
+    void execute();
+  }, [conversation, restoreStatus, apiBaseUrl, publicSlug, activeSnapshot]);
 
   function submitMessage(): void {
     const content = draft.trim();
-    if (content.length === 0 || content.length > 2_000 || conversation.pending !== undefined)
+    if (
+      restoreStatus !== 'ready' ||
+      content.length === 0 ||
+      content.length > 2_000 ||
+      conversation.pending !== undefined
+    )
       return;
     const nextState = beginMessage(conversation, {
       clientMessageId: clientId('message'),
       content,
-      sessionRequestId: clientId('session_request'),
+      sessionRequestId: sessionRequestIdRef.current ?? clientId('session_request'),
     });
     setDraft('');
     setConversation(nextState);
-    void execute(nextState.pending!, nextState.session);
   }
 
   function retryMessage(): void {
     const nextState = retryPending(conversation);
     if (nextState.pending === undefined || nextState === conversation) return;
     setConversation(nextState);
-    void execute(nextState.pending, nextState.session);
   }
 
   const pending = conversation.pending;
-  const inputDisabled = pending !== undefined;
+  const inputDisabled = restoreStatus !== 'ready' || pending !== undefined;
 
   return (
     <main className="consumer-page">
@@ -181,17 +286,17 @@ export function OnlineCustomerService({
             </div>
             <div>
               <div className="assistant-title-row">
-                <h1>{snapshot.assistantDisplayName}</h1>
+                <h1>{activeSnapshot.assistantDisplayName}</h1>
                 <span className="ai-label">AI</span>
               </div>
-              <p>{snapshot.merchantDisplayName} · 在线</p>
+              <p>{activeSnapshot.merchantDisplayName} · 在线</p>
             </div>
           </div>
         </header>
 
         <aside className="scope-notice">
           <strong>这是 AI 客服</strong>
-          <span>{snapshot.businessScope}</span>
+          <span>{activeSnapshot.businessScope}</span>
         </aside>
 
         <div
@@ -227,6 +332,20 @@ export function OnlineCustomerService({
         </div>
 
         <footer className="composer-area">
+          {restoreStatus === 'restoring' ? <p role="status">正在恢复上次咨询…</p> : null}
+          {recoveryNotice ? <p role="status">{recoveryNotice}</p> : null}
+          {restoreStatus === 'failed' ? (
+            <button
+              onClick={() => {
+                setRecoveryNotice(null);
+                setRestoreStatus('restoring');
+                setRestoreAttempt((value) => value + 1);
+              }}
+              type="button"
+            >
+              重试恢复上次咨询
+            </button>
+          ) : null}
           {pending?.phase === 'failed' ? (
             <div className="send-failure" role="alert">
               <p>{pending.errorMessage}</p>

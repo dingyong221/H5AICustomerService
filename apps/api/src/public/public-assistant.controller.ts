@@ -32,4 +32,15 @@ export class PublicAssistantController {
     if (created.setCookie) response.setHeader('Set-Cookie', created.setCookie);
     return created.session;
   }
+
+  @Get('/:publicSlug/sessions/:sessionRequestId')
+  public async resumeSession(
+    @Param('publicSlug') publicSlug: string,
+    @Param('sessionRequestId') sessionRequestId: string,
+    @Headers('cookie') cookieHeader: string | undefined,
+    @Res({ passthrough: true }) response: ResponseLike,
+  ) {
+    response.setHeader('Cache-Control', 'no-store');
+    return this.sessions.resume({ publicSlug, sessionRequestId, cookieHeader });
+  }
 }

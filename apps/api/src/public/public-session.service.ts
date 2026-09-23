@@ -1,11 +1,20 @@
 import { randomBytes } from 'node:crypto';
 
-import { BadRequestException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import {
+  BadRequestException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 
-import { loadDatabaseConfig, MySqlPublicSessionRepository, PublicSessionUnavailableError } from '@h5cs/database';
-import type { PublicSessionCreated } from '@h5cs/database';
+import {
+  loadDatabaseConfig,
+  MySqlPublicSessionRepository,
+  PublicSessionUnavailableError,
+} from '@h5cs/database';
+import type { PublicSessionCreated, PublicSessionHistory } from '@h5cs/database';
 
-type SessionIssuer = Pick<MySqlPublicSessionRepository, 'createSession'>;
+type SessionIssuer = Pick<MySqlPublicSessionRepository, 'createSession'> &
+  Partial<Pick<MySqlPublicSessionRepository, 'resumeSession' | 'readHistory'>>;
 
 const visitorCookieSeconds = 30 * 24 * 60 * 60;
 
@@ -17,7 +26,8 @@ const canonicalOrigin = (value: string | undefined): URL | null => {
     if (
       parsed.origin !== value ||
       (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && loopback))
-    ) return null;
+    )
+      return null;
     return parsed;
   } catch {
     return null;
@@ -36,16 +46,20 @@ export class PublicSessionService {
     private readonly secure: boolean,
   ) {}
 
-  public static fromEnvironment(environment: NodeJS.ProcessEnv = process.env): PublicSessionService {
+  public static fromEnvironment(
+    environment: NodeJS.ProcessEnv = process.env,
+  ): PublicSessionService {
     const origin = canonicalOrigin(environment['CONSUMER_H5_ORIGIN']);
     if (
       environment['PUBLIC_CONVERSATION_ENABLED'] !== 'true' ||
       !origin ||
       (environment['NODE_ENV'] === 'production' && origin.protocol !== 'https:')
-    ) return new PublicSessionService(null, false);
+    )
+      return new PublicSessionService(null, false);
     const database = loadDatabaseConfig(environment);
     const key = environment['VISITOR_CREDENTIAL_HMAC_KEY'];
-    if (!database.configured || !key) return new PublicSessionService(null, origin.protocol === 'https:');
+    if (!database.configured || !key)
+      return new PublicSessionService(null, origin.protocol === 'https:');
     try {
       return new PublicSessionService(
         new MySqlPublicSessionRepository(database.config, key),
@@ -62,7 +76,9 @@ export class PublicSessionService {
 
   private readNonce(cookieHeader: string | undefined): string | null {
     if (!cookieHeader || cookieHeader.length > 8_192) return null;
-    const values = cookieHeader.split(';').map((part) => part.trim())
+    const values = cookieHeader
+      .split(';')
+      .map((part) => part.trim())
       .filter((part) => part.startsWith(`${this.cookieName()}=`))
       .map((part) => part.slice(this.cookieName().length + 1));
     return values.length === 1 && validNonce(values[0]!) ? values[0]! : null;
@@ -91,14 +107,54 @@ export class PublicSessionService {
       });
       return {
         session,
-        setCookie: existingNonce === null
-          ? `${this.cookieName()}=${nonce}; Path=/; Max-Age=${visitorCookieSeconds}; HttpOnly; SameSite=Lax${this.secure ? '; Secure' : ''}`
-          : null,
+        setCookie:
+          existingNonce === null
+            ? `${this.cookieName()}=${nonce}; Path=/; Max-Age=${visitorCookieSeconds}; HttpOnly; SameSite=Lax${this.secure ? '; Secure' : ''}`
+            : null,
       };
     } catch (error) {
       if (error instanceof PublicSessionUnavailableError) {
         throw new NotFoundException('Assistant not available');
       }
+      throw new ServiceUnavailableException('Conversation service unavailable');
+    }
+  }
+
+  public async resume(input: {
+    publicSlug: string;
+    sessionRequestId: string;
+    cookieHeader: string | undefined;
+  }): Promise<PublicSessionCreated> {
+    if (!this.issuer?.resumeSession) {
+      throw new ServiceUnavailableException('Conversation service unavailable');
+    }
+    const nonce = this.readNonce(input.cookieHeader);
+    if (!nonce) throw new NotFoundException('Session not available');
+    try {
+      const session = await this.issuer.resumeSession({
+        publicSlug: input.publicSlug,
+        sessionRequestId: input.sessionRequestId,
+        visitorNonce: nonce,
+        now: new Date(),
+      });
+      if (!session) throw new NotFoundException('Session not available');
+      return session;
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      throw new ServiceUnavailableException('Conversation service unavailable');
+    }
+  }
+
+  public async history(sessionHandle: string): Promise<PublicSessionHistory> {
+    if (!this.issuer?.readHistory) {
+      throw new ServiceUnavailableException('Conversation service unavailable');
+    }
+    try {
+      const history = await this.issuer.readHistory(sessionHandle, new Date());
+      if (!history) throw new NotFoundException('Session not available');
+      return history;
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
       throw new ServiceUnavailableException('Conversation service unavailable');
     }
   }

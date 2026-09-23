@@ -5,11 +5,13 @@ import {
   decodeAcceptedTurn,
   decodePublicApiErrorEnvelope,
   decodePublicAssistantSnapshot,
+  decodePublicSessionHistory,
   decodeTurnResult,
   type OnlinePublicAssistantSnapshot,
 } from './public-api-client';
 
 const origin = 'https://h5.example.com';
+const sessionRequestId = `session_request_${'11'.repeat(16)}`;
 
 function envelope(data: Readonly<Record<string, unknown>>): unknown {
   return { data, request_id: 'request_1234567890' };
@@ -38,18 +40,30 @@ const snapshot: OnlinePublicAssistantSnapshot = snapshotData;
 describe('public API response decoders', () => {
   it('accepts an exact online public snapshot', () => {
     expect(decodePublicAssistantSnapshot(envelope(snapshotData))).toEqual(snapshotData);
-    expect(decodePublicAssistantSnapshot(envelope({
-      ...snapshotData,
-      assistantDisplayName: '客'.repeat(200),
-    }))).toBeDefined();
-    expect(decodePublicAssistantSnapshot(envelope({
-      ...snapshotData,
-      assistantDisplayName: '客'.repeat(201),
-    }))).toBeUndefined();
-    expect(decodePublicAssistantSnapshot(envelope({
-      ...snapshotData,
-      businessScope: '服务 A\n服务 B',
-    }))?.businessScope).toBe('服务 A\n服务 B');
+    expect(
+      decodePublicAssistantSnapshot(
+        envelope({
+          ...snapshotData,
+          assistantDisplayName: '客'.repeat(200),
+        }),
+      ),
+    ).toBeDefined();
+    expect(
+      decodePublicAssistantSnapshot(
+        envelope({
+          ...snapshotData,
+          assistantDisplayName: '客'.repeat(201),
+        }),
+      ),
+    ).toBeUndefined();
+    expect(
+      decodePublicAssistantSnapshot(
+        envelope({
+          ...snapshotData,
+          businessScope: '服务 A\n服务 B',
+        }),
+      )?.businessScope,
+    ).toBe('服务 A\n服务 B');
   });
 
   it('accepts the shared request ID grammar including dots and rejects short IDs', () => {
@@ -163,9 +177,96 @@ describe('public API response decoders', () => {
     });
     expect(decodeTurnResult(result)).toBeUndefined();
   });
+
+  it('accepts pinned session history and rejects a mismatched active turn', () => {
+    const history = {
+      activeTurn: {
+        clientMessageId: 'message_1234567890',
+        content: '多少钱？',
+        turnId: 'turn_1234567890',
+      },
+      createdAt: '2026-09-21T08:00:00.000Z',
+      hasEarlierMessages: false,
+      messages: [
+        {
+          clientMessageId: 'message_1234567890',
+          content: '多少钱？',
+          createdAt: '2026-09-21T08:00:00.000Z',
+          messageId: 'server_message_1',
+          role: 'visitor',
+          sequence: 1,
+        },
+      ],
+      releaseRef: snapshot.releaseRef,
+      sessionHandle: 'session_1234567890',
+      snapshot: snapshotData,
+    };
+    expect(decodePublicSessionHistory(envelope(history))).toMatchObject({
+      activeTurn: history.activeTurn,
+      messages: history.messages,
+      snapshot: snapshotData,
+    });
+    expect(
+      decodePublicSessionHistory(
+        envelope({ ...history, activeTurn: { ...history.activeTurn, content: '篡改后的问题' } }),
+      ),
+    ).toBeUndefined();
+    expect(
+      decodePublicSessionHistory(
+        envelope({
+          ...history,
+          snapshot: { ...snapshotData, releaseRef: 'release_other_1234567890' },
+        }),
+      ),
+    ).toBeUndefined();
+  });
 });
 
 describe('public assistant API client', () => {
+  it('uses same-origin credentialed GETs for resume and history', async () => {
+    const session = {
+      createdAt: '2026-09-21T08:00:00.000Z',
+      releaseRef: snapshot.releaseRef,
+      sessionHandle: 'session_1234567890',
+      state: 'active',
+    };
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(envelope(session)))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          envelope({
+            activeTurn: null,
+            createdAt: session.createdAt,
+            hasEarlierMessages: false,
+            messages: [],
+            releaseRef: session.releaseRef,
+            sessionHandle: session.sessionHandle,
+            snapshot: snapshotData,
+          }),
+        ),
+      );
+    const client = createPublicAssistantApiClient({
+      apiBaseUrl: '/api/v1/public',
+      fetchImpl,
+      origin,
+    });
+    await expect(
+      client.resumeSession({ publicSlug: 'shop-help', sessionRequestId }),
+    ).resolves.toEqual(session);
+    await expect(
+      client.loadHistory({ sessionHandle: session.sessionHandle }),
+    ).resolves.toMatchObject({ session, snapshot: snapshotData });
+    expect(fetchImpl.mock.calls.map(([url]) => String(url))).toEqual([
+      `${origin}/api/v1/public/assistants/shop-help/sessions/${sessionRequestId}`,
+      `${origin}/api/v1/public/sessions/${session.sessionHandle}/history`,
+    ]);
+    expect(fetchImpl.mock.calls.map(([, options]) => options)).toEqual([
+      expect.objectContaining({ method: 'GET', credentials: 'same-origin', cache: 'no-store' }),
+      expect.objectContaining({ method: 'GET', credentials: 'same-origin', cache: 'no-store' }),
+    ]);
+  });
+
   it('fails closed for unknown, paused, malformed, and unavailable snapshots', async () => {
     const responses = [
       jsonResponse({}, 404),
@@ -238,13 +339,13 @@ describe('public assistant API client', () => {
     });
     const session = await client.createSession({
       publicSlug: 'shop-help',
-      sessionRequestId: 'session_request_1234567890',
+      sessionRequestId,
       snapshot,
     });
     const [, sessionRequest] = fetchImpl.mock.calls[0]!;
     expect(sessionRequest?.body).toBeUndefined();
     expect(sessionRequest?.headers).toMatchObject({
-      'Idempotency-Key': 'session_request_1234567890',
+      'Idempotency-Key': sessionRequestId,
     });
     const clientMessageId = 'message_client_1234567890';
     await client.sendMessage({
@@ -317,7 +418,7 @@ describe('public assistant API client', () => {
     await expect(
       client.createSession({
         publicSlug: 'shop-help',
-        sessionRequestId: 'session_request_1234567890',
+        sessionRequestId,
         snapshot,
       }),
     ).rejects.toMatchObject({ requestId: 'request_1234567890', retryable: true });

@@ -23,6 +23,18 @@ export type PublicSession = Readonly<{
   state: 'active';
 }>;
 
+export type PublicSessionHistory = Readonly<{
+  session: PublicSession;
+  snapshot: OnlinePublicAssistantSnapshot;
+  messages: readonly PublicMessage[];
+  activeTurn: Readonly<{
+    turnId: string;
+    clientMessageId: string;
+    content: string;
+  }> | null;
+  hasEarlierMessages: boolean;
+}>;
+
 export type PublicMessage = Readonly<{
   clientMessageId?: string | undefined;
   content: string;
@@ -105,6 +117,15 @@ export interface PublicAssistantApiClient {
     publicSlug: string,
     signal?: AbortSignal | undefined,
   ): Promise<PublicAssistantLoadResult>;
+  resumeSession(input: {
+    publicSlug: string;
+    sessionRequestId: string;
+    signal?: AbortSignal | undefined;
+  }): Promise<PublicSession | null>;
+  loadHistory(input: {
+    sessionHandle: string;
+    signal?: AbortSignal | undefined;
+  }): Promise<PublicSessionHistory | null>;
   readTurn(input: {
     clientMessageId: string;
     resultUrl: string;
@@ -123,6 +144,7 @@ export interface PublicAssistantApiClient {
 const publicSlugPattern = /^[a-z0-9](?:[a-z0-9-]{0,62})$/u;
 const opaqueRefPattern = /^[A-Za-z0-9](?:[A-Za-z0-9:_-]{0,190})$/u;
 const clientIdPattern = /^[A-Za-z0-9](?:[A-Za-z0-9_-]{15,127})$/u;
+const sessionRequestPattern = /^session_request_[0-9a-f]{32}$/u;
 const requestIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u;
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
@@ -156,9 +178,11 @@ function boundedText(value: unknown, maximumLength: number): string | undefined 
 function boundedParagraph(value: unknown, maximumLength: number): string | undefined {
   if (typeof value !== 'string') return undefined;
   const normalized = value.replace(/\r\n?/gu, '\n').trim();
-  return normalized.length > 0 && normalized.length <= maximumLength &&
+  return normalized.length > 0 &&
+    normalized.length <= maximumLength &&
     !/[\u0000-\u0009\u000b-\u001f\u007f]/u.test(normalized)
-    ? normalized : undefined;
+    ? normalized
+    : undefined;
 }
 
 function opaqueRef(value: unknown): string | undefined {
@@ -215,7 +239,7 @@ export function decodePublicApiErrorEnvelope(
   };
 }
 
-export function decodePublicAssistantSnapshot(value: unknown):
+function decodePublicAssistantSnapshotData(data: unknown):
   | Readonly<{
       aiDisclosure: true;
       assistantDisplayName: string;
@@ -227,9 +251,8 @@ export function decodePublicAssistantSnapshot(value: unknown):
       welcomeMessage: string;
     }>
   | undefined {
-  const data = decodeEnvelope(value);
   if (
-    data === undefined ||
+    !isRecord(data) ||
     !hasExactKeys(data, [
       'publicAssistantId',
       'merchantDisplayName',
@@ -271,6 +294,12 @@ export function decodePublicAssistantSnapshot(value: unknown):
     releaseRef,
     welcomeMessage,
   };
+}
+
+export function decodePublicAssistantSnapshot(
+  value: unknown,
+): ReturnType<typeof decodePublicAssistantSnapshotData> {
+  return decodePublicAssistantSnapshotData(decodeEnvelope(value));
 }
 
 export function decodePublicSession(value: unknown): PublicSession | undefined {
@@ -438,6 +467,77 @@ function decodeMessages(value: unknown): readonly PublicMessage[] | undefined {
     : undefined;
 }
 
+export function decodePublicSessionHistory(value: unknown): PublicSessionHistory | undefined {
+  const data = decodeEnvelope(value);
+  if (
+    data === undefined ||
+    !hasExactKeys(data, [
+      'sessionHandle',
+      'releaseRef',
+      'createdAt',
+      'snapshot',
+      'messages',
+      'activeTurn',
+      'hasEarlierMessages',
+    ]) ||
+    typeof data['hasEarlierMessages'] !== 'boolean'
+  )
+    return undefined;
+  const session = decodePublicSession({
+    data: {
+      sessionHandle: data['sessionHandle'],
+      releaseRef: data['releaseRef'],
+      createdAt: data['createdAt'],
+      state: 'active',
+    },
+    request_id: 'history.decode',
+  });
+  const snapshot = decodePublicAssistantSnapshotData(data['snapshot']);
+  const messages = decodeMessages(data['messages']);
+  if (
+    !session ||
+    !snapshot ||
+    snapshot.availability !== 'online' ||
+    !messages ||
+    session.releaseRef !== snapshot.releaseRef
+  )
+    return undefined;
+  const active = data['activeTurn'];
+  if (active === null)
+    return {
+      session,
+      snapshot: { ...snapshot, availability: 'online' },
+      messages,
+      activeTurn: null,
+      hasEarlierMessages: data['hasEarlierMessages'],
+    };
+  if (!isRecord(active) || !hasExactKeys(active, ['turnId', 'clientMessageId', 'content'])) {
+    return undefined;
+  }
+  const turnId = opaqueRef(active['turnId']);
+  const clientMessageId = clientGeneratedId(active['clientMessageId']);
+  const content = boundedParagraph(active['content'], 2_000);
+  if (
+    !turnId ||
+    !clientMessageId ||
+    !content ||
+    !messages.some(
+      (message) =>
+        message.role === 'visitor' &&
+        message.clientMessageId === clientMessageId &&
+        message.content === content,
+    )
+  )
+    return undefined;
+  return {
+    session,
+    snapshot: { ...snapshot, availability: 'online' },
+    messages,
+    activeTurn: { turnId, clientMessageId, content },
+    hasEarlierMessages: data['hasEarlierMessages'],
+  };
+}
+
 export function decodeTurnResult(value: unknown): TurnResult | undefined {
   const data = decodeEnvelope(value);
   if (
@@ -589,7 +689,7 @@ export function createPublicAssistantApiClient(
 
     async createSession({ publicSlug, sessionRequestId, snapshot, signal }) {
       if (
-        !clientIdPattern.test(sessionRequestId) ||
+        !sessionRequestPattern.test(sessionRequestId) ||
         !publicSlugPattern.test(publicSlug) ||
         snapshot.availability !== 'online'
       ) {
@@ -625,6 +725,70 @@ export function createPublicAssistantApiClient(
         throw new PublicApiClientError('invalid_response', '服务端返回了无效的咨询会话。');
       }
       return session;
+    },
+
+    async resumeSession({ publicSlug, sessionRequestId, signal }) {
+      if (!publicSlugPattern.test(publicSlug) || !sessionRequestPattern.test(sessionRequestId)) {
+        throw new PublicApiClientError('invalid_input', '恢复咨询会话的参数无效。');
+      }
+      let response: Response;
+      try {
+        response = await fetchImpl(
+          endpointFor(`assistants/${encodeURIComponent(publicSlug)}/sessions/${sessionRequestId}`),
+          {
+            cache: 'no-store',
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json' },
+            method: 'GET',
+            redirect: 'error',
+            ...(signal === undefined ? {} : { signal }),
+          },
+        );
+      } catch {
+        throw new PublicApiClientError('unavailable', '无法恢复咨询会话。', { retryable: true });
+      }
+      if (response.status === 404) return null;
+      if (response.status !== 200) {
+        throw new PublicApiClientError('request_failed', '无法确认原咨询会话。', {
+          ...(await readFailureOptions(response, response.status >= 500)),
+        });
+      }
+      const session = decodePublicSession(await readJson(response));
+      if (!session) throw new PublicApiClientError('invalid_response', '会话恢复结果无效。');
+      return session;
+    },
+
+    async loadHistory({ sessionHandle, signal }) {
+      if (opaqueRef(sessionHandle) === undefined) {
+        throw new PublicApiClientError('invalid_input', '咨询会话标识无效。');
+      }
+      let response: Response;
+      try {
+        response = await fetchImpl(
+          endpointFor(`sessions/${encodeURIComponent(sessionHandle)}/history`),
+          {
+            cache: 'no-store',
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json' },
+            method: 'GET',
+            redirect: 'error',
+            ...(signal === undefined ? {} : { signal }),
+          },
+        );
+      } catch {
+        throw new PublicApiClientError('unavailable', '无法读取咨询记录。', { retryable: true });
+      }
+      if (response.status === 404) return null;
+      if (response.status !== 200) {
+        throw new PublicApiClientError('request_failed', '咨询记录暂不可用。', {
+          ...(await readFailureOptions(response, response.status >= 500)),
+        });
+      }
+      const history = decodePublicSessionHistory(await readJson(response));
+      if (!history || history.session.sessionHandle !== sessionHandle) {
+        throw new PublicApiClientError('invalid_response', '咨询记录与当前会话不匹配。');
+      }
+      return history;
     },
 
     async sendMessage({ clientMessageId, content, sessionHandle, signal }) {
