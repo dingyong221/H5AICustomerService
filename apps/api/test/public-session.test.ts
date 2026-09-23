@@ -9,7 +9,7 @@ import { PublicTurnService } from '../src/public/public-turn.service.js';
 const sessionRequestId = `session_request_${'11'.repeat(16)}`;
 const publicSlug = 'a-example-assistant';
 const session = {
-  sessionHandle: `s_${'22'.repeat(16)}_${'A'.repeat(43)}`,
+  sessionHandle: `s_${'22'.repeat(16)}`,
   releaseRef: '33'.repeat(16),
   state: 'active' as const,
   createdAt: '2026-09-24T00:00:00.000Z',
@@ -67,7 +67,7 @@ describe('public visitor session issuance', () => {
     expect(result.setCookie).toMatch(/^h5cs_visitor=[A-Za-z0-9_-]{43};/u);
   });
 
-  it('requires the bound visitor cookie to resume and the bearer handle to read history', async () => {
+  it('requires the bound visitor cookie to resume and read history', async () => {
     const nonce = 'A'.repeat(43);
     const history = {
       sessionHandle: session.sessionHandle,
@@ -109,8 +109,14 @@ describe('public visitor session issuance', () => {
       }),
     ).resolves.toEqual(session);
     expect(resumeSession.mock.calls[0]?.[0].visitorNonce).toBe(nonce);
-    await expect(service.history(session.sessionHandle)).resolves.toEqual(history);
-    expect(readHistory).toHaveBeenCalledWith(session.sessionHandle, expect.any(Date));
+    await expect(service.history(session.sessionHandle, undefined)).rejects.toMatchObject({
+      status: HttpStatus.NOT_FOUND,
+    });
+    expect(readHistory).not.toHaveBeenCalled();
+    await expect(
+      service.history(session.sessionHandle, `__Host-h5cs_visitor=${nonce}`),
+    ).resolves.toEqual(history);
+    expect(readHistory).toHaveBeenCalledWith(session.sessionHandle, nonce, expect.any(Date));
   });
 
   it('keeps the actual public session route unavailable before the full conversation runtime is ready', async () => {
@@ -147,7 +153,8 @@ describe('public visitor session issuance', () => {
 });
 
 describe('public conversation turn contract', () => {
-  const handle = `s_${'22'.repeat(16)}_${'A'.repeat(43)}`;
+  const handle = `s_${'22'.repeat(16)}`;
+  const nonce = 'A'.repeat(43);
   const messageId = `message_${'55'.repeat(16)}`;
   const turnId = `t_${'88'.repeat(16)}`;
 
@@ -157,6 +164,7 @@ describe('public conversation turn contract', () => {
     const service = new PublicTurnService({ acceptTurn, readTurn }, 'https://h5cs.1rying.com');
     const accepted = await service.send({
       sessionHandle: handle,
+      visitorNonce: nonce,
       idempotencyKey: messageId,
       body: { clientMessageId: messageId, content: '多少钱？' },
     });
@@ -167,10 +175,23 @@ describe('public conversation turn contract', () => {
       eventsUrl: `https://h5cs.1rying.com/api/v1/public/sessions/${handle}/turns/${turnId}/events`,
       resultUrl: `https://h5cs.1rying.com/api/v1/public/sessions/${handle}/turns/${turnId}`,
     });
+    expect(accepted.eventsUrl).not.toContain(nonce);
+    expect(accepted.resultUrl).not.toContain(nonce);
+    expect(acceptTurn).toHaveBeenCalledOnce();
+    expect(acceptTurn).toHaveBeenCalledWith(expect.objectContaining({ visitorNonce: nonce }));
+    await expect(
+      service.send({
+        sessionHandle: handle,
+        visitorNonce: null,
+        idempotencyKey: messageId,
+        body: { clientMessageId: messageId, content: '多少钱？' },
+      }),
+    ).rejects.toMatchObject({ status: HttpStatus.NOT_FOUND });
     expect(acceptTurn).toHaveBeenCalledOnce();
     await expect(
       service.send({
         sessionHandle: handle,
+        visitorNonce: nonce,
         idempotencyKey: messageId,
         body: { clientMessageId: messageId, content: '多少钱？', role: 'admin' },
       }),

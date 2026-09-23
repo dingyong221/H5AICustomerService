@@ -45,7 +45,7 @@ const repositoryWith = (
 };
 
 describe('MySQL public visitor sessions', () => {
-  it('pins a published release and stores a credential digest, never the raw handle', async () => {
+  it('pins a published release and keeps the visitor credential out of the URL handle', async () => {
     const { repository, calls, commit } = repositoryWith(async (statement) => {
       if (statement.includes('SELECT cs.release_id')) return [[], []];
       if (statement.includes('SELECT a.id AS assistant_id')) {
@@ -64,7 +64,8 @@ describe('MySQL public visitor sessions', () => {
     });
 
     expect(created).toMatchObject({ releaseRef: releaseId.toString('hex'), state: 'active' });
-    expect(created.sessionHandle).toMatch(/^s_[0-9a-f]{32}_[A-Za-z0-9_-]{43}$/u);
+    expect(created.sessionHandle).toMatch(/^s_[0-9a-f]{32}$/u);
+    expect(created.sessionHandle).not.toContain(visitorNonce);
     const insert = calls.find((call) =>
       call.statement.includes('INSERT INTO conversation_session'),
     );
@@ -154,7 +155,8 @@ describe('MySQL public visitor sessions', () => {
     expect(calls.every((call) => !call.statement.includes('INSERT INTO'))).toBe(true);
   });
 
-  it('returns bounded pinned history only to the bearer session handle', async () => {
+  it('returns bounded pinned history only with the bound visitor nonce', async () => {
+    let issuedSessionId: Buffer | undefined;
     let credentialId: Buffer | undefined;
     const activeTurnId = Buffer.from('88'.repeat(16), 'hex');
     const visitorMessageId = `message_${'55'.repeat(16)}`;
@@ -166,10 +168,13 @@ describe('MySQL public visitor sessions', () => {
           [],
         ];
       }
-      if (statement.includes('INSERT INTO conversation_session'))
+      if (statement.includes('INSERT INTO conversation_session')) {
+        issuedSessionId = values[0] as Buffer;
         credentialId = values[4] as Buffer;
+      }
       if (statement.includes('SELECT cs.merchant_id') && statement.includes('r.config_snapshot')) {
         return [
+          (values[0] as Buffer).equals(issuedSessionId!) &&
           (values[1] as Buffer).equals(credentialId!)
             ? [
                 {
@@ -217,7 +222,9 @@ describe('MySQL public visitor sessions', () => {
       now,
     });
     calls.length = 0;
-    await expect(repository.readHistory(issued.sessionHandle, now)).resolves.toMatchObject({
+    await expect(
+      repository.readHistory(issued.sessionHandle, visitorNonce, now),
+    ).resolves.toMatchObject({
       sessionHandle: issued.sessionHandle,
       releaseRef: releaseId.toString('hex'),
       snapshot: { publicAssistantId: publicSlug, assistantDisplayName: '售前助手' },
@@ -225,11 +232,13 @@ describe('MySQL public visitor sessions', () => {
       activeTurn: { turnId: `t_${'88'.repeat(16)}`, clientMessageId: visitorMessageId },
       hasEarlierMessages: false,
     });
-    const [prefix, sessionId, secret] = issued.sessionHandle.split('_');
-    const changedSecret = `${secret!.startsWith('A') ? 'B' : 'A'}${secret!.slice(1)}`;
     const messageQueries = calls.filter((call) => call.statement.includes('FROM message')).length;
     await expect(
-      repository.readHistory(`${prefix}_${sessionId}_${changedSecret}`, now),
+      repository.readHistory(issued.sessionHandle, randomBytes(32).toString('base64url'), now),
+    ).resolves.toBeNull();
+    await expect(repository.readHistory(issued.sessionHandle, '', now)).resolves.toBeNull();
+    await expect(
+      repository.readHistory(`s_${'99'.repeat(16)}`, visitorNonce, now),
     ).resolves.toBeNull();
     expect(calls.filter((call) => call.statement.includes('FROM message'))).toHaveLength(
       messageQueries,
@@ -252,7 +261,7 @@ describe('MySQL public visitor sessions', () => {
     expect(rollback).toHaveBeenCalledOnce();
   });
 
-  it('resolves only the visitor bearer credential while preserving the pinned release', async () => {
+  it('resolves only the visitor cookie credential while preserving the pinned release', async () => {
     let issuedCredentialId: Buffer | undefined;
     const { repository: issuer } = repositoryWith(async (statement, values) => {
       if (statement.includes('SELECT cs.release_id')) return [[], []];
@@ -286,21 +295,22 @@ describe('MySQL public visitor sessions', () => {
       }
       throw new Error('unexpected SQL');
     });
-    await expect(repository.resolveSession(issued.sessionHandle, now)).resolves.toMatchObject({
+    await expect(
+      repository.resolveSession(issued.sessionHandle, visitorNonce, now),
+    ).resolves.toMatchObject({
       releaseId: releaseId.toString('hex'),
       configSnapshot: { businessScope: '空调清洗' },
     });
     expect(calls[0]?.statement).toContain('cs.visitor_credential_id = ?');
     expect(calls[0]?.statement).not.toContain("r.status = 'active'");
-    await expect(repository.resolveSession('s_invalid', now)).resolves.toBeNull();
-    const [prefix, sessionId, secret] = issued.sessionHandle.split('_');
-    const changedSecret = `${secret!.startsWith('A') ? 'B' : 'A'}${secret!.slice(1)}`;
+    await expect(repository.resolveSession('s_invalid', visitorNonce, now)).resolves.toBeNull();
     await expect(
-      repository.resolveSession(`${prefix}_${sessionId}_${changedSecret}`, now),
+      repository.resolveSession(issued.sessionHandle, randomBytes(32).toString('base64url'), now),
     ).resolves.toBeNull();
   });
 
   it('accepts one message and queues one durable job, then returns the same turn on retry', async () => {
+    let credentialId: Buffer | undefined;
     let activeTurnId: Buffer | null = null;
     let originalTurnId: Buffer | null = null;
     let originalContent: string | null = null;
@@ -313,17 +323,21 @@ describe('MySQL public visitor sessions', () => {
           [],
         ];
       }
+      if (statement.includes('INSERT INTO conversation_session'))
+        credentialId = values[4] as Buffer;
       if (statement.includes('SELECT cs.merchant_id')) {
         return [
-          [
-            {
-              merchant_id: merchantId,
-              assistant_id: assistantId,
-              release_id: releaseId,
-              active_turn_id: activeTurnId,
-              next_sequence: 1,
-            },
-          ],
+          (values[1] as Buffer).equals(credentialId!)
+            ? [
+                {
+                  merchant_id: merchantId,
+                  assistant_id: assistantId,
+                  release_id: releaseId,
+                  active_turn_id: activeTurnId,
+                  next_sequence: 1,
+                },
+              ]
+            : [],
           [],
         ];
       }
@@ -352,6 +366,7 @@ describe('MySQL public visitor sessions', () => {
     calls.length = 0;
     const input = {
       sessionHandle: issued.sessionHandle,
+      visitorNonce,
       clientMessageId: `message_${'55'.repeat(16)}`,
       content: '清洗空调多少钱？',
       now,
@@ -364,6 +379,9 @@ describe('MySQL public visitor sessions', () => {
     expect(calls.filter((call) => call.statement.includes('INSERT INTO job'))).toHaveLength(1);
     expect(commit).toHaveBeenCalledTimes(3);
     await expect(
+      repository.acceptTurn({ ...input, visitorNonce: randomBytes(32).toString('base64url') }),
+    ).rejects.toBeInstanceOf(PublicSessionUnavailableError);
+    await expect(
       repository.acceptTurn({ ...input, content: '改成其他问题' }),
     ).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
     await expect(
@@ -372,6 +390,7 @@ describe('MySQL public visitor sessions', () => {
   });
 
   it('reads a turn only through its bound visitor credential', async () => {
+    let issuedSessionId: Buffer | undefined;
     let credentialId: Buffer | undefined;
     const { repository, calls } = repositoryWith(async (statement, values) => {
       if (statement.includes('SELECT cs.release_id')) return [[], []];
@@ -381,10 +400,13 @@ describe('MySQL public visitor sessions', () => {
           [],
         ];
       }
-      if (statement.includes('INSERT INTO conversation_session'))
+      if (statement.includes('INSERT INTO conversation_session')) {
+        issuedSessionId = values[0] as Buffer;
         credentialId = values[4] as Buffer;
+      }
       if (statement.includes('SELECT cs.merchant_id')) {
         return [
+          (values[0] as Buffer).equals(issuedSessionId!) &&
           (values[1] as Buffer).equals(credentialId!)
             ? [{ merchant_id: merchantId, assistant_id: assistantId }]
             : [],
@@ -418,18 +440,21 @@ describe('MySQL public visitor sessions', () => {
       now,
     });
     const turnId = `t_${'88'.repeat(16)}`;
-    const result = await repository.readTurn(issued.sessionHandle, turnId, now);
+    const result = await repository.readTurn(issued.sessionHandle, visitorNonce, turnId, now);
     expect(result).toMatchObject({
       turnId,
       state: 'accepted',
       messages: [{ role: 'visitor', clientMessageId: `message_${'55'.repeat(16)}` }],
     });
-    const [prefix, sessionId, secret] = issued.sessionHandle.split('_');
-    const tamperedHandle = `${prefix}_${sessionId}_${secret!.startsWith('A') ? 'B' : 'A'}${secret!.slice(1)}`;
     const previousMessageQueries = calls.filter((call) =>
       call.statement.includes('FROM message'),
     ).length;
-    await expect(repository.readTurn(tamperedHandle, turnId, now)).resolves.toBeNull();
+    await expect(
+      repository.readTurn(issued.sessionHandle, randomBytes(32).toString('base64url'), turnId, now),
+    ).resolves.toBeNull();
+    await expect(
+      repository.readTurn(`s_${'99'.repeat(16)}`, visitorNonce, turnId, now),
+    ).resolves.toBeNull();
     expect(calls.filter((call) => call.statement.includes('FROM message'))).toHaveLength(
       previousMessageQueries,
     );

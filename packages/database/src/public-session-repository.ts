@@ -202,12 +202,9 @@ const publicParagraph = (value: unknown, max: number): string => {
   return value;
 };
 
-const handleParts = (sessionHandle: string): { sessionId: Buffer; credential: Buffer } | null => {
-  const match = /^s_([0-9a-f]{32})_([A-Za-z0-9_-]{43})$/u.exec(sessionHandle);
-  if (!match) return null;
-  const credential = Buffer.from(match[2]!, 'base64url');
-  if (credential.byteLength !== 32 || credential.toString('base64url') !== match[2]) return null;
-  return { sessionId: Buffer.from(match[1]!, 'hex'), credential };
+const handleParts = (sessionHandle: string): Buffer | null => {
+  const match = /^s_([0-9a-f]{32})$/u.exec(sessionHandle);
+  return match ? Buffer.from(match[1]!, 'hex') : null;
 };
 
 const turnIdBuffer = (turnId: string): Buffer | null =>
@@ -234,8 +231,21 @@ export class MySqlPublicSessionRepository {
     return createHmac('sha256', this.#key).update(label, 'ascii').update(value).digest();
   }
 
-  #credentialId(secret: Buffer): Buffer {
-    return this.#hmac('visitor-credential-v1:', secret).subarray(0, 16);
+  #credentialId(nonce: Buffer): Buffer {
+    return this.#hmac('visitor-credential-v2:', nonce).subarray(0, 16);
+  }
+
+  #authorizedHandle(
+    sessionHandle: string,
+    visitorNonce: string,
+  ): { sessionId: Buffer; visitorCredentialId: Buffer } | null {
+    const sessionId = handleParts(sessionHandle);
+    if (!sessionId) return null;
+    try {
+      return { sessionId, visitorCredentialId: this.#credentialId(validNonce(visitorNonce)) };
+    } catch {
+      return null;
+    }
   }
 
   #material(publicSlug: string, sessionRequestId: string, visitorNonce: string): SessionMaterial {
@@ -248,11 +258,10 @@ export class MySqlPublicSessionRepository {
     const nonce = validNonce(visitorNonce);
     const scope = Buffer.concat([nonce, Buffer.from(`:${publicSlug}:${sessionRequestId}`, 'utf8')]);
     const sessionId = this.#hmac('public-session-id-v1:', scope).subarray(0, 16);
-    const visitorSecret = this.#hmac('public-session-secret-v1:', scope);
     return {
       sessionId,
-      visitorCredentialId: this.#credentialId(visitorSecret),
-      sessionHandle: `s_${sessionId.toString('hex')}_${visitorSecret.toString('base64url')}`,
+      visitorCredentialId: this.#credentialId(nonce),
+      sessionHandle: `s_${sessionId.toString('hex')}`,
       slugDigest: createHash('sha256').update(publicSlug, 'utf8').digest(),
     };
   }
@@ -398,8 +407,12 @@ export class MySqlPublicSessionRepository {
     }
   }
 
-  public async readHistory(sessionHandle: string, now: Date): Promise<PublicSessionHistory | null> {
-    const handle = handleParts(sessionHandle);
+  public async readHistory(
+    sessionHandle: string,
+    visitorNonce: string,
+    now: Date,
+  ): Promise<PublicSessionHistory | null> {
+    const handle = this.#authorizedHandle(sessionHandle, visitorNonce);
     if (!handle || !Number.isFinite(now.getTime())) return null;
     const connection = await this.#database.openConnection();
     try {
@@ -416,7 +429,7 @@ export class MySqlPublicSessionRepository {
           WHERE cs.id = ? AND cs.visitor_credential_id = ?
             AND cs.status = 'active' AND cs.expires_at > ?
             AND m.status = 'active' AND a.status = 'active' LIMIT 1`,
-        [handle.sessionId, this.#credentialId(handle.credential), now],
+        [handle.sessionId, handle.visitorCredentialId, now],
       );
       const session = sessions[0];
       if (!session) return null;
@@ -487,9 +500,10 @@ export class MySqlPublicSessionRepository {
 
   public async resolveSession(
     sessionHandle: string,
+    visitorNonce: string,
     now: Date,
   ): Promise<PublicSessionContext | null> {
-    const handle = handleParts(sessionHandle);
+    const handle = this.#authorizedHandle(sessionHandle, visitorNonce);
     if (!handle || !Number.isFinite(now.getTime())) return null;
     const connection = await this.#database.openConnection();
     try {
@@ -506,7 +520,7 @@ export class MySqlPublicSessionRepository {
             AND cs.status = 'active' AND cs.expires_at > ?
             AND m.status = 'active' AND a.status = 'active'
           LIMIT 1`,
-        [handle.sessionId, this.#credentialId(handle.credential), now],
+        [handle.sessionId, handle.visitorCredentialId, now],
       );
       const row = rows[0];
       if (!row) return null;
@@ -525,11 +539,12 @@ export class MySqlPublicSessionRepository {
 
   public async acceptTurn(input: {
     sessionHandle: string;
+    visitorNonce: string;
     clientMessageId: string;
     content: string;
     now: Date;
   }): Promise<PublicTurnAccepted> {
-    const handle = handleParts(input.sessionHandle);
+    const handle = this.#authorizedHandle(input.sessionHandle, input.visitorNonce);
     if (
       !handle ||
       !/^message_[0-9a-f]{32}$/u.test(input.clientMessageId) ||
@@ -549,7 +564,7 @@ export class MySqlPublicSessionRepository {
             AND cs.status = 'active' AND cs.expires_at > ?
             AND m.status = 'active' AND a.status = 'active'
           LIMIT 1 FOR UPDATE`,
-        [handle.sessionId, this.#credentialId(handle.credential), input.now],
+        [handle.sessionId, handle.visitorCredentialId, input.now],
       );
       const session = sessions[0];
       if (!session) throw new PublicSessionUnavailableError();
@@ -636,10 +651,11 @@ export class MySqlPublicSessionRepository {
 
   public async readTurn(
     sessionHandle: string,
+    visitorNonce: string,
     turnId: string,
     now: Date,
   ): Promise<PublicTurnResult | null> {
-    const handle = handleParts(sessionHandle);
+    const handle = this.#authorizedHandle(sessionHandle, visitorNonce);
     const turnBuffer = turnIdBuffer(turnId);
     if (!handle || !turnBuffer || !Number.isFinite(now.getTime())) return null;
     const connection = await this.#database.openConnection();
@@ -652,7 +668,7 @@ export class MySqlPublicSessionRepository {
           WHERE cs.id = ? AND cs.visitor_credential_id = ?
             AND cs.status = 'active' AND cs.expires_at > ?
             AND m.status = 'active' AND a.status = 'active' LIMIT 1`,
-        [handle.sessionId, this.#credentialId(handle.credential), now],
+        [handle.sessionId, handle.visitorCredentialId, now],
       );
       const session = sessions[0];
       if (!session) return null;

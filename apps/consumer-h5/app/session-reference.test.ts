@@ -20,7 +20,7 @@ const storage = () => {
 };
 
 describe('session reference storage', () => {
-  it('stores only the scoped request ID, never the bearer session handle', () => {
+  it('stores only the scoped request ID, not the session handle', () => {
     const store = storage();
     const requestId = `session_request_${'11'.repeat(16)}`;
     saveSessionReference(store, 'a-one', requestId);

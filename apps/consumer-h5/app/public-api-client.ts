@@ -145,6 +145,7 @@ const publicSlugPattern = /^[a-z0-9](?:[a-z0-9-]{0,62})$/u;
 const opaqueRefPattern = /^[A-Za-z0-9](?:[A-Za-z0-9:_-]{0,190})$/u;
 const clientIdPattern = /^[A-Za-z0-9](?:[A-Za-z0-9_-]{15,127})$/u;
 const sessionRequestPattern = /^session_request_[0-9a-f]{32}$/u;
+const sessionHandlePattern = /^s_[0-9a-f]{32}$/u;
 const requestIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u;
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
@@ -188,6 +189,10 @@ function boundedParagraph(value: unknown, maximumLength: number): string | undef
 function opaqueRef(value: unknown): string | undefined {
   const normalized = boundedText(value, 191);
   return normalized !== undefined && opaqueRefPattern.test(normalized) ? normalized : undefined;
+}
+
+function sessionHandleRef(value: unknown): string | undefined {
+  return typeof value === 'string' && sessionHandlePattern.test(value) ? value : undefined;
 }
 
 function clientGeneratedId(value: unknown): string | undefined {
@@ -311,7 +316,7 @@ export function decodePublicSession(value: unknown): PublicSession | undefined {
   ) {
     return undefined;
   }
-  const sessionHandle = opaqueRef(data['sessionHandle']);
+  const sessionHandle = sessionHandleRef(data['sessionHandle']);
   const releaseRef = opaqueRef(data['releaseRef']);
   const createdAt = isoTimestamp(data['createdAt']);
   return sessionHandle === undefined || releaseRef === undefined || createdAt === undefined
@@ -363,7 +368,7 @@ function decodeTurnEndpoint(
     ) {
       return undefined;
     }
-    const sessionHandle = opaqueRef(decodeURIComponent(segments[5] ?? ''));
+    const sessionHandle = sessionHandleRef(decodeURIComponent(segments[5] ?? ''));
     const turnId = opaqueRef(decodeURIComponent(segments[7] ?? ''));
     return sessionHandle === undefined || turnId === undefined
       ? undefined
@@ -550,7 +555,7 @@ export function decodeTurnResult(value: unknown): TurnResult | undefined {
   ) {
     return undefined;
   }
-  const sessionHandle = opaqueRef(data['sessionHandle']);
+  const sessionHandle = sessionHandleRef(data['sessionHandle']);
   const turnId = opaqueRef(data['turnId']);
   const traceId = opaqueRef(data['traceId']);
   const messages = decodeMessages(data['messages']);
@@ -759,7 +764,7 @@ export function createPublicAssistantApiClient(
     },
 
     async loadHistory({ sessionHandle, signal }) {
-      if (opaqueRef(sessionHandle) === undefined) {
+      if (sessionHandleRef(sessionHandle) === undefined) {
         throw new PublicApiClientError('invalid_input', '咨询会话标识无效。');
       }
       let response: Response;
@@ -795,7 +800,7 @@ export function createPublicAssistantApiClient(
       const normalizedContent = content.trim();
       if (
         !clientIdPattern.test(clientMessageId) ||
-        opaqueRef(sessionHandle) === undefined ||
+        sessionHandleRef(sessionHandle) === undefined ||
         normalizedContent.length === 0 ||
         normalizedContent.length > 2_000
       ) {
@@ -850,7 +855,7 @@ export function createPublicAssistantApiClient(
         resultEndpoint.sessionHandle !== sessionHandle ||
         resultEndpoint.turnId !== turnId ||
         !clientIdPattern.test(clientMessageId) ||
-        opaqueRef(sessionHandle) === undefined ||
+        sessionHandleRef(sessionHandle) === undefined ||
         opaqueRef(turnId) === undefined
       ) {
         throw new PublicApiClientError('invalid_input', '消息结果地址无效。');

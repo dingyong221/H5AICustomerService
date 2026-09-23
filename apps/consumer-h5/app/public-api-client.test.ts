@@ -5,6 +5,7 @@ import {
   decodeAcceptedTurn,
   decodePublicApiErrorEnvelope,
   decodePublicAssistantSnapshot,
+  decodePublicSession,
   decodePublicSessionHistory,
   decodeTurnResult,
   type OnlinePublicAssistantSnapshot,
@@ -12,6 +13,8 @@ import {
 
 const origin = 'https://h5.example.com';
 const sessionRequestId = `session_request_${'11'.repeat(16)}`;
+const sessionHandle = `s_${'22'.repeat(16)}`;
+const otherSessionHandle = `s_${'33'.repeat(16)}`;
 
 function envelope(data: Readonly<Record<string, unknown>>): unknown {
   return { data, request_id: 'request_1234567890' };
@@ -88,7 +91,7 @@ describe('public API response decoders', () => {
     expect(
       decodeAcceptedTurn(
         envelope({
-          eventsUrl: '/api/v1/public/sessions/session_1234567890/turns/turn_1/events',
+          eventsUrl: `/api/v1/public/sessions/${sessionHandle}/turns/turn_1/events`,
           resultUrl: 'https://evil.example/api/v1/public/turns/turn_1',
           state: 'accepted',
           traceId: 'trace_1234567890',
@@ -115,8 +118,34 @@ describe('public API response decoders', () => {
     expect(
       decodeAcceptedTurn(
         envelope({
-          eventsUrl: '/api/v1/public/sessions/session_other_1234/turns/turn_1234567890/events',
-          resultUrl: '/api/v1/public/sessions/session_1234567890/turns/turn_1234567890',
+          eventsUrl: `/api/v1/public/sessions/${otherSessionHandle}/turns/turn_1234567890/events`,
+          resultUrl: `/api/v1/public/sessions/${sessionHandle}/turns/turn_1234567890`,
+          state: 'accepted',
+          traceId: 'trace_1234567890',
+          turnId: 'turn_1234567890',
+        }),
+        origin,
+      ),
+    ).toBeUndefined();
+  });
+
+  it('rejects a session credential embedded in a handle or polling URL', () => {
+    const bearerHandle = `${sessionHandle}_${'A'.repeat(43)}`;
+    expect(
+      decodePublicSession(
+        envelope({
+          createdAt: '2026-09-21T08:00:00.000Z',
+          releaseRef: snapshot.releaseRef,
+          sessionHandle: bearerHandle,
+          state: 'active',
+        }),
+      ),
+    ).toBeUndefined();
+    expect(
+      decodeAcceptedTurn(
+        envelope({
+          eventsUrl: `/api/v1/public/sessions/${bearerHandle}/turns/turn_1234567890/events`,
+          resultUrl: `/api/v1/public/sessions/${bearerHandle}/turns/turn_1234567890`,
           state: 'accepted',
           traceId: 'trace_1234567890',
           turnId: 'turn_1234567890',
@@ -170,7 +199,7 @@ describe('public API response decoders', () => {
           sourceLabel: 'AI 客服',
         },
       ],
-      sessionHandle: 'session_1234567890',
+      sessionHandle,
       state: 'completed',
       traceId: 'trace_1234567890',
       turnId: 'turn_1234567890',
@@ -198,7 +227,7 @@ describe('public API response decoders', () => {
         },
       ],
       releaseRef: snapshot.releaseRef,
-      sessionHandle: 'session_1234567890',
+      sessionHandle,
       snapshot: snapshotData,
     };
     expect(decodePublicSessionHistory(envelope(history))).toMatchObject({
@@ -227,7 +256,7 @@ describe('public assistant API client', () => {
     const session = {
       createdAt: '2026-09-21T08:00:00.000Z',
       releaseRef: snapshot.releaseRef,
-      sessionHandle: 'session_1234567890',
+      sessionHandle,
       state: 'active',
     };
     const fetchImpl = vi
@@ -314,7 +343,7 @@ describe('public assistant API client', () => {
           envelope({
             createdAt: '2026-09-21T08:00:00.000Z',
             releaseRef: snapshot.releaseRef,
-            sessionHandle: 'session_1234567890',
+            sessionHandle,
             state: 'active',
           }),
           201,
@@ -323,8 +352,8 @@ describe('public assistant API client', () => {
       .mockResolvedValueOnce(
         jsonResponse(
           envelope({
-            eventsUrl: '/api/v1/public/sessions/session_1234567890/turns/turn_1234567890/events',
-            resultUrl: '/api/v1/public/sessions/session_1234567890/turns/turn_1234567890',
+            eventsUrl: `/api/v1/public/sessions/${sessionHandle}/turns/turn_1234567890/events`,
+            resultUrl: `/api/v1/public/sessions/${sessionHandle}/turns/turn_1234567890`,
             state: 'accepted',
             traceId: 'trace_1234567890',
             turnId: 'turn_1234567890',
@@ -392,8 +421,8 @@ describe('public assistant API client', () => {
     await expect(
       client.readTurn({
         clientMessageId: 'message_client_1234567890',
-        resultUrl: '/api/v1/public/sessions/session_other_1234/turns/turn_1234567890',
-        sessionHandle: 'session_1234567890',
+        resultUrl: `/api/v1/public/sessions/${otherSessionHandle}/turns/turn_1234567890`,
+        sessionHandle,
         turnId: 'turn_1234567890',
       }),
     ).rejects.toMatchObject({ kind: 'invalid_input' });

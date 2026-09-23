@@ -74,7 +74,7 @@ export class PublicSessionService {
     return this.secure ? '__Host-h5cs_visitor' : 'h5cs_visitor';
   }
 
-  private readNonce(cookieHeader: string | undefined): string | null {
+  public visitorNonce(cookieHeader: string | undefined): string | null {
     if (!cookieHeader || cookieHeader.length > 8_192) return null;
     const values = cookieHeader
       .split(';')
@@ -96,7 +96,7 @@ export class PublicSessionService {
       throw new BadRequestException('A valid session request key is required');
     }
     if (!this.issuer) throw new ServiceUnavailableException('Conversation service unavailable');
-    const existingNonce = this.readNonce(input.cookieHeader);
+    const existingNonce = this.visitorNonce(input.cookieHeader);
     const nonce = existingNonce ?? randomBytes(32).toString('base64url');
     try {
       const session = await this.issuer.createSession({
@@ -128,7 +128,7 @@ export class PublicSessionService {
     if (!this.issuer?.resumeSession) {
       throw new ServiceUnavailableException('Conversation service unavailable');
     }
-    const nonce = this.readNonce(input.cookieHeader);
+    const nonce = this.visitorNonce(input.cookieHeader);
     if (!nonce) throw new NotFoundException('Session not available');
     try {
       const session = await this.issuer.resumeSession({
@@ -145,12 +145,17 @@ export class PublicSessionService {
     }
   }
 
-  public async history(sessionHandle: string): Promise<PublicSessionHistory> {
+  public async history(
+    sessionHandle: string,
+    cookieHeader: string | undefined,
+  ): Promise<PublicSessionHistory> {
     if (!this.issuer?.readHistory) {
       throw new ServiceUnavailableException('Conversation service unavailable');
     }
+    const nonce = this.visitorNonce(cookieHeader);
+    if (!nonce) throw new NotFoundException('Session not available');
     try {
-      const history = await this.issuer.readHistory(sessionHandle, new Date());
+      const history = await this.issuer.readHistory(sessionHandle, nonce, new Date());
       if (!history) throw new NotFoundException('Session not available');
       return history;
     } catch (error) {

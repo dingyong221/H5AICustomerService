@@ -14,10 +14,11 @@ export class PublicTurnController {
   @Get('/:sessionHandle/history')
   public async history(
     @Param('sessionHandle') sessionHandle: string,
+    @Headers('cookie') cookieHeader: string | undefined,
     @Res({ passthrough: true }) response: ResponseLike,
   ) {
     response.setHeader('Cache-Control', 'no-store');
-    return this.sessions.history(sessionHandle);
+    return this.sessions.history(sessionHandle, cookieHeader);
   }
 
   @Post('/:sessionHandle/messages')
@@ -25,20 +26,27 @@ export class PublicTurnController {
   public async send(
     @Param('sessionHandle') sessionHandle: string,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Headers('cookie') cookieHeader: string | undefined,
     @Body() body: unknown,
     @Res({ passthrough: true }) response: ResponseLike,
   ) {
     response.setHeader('Cache-Control', 'no-store');
-    return this.turns.send({ sessionHandle, idempotencyKey, body });
+    return this.turns.send({
+      sessionHandle,
+      visitorNonce: this.sessions.visitorNonce(cookieHeader),
+      idempotencyKey,
+      body,
+    });
   }
 
   @Get('/:sessionHandle/turns/:turnId')
   public async read(
     @Param('sessionHandle') sessionHandle: string,
     @Param('turnId') turnId: string,
+    @Headers('cookie') cookieHeader: string | undefined,
     @Res({ passthrough: true }) response: ResponseLike,
   ) {
     response.setHeader('Cache-Control', 'no-store');
-    return this.turns.read(sessionHandle, turnId);
+    return this.turns.read(sessionHandle, this.sessions.visitorNonce(cookieHeader), turnId);
   }
 }

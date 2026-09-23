@@ -57,6 +57,7 @@ export class PublicTurnService {
 
   public async send(input: {
     sessionHandle: string;
+    visitorNonce: string | null;
     idempotencyKey: string | undefined;
     body: unknown;
   }): Promise<{
@@ -68,6 +69,7 @@ export class PublicTurnService {
   }> {
     if (!this.store || !this.origin)
       throw new ServiceUnavailableException('Conversation service unavailable');
+    if (!input.visitorNonce) throw new NotFoundException('Session not available');
     if (typeof input.body !== 'object' || input.body === null || Array.isArray(input.body)) {
       throw new BadRequestException('Invalid message');
     }
@@ -85,6 +87,7 @@ export class PublicTurnService {
     try {
       const accepted = await this.store.acceptTurn({
         sessionHandle: input.sessionHandle,
+        visitorNonce: input.visitorNonce,
         clientMessageId: body['clientMessageId'],
         content: body['content'],
         now: new Date(),
@@ -104,10 +107,15 @@ export class PublicTurnService {
     }
   }
 
-  public async read(sessionHandle: string, turnId: string): Promise<PublicTurnResult> {
+  public async read(
+    sessionHandle: string,
+    visitorNonce: string | null,
+    turnId: string,
+  ): Promise<PublicTurnResult> {
     if (!this.store) throw new ServiceUnavailableException('Conversation service unavailable');
+    if (!visitorNonce) throw new NotFoundException('Turn not available');
     try {
-      const result = await this.store.readTurn(sessionHandle, turnId, new Date());
+      const result = await this.store.readTurn(sessionHandle, visitorNonce, turnId, new Date());
       if (!result) throw new NotFoundException('Turn not available');
       return result;
     } catch (error) {
