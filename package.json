@@ -17,9 +17,13 @@
     "release:check": "node scripts/quality/release-gate.mjs repository --version 0.1.0",
     "release:static": "node scripts/quality/release-gate.mjs static --version 0.1.0",
     "test": "turbo run test",
-    "typecheck": "turbo run typecheck"
+    "test:e2e": "playwright test",
+    "typecheck": "turbo run typecheck && pnpm typecheck:e2e",
+    "typecheck:e2e": "tsc -p tsconfig.e2e.json --noEmit"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "catalog:",
     "prettier": "3.9.8",
     "turbo": "2.11.2",
     "typescript": "6.0.3"
