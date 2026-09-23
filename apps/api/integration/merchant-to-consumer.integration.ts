@@ -100,6 +100,27 @@ describe('real MySQL merchant-to-consumer flow', () => {
       now,
     });
     expect(created.status).toBe('draft_only');
+    const otherMerchant = await provisioner.provisionMerchant({
+      name: `CI 其他商家 ${uniqueHex()}`,
+      operatorId: 'integration_operator',
+    });
+    const otherOwner = await access.claimInvitation({
+      setupToken: otherMerchant.setupToken,
+      phone: '13900139000',
+      password: 'integration-test-password-456',
+    });
+    expect(
+      await assistants.listMerchantAssistants(
+        toMerchantUserId(otherOwner.merchantUserId),
+        toMerchantId(otherMerchant.id),
+      ),
+    ).toEqual([]);
+    expect(
+      await assistants.findManagementSnapshot(
+        toMerchantId(otherMerchant.id),
+        toAssistantId(created.assistantId),
+      ),
+    ).toBeNull();
     await assistants.confirmDraftKnowledge({
       merchantUserId,
       merchantId,
@@ -172,6 +193,29 @@ describe('real MySQL merchant-to-consumer flow', () => {
         201,
       );
       expect(session.releaseRef).toBe(release.releaseId);
+      const otherSessionResponse = await fetch(
+        `${publicBase}/assistants/${created.publicSlug}/sessions`,
+        { method: 'POST', headers: { 'Idempotency-Key': `session_request_${uniqueHex()}` } },
+      );
+      const otherCookie = otherSessionResponse.headers.get('set-cookie')?.split(';', 1)[0];
+      expect(otherCookie).toMatch(/^h5cs_visitor=[A-Za-z0-9_-]{43}$/u);
+      expect(otherCookie).not.toBe(cookie);
+      const otherSession = await dataFrom<{ sessionHandle: string }>(otherSessionResponse, 201);
+      expect(otherSession.sessionHandle).not.toBe(session.sessionHandle);
+      expect(
+        (
+          await fetch(`${publicBase}/sessions/${session.sessionHandle}/history`, {
+            headers: { Cookie: otherCookie! },
+          })
+        ).status,
+      ).toBe(404);
+      expect(
+        (
+          await fetch(`${publicBase}/sessions/${otherSession.sessionHandle}/history`, {
+            headers: { Cookie: cookie! },
+          })
+        ).status,
+      ).toBe(404);
       const clientMessageId = `message_${uniqueHex()}`;
       const accepted = await dataFrom<{ turnId: string }>(
         await fetch(`${publicBase}/sessions/${session.sessionHandle}/messages`, {
@@ -185,6 +229,36 @@ describe('real MySQL merchant-to-consumer flow', () => {
         }),
         202,
       );
+      const repeated = await dataFrom<{ turnId: string }>(
+        await fetch(`${publicBase}/sessions/${session.sessionHandle}/messages`, {
+          method: 'POST',
+          headers: {
+            Cookie: cookie!,
+            'Content-Type': 'application/json',
+            'Idempotency-Key': clientMessageId,
+          },
+          body: JSON.stringify({ clientMessageId, content: '你们提供什么服务？' }),
+        }),
+        202,
+      );
+      expect(repeated.turnId).toBe(accepted.turnId);
+      const unauthorizedMessageId = `message_${uniqueHex()}`;
+      expect(
+        (
+          await fetch(`${publicBase}/sessions/${session.sessionHandle}/messages`, {
+            method: 'POST',
+            headers: {
+              Cookie: otherCookie!,
+              'Content-Type': 'application/json',
+              'Idempotency-Key': unauthorizedMessageId,
+            },
+            body: JSON.stringify({
+              clientMessageId: unauthorizedMessageId,
+              content: '无权发送的消息',
+            }),
+          })
+        ).status,
+      ).toBe(404);
       const jobs = new MySqlConversationTurnJobRepository(database);
       const claim = await jobs.claimNext(new Date(), 'integration_ci_worker');
       expect(claim).toMatchObject({
@@ -208,6 +282,21 @@ describe('real MySQL merchant-to-consumer flow', () => {
       expect(turn.state).toBe('completed');
       expect(turn.messages.map((message) => message.role)).toEqual(['visitor', 'assistant']);
       expect(turn.messages[1]?.content).toContain('空调清洗');
+      expect(
+        (
+          await fetch(`${publicBase}/sessions/${session.sessionHandle}/turns/${accepted.turnId}`, {
+            headers: { Cookie: otherCookie! },
+          })
+        ).status,
+      ).toBe(404);
+      expect(
+        (
+          await fetch(`${publicBase}/sessions/${session.sessionHandle}/end`, {
+            method: 'POST',
+            headers: { Cookie: otherCookie! },
+          })
+        ).status,
+      ).toBe(404);
       expect((await fetch(`${publicBase}/sessions/${session.sessionHandle}/history`)).status).toBe(
         404,
       );
