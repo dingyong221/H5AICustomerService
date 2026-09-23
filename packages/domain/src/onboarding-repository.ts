@@ -51,6 +51,7 @@ export interface OnboardingRepository {
   ): Promise<OnboardingSessionRecord | null>;
   createSession(
     merchantUserId: MerchantUserId,
+    merchantId: MerchantId,
     snapshot: OnboardingSnapshot,
   ): Promise<OnboardingSessionRecord>;
   saveSession(

@@ -8,7 +8,7 @@ import {
   toMerchantUserId,
   toOnboardingSessionId,
 } from '@h5cs/domain';
-import type { Connection, RowDataPacket } from 'mysql2/promise';
+import type { Connection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
 import type { DatabaseConnectionConfig } from '../src/config.js';
 import {
@@ -38,6 +38,57 @@ const configWithBindings = (
 };
 
 describe('MySQL onboarding repository merchant binding', () => {
+  it('creates an onboarding session only through an active merchant membership', async () => {
+    const statements: Array<{ sql: string; values: readonly unknown[] }> = [];
+    const connection = {
+      execute: async (sql: string, values: readonly unknown[]) => {
+        statements.push({ sql, values });
+        return [{ affectedRows: 1 } as ResultSetHeader, []];
+      },
+      end: async () => undefined,
+    } as unknown as Connection;
+    const repository = new MySqlOnboardingRepository({
+      openConnection: async () => connection,
+      summary: { host: 'test', database: 'test', tlsRequested: false },
+      toJSON: () => ({ host: 'test', database: 'test', tlsRequested: false }),
+    });
+    const merchantId = toMerchantId('22222222222222222222222222222222');
+
+    await expect(
+      repository.createSession(merchantUserId, merchantId, {
+        state: 'industry',
+        answers: {},
+      }),
+    ).resolves.toMatchObject({ merchantId, merchantUserId, version: 1 });
+    expect(statements[0]?.sql).toMatch(
+      /INSERT INTO onboarding_session[\s\S]*FROM merchant_membership mm/u,
+    );
+    expect(statements[0]?.sql).toMatch(/mm\.status = 'active' AND m\.status = 'active'/u);
+    expect(statements[0]?.values.slice(-2)).toEqual([
+      Buffer.from(merchantUserId, 'hex'),
+      Buffer.from(merchantId, 'hex'),
+    ]);
+  });
+
+  it('does not create onboarding when the membership is no longer active', async () => {
+    const connection = {
+      execute: async () => [{ affectedRows: 0 } as ResultSetHeader, []],
+      end: async () => undefined,
+    } as unknown as Connection;
+    const repository = new MySqlOnboardingRepository({
+      openConnection: async () => connection,
+      summary: { host: 'test', database: 'test', tlsRequested: false },
+      toJSON: () => ({ host: 'test', database: 'test', tlsRequested: false }),
+    });
+
+    await expect(
+      repository.createSession(merchantUserId, toMerchantId('22222222222222222222222222222222'), {
+        state: 'industry',
+        answers: {},
+      }),
+    ).rejects.toBeInstanceOf(OnboardingPersistenceError);
+  });
+
   it('reads at most two active memberships and blocks ambiguous selection', async () => {
     const statements: string[] = [];
     const repository = new MySqlOnboardingRepository(

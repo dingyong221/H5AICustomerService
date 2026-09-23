@@ -4,7 +4,12 @@ import { type FormEvent, useMemo, useReducer, useState } from 'react';
 
 import { Button, ProgressSteps, StatusBadge } from '@h5cs/ui';
 
-import { createOnboardingApiClient, OnboardingClientError } from './onboarding-api-client';
+import {
+  createOnboardingApiClient,
+  OnboardingClientError,
+  type ExistingAssistantResult,
+  type OnboardingStartResult,
+} from './onboarding-api-client';
 import {
   formSteps,
   initialOnboardingFormValues,
@@ -38,6 +43,7 @@ const statusLabels: Readonly<Record<string, string>> = {
   conflict: '状态冲突',
   editing: '尚未保存',
   error: '提交失败',
+  existing: '已有客服',
   generated: '生成完成',
   generation_unavailable: '生成暂不可用',
   generating: '服务端生成中',
@@ -62,7 +68,7 @@ function FieldError({ error, id }: { error?: string | undefined; id: string }) {
 }
 
 function statusTone(status: string): 'neutral' | 'info' | 'success' | 'warning' | 'danger' {
-  if (status === 'generated' || status === 'saved') return 'success';
+  if (status === 'existing' || status === 'generated' || status === 'saved') return 'success';
   if (status === 'saving' || status === 'generating' || status === 'resuming') return 'info';
   if (
     status === 'conflict' ||
@@ -82,13 +88,18 @@ export function OnboardingForm({ apiBaseUrl, authorization }: OnboardingFormProp
   const [values, setValues] = useState<OnboardingFormValues>(initialOnboardingFormValues);
   const [errors, setErrors] = useState<FormErrors>({});
   const [currentStep, setCurrentStep] = useState<FormStep>('industry');
+  const [existingManagement, setExistingManagement] = useState<ExistingAssistantResult | null>(
+    null,
+  );
   const [interaction, dispatch] = useReducer(
     reduceOnboardingInteraction,
     initialOnboardingInteractionState,
   );
   const apiConfigured = apiBaseUrl !== undefined && apiBaseUrl.trim().length > 0;
   const authorized = authorization === 'authorized';
-  const busy = ['saving', 'generating', 'pausing', 'resuming'].includes(interaction.status);
+  const busy =
+    existingManagement !== null ||
+    ['saving', 'generating', 'pausing', 'resuming'].includes(interaction.status);
   const canWrite = apiConfigured && authorized && !busy;
   const serverViewModel = buildOnboardingViewModel({
     apiConnected: apiConfigured,
@@ -128,6 +139,31 @@ export function OnboardingForm({ apiBaseUrl, authorization }: OnboardingFormProp
     dispatch({ type: 'edit' });
   };
 
+  const acceptStartResult = (result: OnboardingStartResult) => {
+    if (result.action === 'continue_onboarding') {
+      dispatch({ type: 'server_succeeded', result });
+    } else {
+      setExistingManagement(result);
+      dispatch({ type: 'existing_assistant' });
+    }
+  };
+
+  const checkExistingOrResume = async () => {
+    if (!canWrite) return;
+    dispatch({ type: 'request_started', operation: 'save' });
+    try {
+      acceptStartResult(await client.startOrResume({ idempotencyKey: createIdempotencyKey() }));
+    } catch (error) {
+      dispatch({
+        type: 'request_failed',
+        error:
+          error instanceof OnboardingClientError
+            ? error
+            : new OnboardingClientError('request_failed', '无法确认已有客服或引导进度。'),
+      });
+    }
+  };
+
   const goToNextStep = () => {
     const nextErrors = validateOnboardingStep(currentStep, values);
     setErrors(nextErrors);
@@ -152,7 +188,7 @@ export function OnboardingForm({ apiBaseUrl, authorization }: OnboardingFormProp
     dispatch({ type: 'request_started', operation: 'save' });
     try {
       const result = await submitCompleteOnboarding({ client, createIdempotencyKey, values });
-      dispatch({ type: 'server_succeeded', result });
+      acceptStartResult(result);
     } catch (error) {
       dispatch({
         type: 'request_failed',
@@ -206,7 +242,26 @@ export function OnboardingForm({ apiBaseUrl, authorization }: OnboardingFormProp
         </div>
         <ProgressSteps ariaLabel="AI 客服生成进度" steps={displaySteps} />
         <p className="local-progress-note">进度在服务端确认前仅代表本页填写位置。</p>
+        <Button
+          disabled={!canWrite}
+          onClick={() => void checkExistingOrResume()}
+          variant="secondary"
+        >
+          检查已有客服或恢复进度
+        </Button>
       </section>
+
+      {existingManagement ? (
+        <section className="onboarding-step-card" role="status">
+          <h2>已找到这个商家的 AI 客服</h2>
+          <p>
+            {existingManagement.action === 'select_assistant'
+              ? `当前有 ${existingManagement.assistants.length} 个客服，请在后台明确选择。`
+              : '无需再次生成。请在现有后台核对资料、管理知识和发布版本。'}
+          </p>
+          <a href={existingManagement.url}>打开商家管理后台</a>
+        </section>
+      ) : null}
 
       <div className="onboarding-layout">
         <form aria-describedby="submission-notice" className="onboarding-form" onSubmit={onSubmit}>
@@ -512,7 +567,11 @@ export function OnboardingForm({ apiBaseUrl, authorization }: OnboardingFormProp
             </div>
             {currentStep === 'confirmation' ? (
               <Button disabled={!canWrite || !values.merchantConfirmed || busy} type="submit">
-                {busy ? '等待服务端确认' : '确认并由服务端生成'}
+                {existingManagement
+                  ? '请使用已有客服后台'
+                  : busy
+                    ? '等待服务端确认'
+                    : '确认并由服务端生成'}
               </Button>
             ) : (
               <Button disabled={busy} type="submit">

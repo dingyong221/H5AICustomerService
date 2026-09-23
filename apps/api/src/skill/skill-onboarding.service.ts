@@ -1,5 +1,11 @@
 import type { SkillIntentRequest, SkillIntentResult } from '@h5cs/contracts';
-import type { OnboardingEvent, OnboardingRepository, OnboardingSessionRecord } from '@h5cs/domain';
+import type {
+  MerchantId,
+  MerchantUserId,
+  OnboardingEvent,
+  OnboardingRepository,
+  OnboardingSessionRecord,
+} from '@h5cs/domain';
 import {
   createOnboardingSnapshot,
   getOnboardingMissingItems,
@@ -86,10 +92,11 @@ export class SkillOnboardingApplicationService {
         if (assistants.length > 0) return this.#existingAssistantsResult(assistants);
         const session = await this.#resolveOnboardingSession(
           merchantUserId,
+          merchantId,
           request.resume_session_id,
         );
-        if (session.merchantId !== null && session.merchantId !== merchantId) {
-          throw new OnboardingSessionNotFoundError();
+        if (session.snapshot.state === 'generating') {
+          return this.#finishGenerating(session, merchantId);
         }
         return this.#toResult(session);
       }
@@ -105,12 +112,16 @@ export class SkillOnboardingApplicationService {
     if (session === null) throw new OnboardingSessionNotFoundError();
     const merchantId = await this.#repository.findMerchantBinding(merchantUserId);
     if (merchantId === null) throw new MerchantBindingRequiredError();
-    if (session.merchantId !== null && session.merchantId !== merchantId) {
+    if (session.merchantId !== merchantId) {
       throw new OnboardingSessionNotFoundError();
     }
 
     if (command.event.type === 'confirm') {
+      this.#managementUrl();
       await this.#generationCoordinator.assertReady();
+      if (session.snapshot.state === 'generating') {
+        return this.#finishGenerating(session, merchantId);
+      }
     }
 
     const nextSnapshot = transitionOnboarding(session.snapshot, command.event);
@@ -125,6 +136,7 @@ export class SkillOnboardingApplicationService {
     } else {
       saved = await this.#repository.saveSession(session, nextSnapshot);
     }
+    if (command.event.type === 'confirm') return this.#finishGenerating(saved, merchantId);
     return this.#toResult(saved);
   }
 
@@ -143,7 +155,8 @@ export class SkillOnboardingApplicationService {
   }
 
   async #resolveOnboardingSession(
-    merchantUserId: Awaited<ReturnType<OnboardingRepository['resolveOrCreateMerchantUser']>>['id'],
+    merchantUserId: MerchantUserId,
+    merchantId: MerchantId,
     requestedSessionId: string | undefined,
   ): Promise<OnboardingSessionRecord> {
     if (requestedSessionId !== undefined) {
@@ -151,12 +164,33 @@ export class SkillOnboardingApplicationService {
         merchantUserId,
         toOnboardingSessionId(requestedSessionId),
       );
-      if (requested === null) throw new OnboardingSessionNotFoundError();
+      if (requested === null || requested.merchantId !== merchantId) {
+        throw new OnboardingSessionNotFoundError();
+      }
       return requested;
     }
 
     const existing = await this.#repository.findLatestSession(merchantUserId);
-    return existing ?? this.#repository.createSession(merchantUserId, createOnboardingSnapshot());
+    return existing?.merchantId === merchantId
+      ? existing
+      : this.#repository.createSession(merchantUserId, merchantId, createOnboardingSnapshot());
+  }
+
+  async #finishGenerating(
+    session: OnboardingSessionRecord,
+    merchantId: MerchantId,
+  ): Promise<SkillIntentResult> {
+    this.#managementUrl();
+    const assistantId = await this.#generationCoordinator.generate(session, merchantId);
+    return this.#toResult({
+      ...session,
+      assistantId,
+      snapshot: transitionOnboarding(session.snapshot, {
+        type: 'generation_succeeded',
+        assistantId,
+      }),
+      version: session.version + 1,
+    });
   }
 
   #toResult(session: OnboardingSessionRecord): SkillIntentResult {
@@ -196,6 +230,21 @@ export class SkillOnboardingApplicationService {
     if (this.#managementConsoleUrl === undefined) {
       throw new ManagementConsoleUnavailableError();
     }
-    return new URL(this.#managementConsoleUrl).toString();
+    try {
+      const url = new URL(this.#managementConsoleUrl);
+      const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+      if (
+        url.username ||
+        url.password ||
+        url.search ||
+        url.hash ||
+        (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback))
+      ) {
+        throw new ManagementConsoleUnavailableError();
+      }
+      return url.toString();
+    } catch {
+      throw new ManagementConsoleUnavailableError();
+    }
   }
 }

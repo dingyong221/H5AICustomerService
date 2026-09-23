@@ -108,6 +108,103 @@ describe('onboarding API client boundary', () => {
     });
   });
 
+  it('accepts a same-origin existing assistant management link without starting onboarding', async () => {
+    const client = createOnboardingApiClient({
+      apiBaseUrl: '/api/v1/skill',
+      fetchImpl: vi.fn<typeof fetch>(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                action: 'open_management_console',
+                assistant: {
+                  assistant_ref: '44444444444444444444444444444444',
+                  status: 'active',
+                },
+                url: 'https://merchant.test/workspace',
+              },
+              request_id: 'request-existing',
+            }),
+            { status: 200 },
+          ),
+      ),
+      getAccessToken: () => 'token',
+      origin: 'https://merchant.test',
+    });
+
+    await expect(client.startOrResume({ idempotencyKey: 'reserved-key' })).resolves.toEqual({
+      action: 'open_management_console',
+      assistant: { assistant_ref: '44444444444444444444444444444444', status: 'active' },
+      url: 'https://merchant.test/workspace',
+    });
+  });
+
+  it('rejects cross-origin or embellished management links', async () => {
+    for (const url of [
+      'https://foreign.test/workspace',
+      'https://merchant.test/workspace?token=secret',
+      'https://merchant.test/workspace#secret',
+    ]) {
+      const client = createOnboardingApiClient({
+        apiBaseUrl: '/api/v1/skill',
+        fetchImpl: vi.fn<typeof fetch>(
+          async () =>
+            new Response(
+              JSON.stringify({
+                data: {
+                  action: 'open_management_console',
+                  assistant: {
+                    assistant_ref: '44444444444444444444444444444444',
+                    status: 'active',
+                  },
+                  url,
+                },
+                request_id: 'request-unsafe-link',
+              }),
+              { status: 200 },
+            ),
+        ),
+        getAccessToken: () => 'token',
+        origin: 'https://merchant.test',
+      });
+
+      await expect(client.startOrResume({ idempotencyKey: 'reserved-key' })).rejects.toMatchObject({
+        kind: 'invalid_response',
+      });
+    }
+  });
+
+  it('accepts a multi-assistant selection only with exact assistant summaries', async () => {
+    const client = createOnboardingApiClient({
+      apiBaseUrl: '/api/v1/skill',
+      fetchImpl: vi.fn<typeof fetch>(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                action: 'select_assistant',
+                assistants: [
+                  { assistant_ref: '44444444444444444444444444444444', status: 'active' },
+                  { assistant_ref: '55555555555555555555555555555555', status: 'paused' },
+                ],
+                selection_required: true,
+                url: 'https://merchant.test/workspace',
+              },
+              request_id: 'request-selection',
+            }),
+            { status: 200 },
+          ),
+      ),
+      getAccessToken: () => 'token',
+      origin: 'https://merchant.test',
+    });
+
+    await expect(client.startOrResume({ idempotencyKey: 'reserved-key' })).resolves.toMatchObject({
+      action: 'select_assistant',
+      selection_required: true,
+    });
+  });
+
   it('maps validated conflicts and invalid error bodies without trusting them', async () => {
     const conflictFetch = vi.fn<typeof fetch>(
       async () =>

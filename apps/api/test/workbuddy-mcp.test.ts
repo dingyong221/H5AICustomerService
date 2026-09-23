@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SkillIntentRequest, SkillIntentResult } from '@h5cs/contracts';
 import { UnavailableOnboardingRepository } from '@h5cs/database';
 import type { OnboardingEvent, VerifiedExternalIdentity } from '@h5cs/domain';
-import { MerchantSelectionRequiredError } from '@h5cs/domain';
+import { MerchantSelectionRequiredError, toAssistantId } from '@h5cs/domain';
 
 import {
   toWorkBuddyMcpToolError,
@@ -286,6 +286,7 @@ describe('WorkBuddy MCP adapter', () => {
     };
     const generationCoordinator: GenerationCoordinator = {
       assertReady: async () => Promise.resolve(),
+      generate: async () => toAssistantId('44444444444444444444444444444444'),
     };
     const missingDatabaseService = new SkillOnboardingApplicationService(
       authenticator,

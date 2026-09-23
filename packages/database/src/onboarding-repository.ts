@@ -341,29 +341,39 @@ export class MySqlOnboardingRepository implements OnboardingRepository {
 
   public async createSession(
     merchantUserId: MerchantUserId,
+    merchantId: MerchantId,
     snapshot: OnboardingSnapshot,
   ): Promise<OnboardingSessionRecord> {
     const sessionId = newId();
     const missingItems = getOnboardingMissingItems(snapshot);
     await this.#withConnection(async (connection) => {
-      await connection.execute(
+      const [inserted] = await connection.execute<ResultSetHeader>(
         `INSERT INTO onboarding_session
-           (id, merchant_user_id, state, answers, missing_items, version, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
+           (id, merchant_user_id, merchant_id, state, answers, missing_items,
+            version, created_at, updated_at)
+         SELECT ?, mm.merchant_user_id, mm.merchant_id, ?, ?, ?, 1,
+                UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)
+           FROM merchant_membership mm
+           JOIN merchant m ON m.id = mm.merchant_id
+           JOIN merchant_user u ON u.id = mm.merchant_user_id
+          WHERE mm.merchant_user_id = ? AND mm.merchant_id = ?
+            AND mm.status = 'active' AND m.status = 'active' AND u.status = 'active'`,
         [
           sessionId,
-          stringToId(merchantUserId),
           snapshot.state,
           JSON.stringify(snapshot.answers),
           JSON.stringify(missingItems),
+          stringToId(merchantUserId),
+          stringToId(merchantId),
         ],
       );
+      if (inserted.affectedRows !== 1) throw new OnboardingPersistenceError();
     });
 
     return {
       id: toOnboardingSessionId(idToString(sessionId)),
       merchantUserId,
-      merchantId: null,
+      merchantId,
       assistantId: null,
       snapshot,
       version: 1,
@@ -374,6 +384,10 @@ export class MySqlOnboardingRepository implements OnboardingRepository {
     session: OnboardingSessionRecord,
     nextSnapshot: OnboardingSnapshot,
   ): Promise<OnboardingSessionRecord> {
+    const merchantId = session.merchantId;
+    if (merchantId === null) {
+      throw new OnboardingPersistenceError('Onboarding session has no merchant ownership');
+    }
     if (nextSnapshot.state === 'manageable') {
       throw new OnboardingPersistenceError(
         'Generation completion must persist merchant and assistant ownership atomically',
@@ -388,7 +402,15 @@ export class MySqlOnboardingRepository implements OnboardingRepository {
                 cancelled_at = CASE WHEN ? = 'cancelled' THEN UTC_TIMESTAMP(6) ELSE NULL END,
                 completed_at = CASE WHEN ? = 'manageable' THEN UTC_TIMESTAMP(6) ELSE completed_at END,
                 updated_at = UTC_TIMESTAMP(6)
-          WHERE id = ? AND merchant_user_id = ? AND version = ?`,
+          WHERE id = ? AND merchant_user_id = ? AND merchant_id = ? AND version = ?
+            AND EXISTS (
+              SELECT 1 FROM merchant_membership mm
+              JOIN merchant m ON m.id = mm.merchant_id
+              JOIN merchant_user u ON u.id = mm.merchant_user_id
+              WHERE mm.merchant_id = onboarding_session.merchant_id
+                AND mm.merchant_user_id = onboarding_session.merchant_user_id
+                AND mm.status = 'active' AND m.status = 'active' AND u.status = 'active'
+            )`,
         [
           nextSnapshot.state,
           nextSnapshot.cancelledFrom ?? null,
@@ -399,6 +421,7 @@ export class MySqlOnboardingRepository implements OnboardingRepository {
           nextSnapshot.state,
           stringToId(session.id),
           stringToId(session.merchantUserId),
+          stringToId(merchantId),
           session.version,
         ],
       );

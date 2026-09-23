@@ -19,6 +19,7 @@ import {
   toMerchantId,
   toMerchantUserId,
   toOnboardingSessionId,
+  transitionOnboarding,
 } from '@h5cs/domain';
 
 import {
@@ -61,6 +62,7 @@ class TestAuthenticator implements WorkBuddyAuthenticator {
 
 const readyGenerationCoordinator: GenerationCoordinator = {
   assertReady: async () => Promise.resolve(),
+  generate: async () => toAssistantId('44444444444444444444444444444444'),
 };
 
 class TestRepository implements OnboardingRepository {
@@ -104,13 +106,14 @@ class TestRepository implements OnboardingRepository {
 
   public async createSession(
     merchantUserId: MerchantUserId,
+    merchantId: MerchantId,
     snapshot: OnboardingSnapshot,
   ): Promise<OnboardingSessionRecord> {
     await Promise.resolve();
     this.session = {
       id: toOnboardingSessionId('33333333333333333333333333333333'),
       merchantUserId,
-      merchantId: null,
+      merchantId,
       assistantId: null,
       snapshot,
       version: 1,
@@ -283,6 +286,7 @@ describe('Skill onboarding application service', () => {
       new TestAuthenticator(),
       repository,
       new UnavailableGenerationCoordinator('generation dispatcher is not configured'),
+      'https://console.example.test/manage',
     );
 
     await expect(
@@ -295,6 +299,112 @@ describe('Skill onboarding application service', () => {
     expect(saveCalled).toBe(false);
     expect(repository.session.snapshot.state).toBe('confirmation');
     expect(repository.session.version).toBe(7);
+  });
+
+  it('generates one manageable draft after confirmation and routes later entry to management', async () => {
+    const repository = new TestRepository();
+    const assistantId = toAssistantId('44444444444444444444444444444444');
+    const confirmation = {
+      state: 'confirmation' as const,
+      answers: {
+        industryCode: 'home_service',
+        businessName: '安心服务',
+        businessDescription: '提供家电清洗服务',
+        offerings: [
+          {
+            kind: 'service' as const,
+            name: '空调清洗',
+            description: '挂机空调清洗服务',
+            targetAudience: '本地家庭用户',
+          },
+        ],
+        materials: [{ kind: 'faq' as const, reference: 'faq:cleaning-v1', summary: '服务范围' }],
+        pricingPolicy: { availability: 'none_confirmed' as const, facts: [] },
+        promotionPolicy: { availability: 'unknown' as const, facts: [] },
+        insufficientFactPolicy: 'say_unconfirmed' as const,
+        merchantConfirmed: false,
+      },
+    };
+    repository.session = {
+      id: toOnboardingSessionId('33333333333333333333333333333333'),
+      merchantUserId: repository.userId,
+      merchantId: repository.merchantId,
+      assistantId: null,
+      snapshot: confirmation,
+      version: 3,
+    };
+    const generate = vi.fn<GenerationCoordinator['generate']>(async (session, merchantId) => {
+      expect(session.snapshot.state).toBe('generating');
+      expect(session.snapshot.answers.merchantConfirmed).toBe(true);
+      expect(merchantId).toBe(repository.merchantId);
+      repository.session = {
+        ...session,
+        assistantId,
+        snapshot: transitionOnboarding(session.snapshot, {
+          type: 'generation_succeeded',
+          assistantId,
+        }),
+        version: session.version + 1,
+      };
+      repository.assistants = [{ id: assistantId, status: 'draft_only' }];
+      return assistantId;
+    });
+    const service = new SkillOnboardingApplicationService(
+      new TestAuthenticator(),
+      repository,
+      { assertReady: async () => undefined, generate },
+      'https://console.example.test/manage',
+    );
+
+    await expect(
+      service.advance({
+        authorizationHeader: 'Bearer token',
+        sessionId: repository.session.id,
+        event: { type: 'confirm' },
+      }),
+    ).resolves.toMatchObject({ action: 'continue_onboarding', state: 'manageable' });
+    expect(generate).toHaveBeenCalledOnce();
+    await expect(
+      service.execute('Bearer token', { intent: 'create_customer_service' }),
+    ).resolves.toMatchObject({ action: 'open_management_console' });
+    expect(generate).toHaveBeenCalledOnce();
+  });
+
+  it('retries an uncertain generating session with the same durable session ownership', async () => {
+    const repository = new TestRepository();
+    repository.session = {
+      id: toOnboardingSessionId('33333333333333333333333333333333'),
+      merchantUserId: repository.userId,
+      merchantId: repository.merchantId,
+      assistantId: null,
+      snapshot: {
+        state: 'generating',
+        answers: { merchantConfirmed: true },
+      },
+      version: 7,
+    };
+    const assistantId = toAssistantId('44444444444444444444444444444444');
+    let attempts = 0;
+    const generate = vi.fn<GenerationCoordinator['generate']>(async (session) => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('unknown database outcome');
+      return assistantId;
+    });
+    const service = new SkillOnboardingApplicationService(
+      new TestAuthenticator(),
+      repository,
+      { assertReady: async () => undefined, generate },
+      'https://console.example.test/manage',
+    );
+
+    await expect(
+      service.execute('Bearer token', { intent: 'create_customer_service' }),
+    ).rejects.toThrow('unknown database outcome');
+    await expect(
+      service.execute('Bearer token', { intent: 'create_customer_service' }),
+    ).resolves.toMatchObject({ action: 'continue_onboarding', state: 'manageable' });
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(generate.mock.calls[0]?.[0].id).toBe(generate.mock.calls[1]?.[0].id);
   });
 
   it('returns generic help safely without authentication or database configuration', async () => {
@@ -428,7 +538,10 @@ describe('Skill onboarding application service', () => {
     );
 
     await expect(
-      service.execute('Bearer token', { intent: 'create_customer_service' }),
+      service.execute('Bearer token', {
+        intent: 'create_customer_service',
+        resume_session_id: '33333333333333333333333333333333',
+      }),
     ).rejects.toBeInstanceOf(OnboardingSessionNotFoundError);
   });
 
