@@ -18,7 +18,15 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
   await operatorPage.getByLabel('运营账号').fill('browser_test_operator');
   await operatorPage.getByLabel('密码').fill(operatorPassword);
   await operatorPage.getByRole('button', { name: '登录运营后台' }).click();
-  await expect(operatorPage).toHaveURL('http://127.0.0.1:3002/');
+  try {
+    await expect(operatorPage).toHaveURL('http://127.0.0.1:3002/', { timeout: 10_000 });
+  } catch {
+    const error = await operatorPage
+      .getByRole('alert')
+      .textContent()
+      .catch(() => null);
+    throw new Error(`Operator login did not complete: ${error ?? 'no page error was shown'}`);
+  }
   await expect(operatorPage.getByRole('heading', { name: '生成商家后台领取链接' })).toBeVisible();
   await operatorPage.getByLabel('商家名称').fill(merchantName);
   await operatorPage.getByRole('button', { name: '创建商家并生成领取链接' }).click();

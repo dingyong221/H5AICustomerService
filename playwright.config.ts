@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync } from 'node:crypto';
+import { createHash, randomBytes, scryptSync } from 'node:crypto';
 
 import { defineConfig } from '@playwright/test';
 
@@ -16,7 +16,10 @@ if (
   throw new Error('Browser tests only run against the dedicated loopback CI database');
 }
 
-const operatorPassword = randomBytes(24).toString('base64url');
+const operatorPassword = createHash('sha256')
+  .update('h5cs-isolated-browser-operator:', 'utf8')
+  .update(databaseUrl, 'utf8')
+  .digest('base64url');
 const operatorSalt = randomBytes(16);
 const modelKey = randomBytes(32).toString('base64url');
 process.env['H5CS_E2E_OPERATOR_PASSWORD'] = operatorPassword;
