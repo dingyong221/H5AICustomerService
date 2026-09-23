@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
+import { mkdtempSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type {
   ConnectorBindingResolution,
@@ -346,10 +349,25 @@ describe('online OAuth identity binding resolver', () => {
 });
 
 describe('production OAuth adapter factory', () => {
+  let directory: string;
+  let caFile: string;
+
+  beforeAll(() => {
+    directory = mkdtempSync(join(tmpdir(), 'h5cs-oauth-ca-'));
+    caFile = join(directory, 'ca.pem');
+    writeFileSync(caFile, '-----BEGIN CERTIFICATE-----\nTEST-ONLY\n-----END CERTIFICATE-----\n');
+  });
+
+  afterAll(() => {
+    unlinkSync(caFile);
+    rmdirSync(directory);
+  });
+
   it('configures adapters only when database, cookie and Origin settings are complete', () => {
     const complete = {
       NODE_ENV: 'production',
-      MYSQL_DATABASE_URL: 'mysql://service:secret@db.internal/h5cs',
+      MYSQL_DATABASE_URL: 'mysql://service:secret@db.internal/h5cs?ssl-mode=VERIFY_IDENTITY',
+      MYSQL_TLS_CA_FILE: caFile,
       PLATFORM_LOGIN_SESSION_COOKIE_NAME: cookieName,
       PLATFORM_LOGIN_ALLOWED_ORIGINS: origin,
     };
@@ -375,7 +393,8 @@ describe('production OAuth adapter factory', () => {
     const environment = {
       NODE_ENV: 'production',
       OAUTH_ISSUER: origin,
-      MYSQL_DATABASE_URL: 'mysql://service:secret@db.internal/h5cs',
+      MYSQL_DATABASE_URL: 'mysql://service:secret@db.internal/h5cs?ssl-mode=VERIFY_IDENTITY',
+      MYSQL_TLS_CA_FILE: caFile,
       PLATFORM_LOGIN_SESSION_COOKIE_NAME: cookieName,
       PLATFORM_LOGIN_ALLOWED_ORIGINS: origin,
     };

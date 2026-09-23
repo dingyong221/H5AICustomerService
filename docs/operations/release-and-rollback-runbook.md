@@ -17,9 +17,9 @@ Release evidence、审批记录和探针结果不得包含 Secret、Token、Cook
 
 1. 在干净 checkout 执行 `pnpm install --frozen-lockfile` 和 `node scripts/quality/release-gate.mjs repository --version 0.1.0`。
 2. 生成并离线复核 SBOM、source hashes、release manifest 和 `evidence.sha256`；校验 commit 与 tag。
-3. 使用 `infra/compose/release.env.example` 的同结构脱敏 locator 文件运行 release Compose `config --quiet`；五个 `H5CS_*_IMAGE` 必须是 registry `@sha256:` 引用。随后对每个镜像执行 registry digest、签名和 provenance 验证；基础镜像与运行镜像均不得依赖浮动 tag。
+3. 使用 `infra/compose/release.env.example` 的同结构脱敏 locator 文件运行 release Compose `config --quiet`；五个 `H5CS_*_IMAGE` 必须是 registry `@sha256:` 引用。确认 `H5CS_MYSQL_CA_HOST_FILE` 指向主机上的可信 CA PEM 文件，且四个数据库客户端容器均只读挂载它；仅有环境变量而无实际挂载不可切流。随后对每个镜像执行 registry digest、签名和 provenance 验证；基础镜像与运行镜像均不得依赖浮动 tag。
 4. 在 Staging 部署相同 digest，验证 `/startupz`、`/livez`、`/readyz`、SSE、Job、租户隔离、幂等、审计与真实外部依赖。
-5. 验证 MySQL 备份/PITR、Schema expand 兼容、metadata lock 风险和旧应用兼容；迁移失败不自动向下迁移。
+5. 验证 MySQL 备份/PITR、Schema expand 兼容、metadata lock 风险和旧应用兼容；按 [托管 MySQL 迁移执行边界](managed-mysql-migration.md)核对清单哈希、目标库及实际 TLS 连接。迁移失败不自动向下迁移。
 6. 运行 production evidence gate。命令非零时停止：
 
 ```text

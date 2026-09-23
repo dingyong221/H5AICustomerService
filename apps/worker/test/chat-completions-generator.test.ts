@@ -1,3 +1,7 @@
+import { mkdtempSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ConversationTurnClaim } from '@h5cs/database';
@@ -146,19 +150,30 @@ describe('configured Chat Completions generator', () => {
     };
     const complete = vi.fn(async () => undefined);
     const fail = vi.fn(async () => undefined);
-    const dispatch = createConversationDispatch(
-      {
-        ...modelEnvironment,
-        MYSQL_DATABASE_URL: 'mysql://test:test@127.0.0.1:3306/h5cs_test',
-      },
-      {
-        fetchImpl: vi.fn<typeof fetch>(async () => response('100 元/台。')),
-        storeFactory: () => ({ claimNext: async () => claim, complete, fail }),
-      },
-    );
-    if (!dispatch.configured) throw new Error(dispatch.reason);
-    await expect(dispatch.processor.processOnce(new AbortController().signal)).resolves.toBe(true);
-    expect(complete).toHaveBeenCalledWith(claim, '100 元/台。', expect.any(Date));
-    expect(fail).not.toHaveBeenCalled();
+    const directory = mkdtempSync(join(tmpdir(), 'h5cs-worker-ca-'));
+    const caFile = join(directory, 'ca.pem');
+    writeFileSync(caFile, '-----BEGIN CERTIFICATE-----\nTEST-ONLY\n-----END CERTIFICATE-----\n');
+    try {
+      const dispatch = createConversationDispatch(
+        {
+          ...modelEnvironment,
+          MYSQL_DATABASE_URL: 'mysql://test:test@mysql.internal/h5cs_test?ssl-mode=VERIFY_IDENTITY',
+          MYSQL_TLS_CA_FILE: caFile,
+        },
+        {
+          fetchImpl: vi.fn<typeof fetch>(async () => response('100 元/台。')),
+          storeFactory: () => ({ claimNext: async () => claim, complete, fail }),
+        },
+      );
+      if (!dispatch.configured) throw new Error(dispatch.reason);
+      await expect(dispatch.processor.processOnce(new AbortController().signal)).resolves.toBe(
+        true,
+      );
+      expect(complete).toHaveBeenCalledWith(claim, '100 元/台。', expect.any(Date));
+      expect(fail).not.toHaveBeenCalled();
+    } finally {
+      unlinkSync(caFile);
+      rmdirSync(directory);
+    }
   });
 });

@@ -21,6 +21,12 @@ x-web-defaults: &web-defaults
   mem_limit: 512m
   cpus: 0.35
 
+x-mysql-ca-volumes: &mysql-ca-volumes
+  - type: bind
+    source: ${H5CS_MYSQL_CA_HOST_FILE:?set H5CS_MYSQL_CA_HOST_FILE to the verified CA PEM file}
+    target: /run/h5cs/mysql-ca.pem
+    read_only: true
+
 services:
   api:
     <<: *runtime-defaults
@@ -31,8 +37,10 @@ services:
     environment:
       APP_ENV: production
       HOST: 0.0.0.0
+      MYSQL_TLS_CA_FILE: /run/h5cs/mysql-ca.pem
       NODE_ENV: production
       PORT: 4000
+    volumes: *mysql-ca-volumes
     ports:
       - 127.0.0.1:${H5CS_API_LOOPBACK_PORT:-14000}:4000
     mem_limit: 1280m
@@ -56,9 +64,11 @@ services:
       - ${H5CS_RUNTIME_ENV_FILE:-/etc/h5-ai-customer-service/runtime.env}
     environment:
       APP_ENV: production
+      MYSQL_TLS_CA_FILE: /run/h5cs/mysql-ca.pem
       NODE_ENV: production
       WORKER_HEALTH_HOST: 0.0.0.0
       WORKER_HEALTH_PORT: 3011
+    volumes: *mysql-ca-volumes
     ports:
       - 127.0.0.1:${H5CS_WORKER_HEALTH_LOOPBACK_PORT:-13011}:3011
     mem_limit: 1536m
@@ -82,9 +92,11 @@ services:
       - ${H5CS_MERCHANT_ENV_FILE:-/etc/h5-ai-customer-service/merchant-web.env}
     environment:
       HOSTNAME: 0.0.0.0
+      MYSQL_TLS_CA_FILE: /run/h5cs/mysql-ca.pem
       NODE_ENV: production
       PORT: 3000
       WORKER_READINESS_URL: http://worker:3011/readyz
+    volumes: *mysql-ca-volumes
     ports:
       - 127.0.0.1:${H5CS_MERCHANT_WEB_LOOPBACK_PORT:-13000}:3000
 
@@ -108,9 +120,11 @@ services:
       - ${H5CS_OPS_ENV_FILE:-/etc/h5-ai-customer-service/ops-web.env}
     environment:
       HOSTNAME: 0.0.0.0
+      MYSQL_TLS_CA_FILE: /run/h5cs/mysql-ca.pem
       NODE_ENV: production
       PORT: 3000
       HEALTHCHECK_PATH: /login
+    volumes: *mysql-ca-volumes
     ports:
       - 127.0.0.1:${H5CS_OPS_WEB_LOOPBACK_PORT:-13002}:3000
 
