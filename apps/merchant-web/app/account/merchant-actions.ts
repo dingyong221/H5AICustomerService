@@ -1,5 +1,7 @@
 'use server';
 
+import { timingSafeEqual } from 'node:crypto';
+
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
@@ -72,6 +74,26 @@ export async function currentMerchant(merchantId: string) {
   if (!token) return null;
   try {
     return await repository.resolveSession(token, merchantId);
+  } catch {
+    return null;
+  }
+}
+
+export async function currentMerchantForWrite(merchantId: string, formCsrfToken: string) {
+  const repository = getRepository();
+  const origin = merchantOrigin();
+  if (!repository || !origin || !/^[A-Za-z0-9_-]{43}$/u.test(formCsrfToken)) return null;
+  const store = await cookies();
+  const secure = origin.protocol === 'https:';
+  const token = store.get(sessionCookieName(secure))?.value;
+  const cookieCsrfToken = store.get(csrfCookieName(secure))?.value;
+  if (!token || !cookieCsrfToken || !/^[A-Za-z0-9_-]{43}$/u.test(cookieCsrfToken)) return null;
+  const formBytes = Buffer.from(formCsrfToken, 'base64url');
+  const cookieBytes = Buffer.from(cookieCsrfToken, 'base64url');
+  if (formBytes.byteLength !== 32 || cookieBytes.byteLength !== 32 ||
+      !timingSafeEqual(formBytes, cookieBytes)) return null;
+  try {
+    return await repository.resolveSession(token, merchantId, formCsrfToken);
   } catch {
     return null;
   }

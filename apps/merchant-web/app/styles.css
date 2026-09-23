@@ -128,6 +128,10 @@ a {
   max-width: 62rem;
 }
 
+.assistant-detail-card a {
+  overflow-wrap: anywhere;
+}
+
 .assistant-facts {
   display: grid;
   gap: 0;

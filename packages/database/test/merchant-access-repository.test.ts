@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 import { describe, expect, it, vi } from 'vitest';
 import type { Connection, ResultSetHeader } from 'mysql2/promise';
@@ -89,5 +89,18 @@ describe('merchant invitation and scoped session', () => {
     expect(lookup?.sql).toContain('mm.merchant_id = s.merchant_id');
     expect(lookup?.sql).toContain('mm.merchant_id = ?');
     expect(lookup?.values[1]).toEqual(merchantId);
+  });
+
+  it('binds sensitive writes to the CSRF token stored with the login session', async () => {
+    const { repository, calls } = repositoryWith();
+    const sessionToken = randomBytes(32).toString('base64url');
+    const csrfToken = randomBytes(32).toString('base64url');
+    await repository.resolveSession(sessionToken, merchantId.toString('hex'), csrfToken);
+    const lookup = calls.find((call) => call.sql.includes('FROM platform_login_session'));
+    expect(lookup?.sql).toContain('s.csrf_digest = ?');
+    expect(lookup?.values[1]).toEqual(createHash('sha256').update(csrfToken, 'ascii').digest());
+    expect(lookup?.values[2]).toEqual(merchantId);
+    expect(await repository.resolveSession(sessionToken, merchantId.toString('hex'), 'invalid'))
+      .toBeNull();
   });
 });

@@ -239,11 +239,18 @@ export class MySqlMerchantAccessRepository {
     }
   }
 
-  public async resolveSession(rawToken: string, merchantId?: string): Promise<MerchantSession | null> {
+  public async resolveSession(
+    rawToken: string,
+    merchantId?: string,
+    rawCsrfToken?: string,
+  ): Promise<MerchantSession | null> {
     if (!/^[A-Za-z0-9_-]{43}$/u.test(rawToken)) return null;
+    if (rawCsrfToken !== undefined && !/^[A-Za-z0-9_-]{43}$/u.test(rawCsrfToken)) return null;
     const connection = await this.#database.openConnection();
     try {
       const parameters: Buffer[] = [tokenDigest(rawToken)];
+      const csrfFilter = rawCsrfToken === undefined ? '' : ' AND s.csrf_digest = ?';
+      if (rawCsrfToken !== undefined) parameters.push(tokenDigest(rawCsrfToken));
       let merchantFilter = '';
       if (merchantId) {
         merchantFilter = ' AND mm.merchant_id = ?';
@@ -257,6 +264,7 @@ export class MySqlMerchantAccessRepository {
              ON mm.merchant_user_id = s.merchant_user_id AND mm.merchant_id = s.merchant_id
            JOIN merchant m ON m.id = mm.merchant_id
           WHERE s.session_digest = ? AND s.authentication_level = 'primary'
+            ${csrfFilter}
             AND u.status = 'active' AND mm.status = 'active' AND m.status = 'active'
             ${merchantFilter}
           LIMIT 2`,
