@@ -290,6 +290,30 @@ export class MySqlMerchantAccessRepository {
     }
   }
 
+  public async revokeSession(
+    rawToken: string,
+    rawCsrfToken: string,
+    merchantId: string,
+  ): Promise<boolean> {
+    if (!/^[A-Za-z0-9_-]{43}$/u.test(rawToken) || !/^[A-Za-z0-9_-]{43}$/u.test(rawCsrfToken)) {
+      throw new MerchantAccessError('Session credential is invalid');
+    }
+    const merchantIdBuffer = hexId(merchantId);
+    const connection = await this.#database.openConnection();
+    try {
+      const [updated] = await connection.execute<ResultSetHeader>(
+        `UPDATE platform_login_session
+            SET revoked_at = UTC_TIMESTAMP(6), updated_at = UTC_TIMESTAMP(6)
+          WHERE session_digest = ? AND csrf_digest = ? AND merchant_id = ?
+            AND authentication_level = 'primary' AND revoked_at IS NULL`,
+        [tokenDigest(rawToken), tokenDigest(rawCsrfToken), merchantIdBuffer],
+      );
+      return updated.affectedRows === 1;
+    } finally {
+      await connection.end();
+    }
+  }
+
   async #issueSession(
     connection: Connection,
     merchantUserId: Buffer,

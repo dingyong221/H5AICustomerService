@@ -3,6 +3,7 @@
 import { useActionState } from 'react';
 
 import { provisionMerchant } from './operator-actions';
+import { SetupLinkResult } from './setup-link-result';
 
 export function ProvisionForm() {
   const [state, action, pending] = useActionState(provisionMerchant, {
@@ -28,12 +29,11 @@ export function ProvisionForm() {
       </form>
       {state.error ? <p role="alert">{state.error}</p> : null}
       {state.created ? (
-        <div className="ops-created" role="status">
-          <strong>{state.created.name} 已创建，等待商家领取</strong>
-          <p>请将下列一次性链接通过受控渠道交给商家负责人。链接过期后需重新签发。</p>
-          <output>{state.created.setupUrl}</output>
-          <small>有效期至 {new Date(state.created.expiresAt).toLocaleString('zh-CN')}</small>
-        </div>
+        <SetupLinkResult
+          expiresAt={state.created.expiresAt}
+          name={state.created.name}
+          setupUrl={state.created.setupUrl}
+        />
       ) : null}
     </div>
   );

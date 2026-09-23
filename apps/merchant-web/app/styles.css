@@ -34,6 +34,19 @@ a {
   padding: clamp(1.2rem, 3vw, 2rem);
 }
 
+.merchant-workspace-aside {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.merchant-workspace-aside [role='alert'] {
+  color: #a02d21;
+  font-size: 0.875rem;
+  margin: 0 0 0.35rem;
+}
+
 .merchant-account-form {
   display: grid;
   gap: 1rem;

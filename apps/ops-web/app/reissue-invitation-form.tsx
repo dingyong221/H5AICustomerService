@@ -3,6 +3,7 @@
 import { useActionState } from 'react';
 
 import { reissueMerchantInvitation } from './operator-actions';
+import { SetupLinkResult } from './setup-link-result';
 
 export function ReissueInvitationForm({ merchantId }: { merchantId: string }) {
   const [state, action, pending] = useActionState(reissueMerchantInvitation, {
@@ -23,12 +24,12 @@ export function ReissueInvitationForm({ merchantId }: { merchantId: string }) {
       </form>
       {state.error ? <p role="alert">{state.error}</p> : null}
       {state.created ? (
-        <div className="ops-created" role="status">
-          <strong>{state.created.name} 的新领取链接已生成</strong>
-          <p>仅通过受控渠道交给商家负责人；本页离开后不再显示明文链接。</p>
-          <output>{state.created.setupUrl}</output>
-          <small>有效期至 {new Date(state.created.expiresAt).toLocaleString('zh-CN')}</small>
-        </div>
+        <SetupLinkResult
+          expiresAt={state.created.expiresAt}
+          name={state.created.name}
+          reissued
+          setupUrl={state.created.setupUrl}
+        />
       ) : null}
     </div>
   );

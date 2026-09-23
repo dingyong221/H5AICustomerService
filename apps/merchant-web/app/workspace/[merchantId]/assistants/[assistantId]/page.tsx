@@ -2,13 +2,12 @@ import { randomUUID } from 'node:crypto';
 
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { cookies } from 'next/headers';
 
 import { loadDatabaseConfig, MySqlAssistantLifecycleRepository } from '@h5cs/database';
 import { toAssistantId, toMerchantId } from '@h5cs/domain';
 import { PageShell, StatusBadge } from '@h5cs/ui';
 
-import { currentMerchant } from '../../../../account/merchant-actions';
+import { currentMerchant, currentMerchantCsrfToken } from '../../../../account/merchant-actions';
 import { publicApiReady } from '../../../api-readiness';
 import { ConfirmKnowledgeForm } from '../../../confirm-knowledge-form';
 import { EditDraftForm } from '../../../edit-draft-form';
@@ -46,9 +45,7 @@ export default async function AssistantDraftPage({
   const [workerAvailable, publicApiAvailable] = policy.ready
     ? await Promise.all([workerReady(), publicApiReady()])
     : [false, false];
-  const merchantOrigin = process.env['MERCHANT_PUBLIC_ORIGIN'];
-  const csrfCookieName = merchantOrigin?.startsWith('https:') ? '__Host-h5cs-csrf' : 'h5cs_csrf';
-  const csrfToken = (await cookies()).get(csrfCookieName)?.value ?? '';
+  const csrfToken = await currentMerchantCsrfToken();
   let verifiedPublicUrl: string | null = null;
   if (
     policy.ready &&

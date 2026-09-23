@@ -16,7 +16,7 @@ const setupToken = randomBytes(32).toString('base64url');
 const password = 'a-long-test-password';
 const resultHeader = { affectedRows: 1 } as ResultSetHeader;
 
-const repositoryWith = (invitationExpired = false) => {
+const repositoryWith = (invitationExpired = false, revokedRows = 1) => {
   const calls: Array<{ sql: string; values: readonly unknown[] }> = [];
   const commit = vi.fn(async () => undefined);
   const rollback = vi.fn(async () => undefined);
@@ -49,6 +49,9 @@ const repositoryWith = (invitationExpired = false) => {
           ],
           [],
         ];
+      }
+      if (sql.includes('UPDATE platform_login_session')) {
+        return [{ affectedRows: revokedRows } as ResultSetHeader, []];
       }
       return [resultHeader, []];
     },
@@ -130,5 +133,42 @@ describe('merchant invitation and scoped session', () => {
     expect(
       await repository.resolveSession(sessionToken, merchantId.toString('hex'), 'invalid'),
     ).toBeNull();
+  });
+
+  it('revokes only the matching merchant session and CSRF pair without storing raw tokens', async () => {
+    const { repository, calls } = repositoryWith();
+    const sessionToken = randomBytes(32).toString('base64url');
+    const csrfToken = randomBytes(32).toString('base64url');
+    await expect(
+      repository.revokeSession(sessionToken, csrfToken, merchantId.toString('hex')),
+    ).resolves.toBe(true);
+    const update = calls.find((call) => call.sql.includes('UPDATE platform_login_session'));
+    expect(update?.sql).toContain('session_digest = ? AND csrf_digest = ? AND merchant_id = ?');
+    expect(update?.sql).toContain("authentication_level = 'primary'");
+    expect(update?.sql).toContain('revoked_at IS NULL');
+    expect(update?.values).toEqual([
+      createHash('sha256').update(sessionToken, 'ascii').digest(),
+      createHash('sha256').update(csrfToken, 'ascii').digest(),
+      merchantId,
+    ]);
+    expect(JSON.stringify(update?.values)).not.toContain(sessionToken);
+    expect(JSON.stringify(update?.values)).not.toContain(csrfToken);
+    await expect(
+      repository.revokeSession('invalid', csrfToken, merchantId.toString('hex')),
+    ).rejects.toBeInstanceOf(MerchantAccessError);
+    expect(calls.filter((call) => call.sql.includes('UPDATE platform_login_session'))).toHaveLength(
+      1,
+    );
+  });
+
+  it('treats an already revoked or missing merchant session as an idempotent logout', async () => {
+    const { repository } = repositoryWith(false, 0);
+    await expect(
+      repository.revokeSession(
+        randomBytes(32).toString('base64url'),
+        randomBytes(32).toString('base64url'),
+        merchantId.toString('hex'),
+      ),
+    ).resolves.toBe(false);
   });
 });

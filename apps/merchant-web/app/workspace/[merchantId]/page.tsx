@@ -7,7 +7,8 @@ import { loadDatabaseConfig, MySqlAssistantLifecycleRepository } from '@h5cs/dat
 import { toMerchantId, toMerchantUserId } from '@h5cs/domain';
 import { PageShell, StatusBadge } from '@h5cs/ui';
 
-import { currentMerchant } from '../../account/merchant-actions';
+import { currentMerchant, currentMerchantCsrfToken } from '../../account/merchant-actions';
+import { MerchantLogoutForm } from '../../account/logout-form';
 import { assistantListStatus } from '../assistant-list-status';
 import { CreateAssistantForm } from '../create-assistant-form';
 
@@ -22,6 +23,7 @@ export default async function MerchantWorkspacePage({
   if (!/^[0-9a-f]{32}$/u.test(merchantId)) redirect('/account/login');
   const session = await currentMerchant(merchantId);
   if (!session) redirect(`/account/login?merchant=${merchantId}`);
+  const csrfToken = await currentMerchantCsrfToken();
   const database = loadDatabaseConfig();
   let assistants: Awaited<ReturnType<MySqlAssistantLifecycleRepository['listMerchantAssistants']>> =
     [];
@@ -39,9 +41,12 @@ export default async function MerchantWorkspacePage({
   return (
     <PageShell
       aside={
-        <StatusBadge tone={ready ? 'info' : 'warning'}>
-          {ready ? '已连接商家数据' : '数据暂不可用'}
-        </StatusBadge>
+        <div className="merchant-workspace-aside">
+          <StatusBadge tone={ready ? 'info' : 'warning'}>
+            {ready ? '已连接商家数据' : '数据暂不可用'}
+          </StatusBadge>
+          <MerchantLogoutForm merchantId={merchantId} csrfToken={csrfToken} />
+        </div>
       }
       description={
         <p>先用真实业务资料生成可编辑客服草稿。完成知识、试聊和发布校验后才会开放消费者链接。</p>

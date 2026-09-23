@@ -85,6 +85,12 @@ export async function currentMerchant(merchantId: string) {
   }
 }
 
+export async function currentMerchantCsrfToken(): Promise<string> {
+  const origin = merchantOrigin();
+  if (!origin) return '';
+  return (await cookies()).get(csrfCookieName(origin.protocol === 'https:'))?.value ?? '';
+}
+
 export async function currentMerchantForWrite(merchantId: string, formCsrfToken: string) {
   const repository = getRepository();
   const origin = merchantOrigin();
@@ -167,4 +173,44 @@ export async function loginMerchant(
     };
   }
   redirect(safeMerchantReturnPath(merchantId, nextPathInput) ?? `/workspace/${merchantId}`);
+}
+
+export async function logoutMerchant(
+  _previous: MerchantAccessState,
+  formData: FormData,
+): Promise<MerchantAccessState> {
+  const origin = merchantOrigin();
+  const repository = getRepository();
+  if (!origin || !repository) return { error: '商家账号服务尚未配置。' };
+  if (!(await sameOrigin(origin))) return { error: '请求来源校验失败。' };
+  const merchantId = formData.get('merchantId');
+  const formCsrfToken = formData.get('csrfToken');
+  if (
+    typeof merchantId !== 'string' ||
+    !/^[0-9a-f]{32}$/u.test(merchantId) ||
+    typeof formCsrfToken !== 'string' ||
+    !/^[A-Za-z0-9_-]{43}$/u.test(formCsrfToken)
+  ) {
+    return { error: '退出请求无效，请刷新页面重试。' };
+  }
+  const secure = origin.protocol === 'https:';
+  const store = await cookies();
+  const sessionToken = store.get(sessionCookieName(secure))?.value;
+  const cookieCsrfToken = store.get(csrfCookieName(secure))?.value;
+  if (
+    !sessionToken ||
+    !cookieCsrfToken ||
+    !/^[A-Za-z0-9_-]{43}$/u.test(cookieCsrfToken) ||
+    !timingSafeEqual(Buffer.from(formCsrfToken), Buffer.from(cookieCsrfToken))
+  ) {
+    return { error: '登录状态已变化，请刷新页面重试。' };
+  }
+  try {
+    await repository.revokeSession(sessionToken, formCsrfToken, merchantId);
+  } catch {
+    return { error: '服务端未能确认退出，请稍后重试。' };
+  }
+  store.delete(sessionCookieName(secure));
+  store.delete(csrfCookieName(secure));
+  redirect('/account/login');
 }
