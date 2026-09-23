@@ -12,6 +12,10 @@ export class WorkerHealth {
     this.#conversationReady = ready;
   }
 
+  public databaseAvailable(): boolean {
+    return this.#databaseCheck.status === 'up';
+  }
+
   public liveness(): LivenessData {
     return {
       status: 'ok',
@@ -22,7 +26,8 @@ export class WorkerHealth {
 
   public readiness(): ReadinessData {
     return {
-      status: this.#databaseCheck.status === 'up' && this.#conversationReady ? 'ready' : 'not_ready',
+      status:
+        this.#databaseCheck.status === 'up' && this.#conversationReady ? 'ready' : 'not_ready',
       service: 'worker',
       timestamp: new Date().toISOString(),
       checks: {

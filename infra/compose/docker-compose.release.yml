@@ -68,7 +68,7 @@ services:
         - CMD
         - node
         - -e
-        - fetch('http://127.0.0.1:3011/livez').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+        - fetch('http://127.0.0.1:3011/readyz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
       interval: 30s
       timeout: 5s
       start_period: 20s
@@ -80,6 +80,11 @@ services:
     pull_policy: always
     env_file:
       - ${H5CS_MERCHANT_ENV_FILE:-/etc/h5-ai-customer-service/merchant-web.env}
+    environment:
+      HOSTNAME: 0.0.0.0
+      NODE_ENV: production
+      PORT: 3000
+      WORKER_READINESS_URL: http://worker:3011/readyz
     ports:
       - 127.0.0.1:${H5CS_MERCHANT_WEB_LOOPBACK_PORT:-13000}:3000
 

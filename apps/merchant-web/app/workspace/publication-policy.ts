@@ -9,8 +9,12 @@ export type PublicationPolicy =
     }>;
 
 const version = (value: string | undefined): string | null =>
-  value && value.length <= 64 && /^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(value) &&
-    !value.startsWith('replace-') ? value : null;
+  value &&
+  value.length <= 64 &&
+  /^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(value) &&
+  !value.startsWith('replace-')
+    ? value
+    : null;
 
 const consumerOrigin = (value: string | undefined, production: boolean): string | null => {
   if (!value) return null;
@@ -20,7 +24,8 @@ const consumerOrigin = (value: string | undefined, production: boolean): string 
     if (
       url.origin !== value ||
       (url.protocol !== 'https:' && (production || url.protocol !== 'http:' || !loopback))
-    ) return null;
+    )
+      return null;
     return url.origin;
   } catch {
     return null;
@@ -32,13 +37,19 @@ export function publicationPolicy(environment: NodeJS.ProcessEnv = process.env):
     return { ready: false, reason: '公开对话尚未完成端到端验证，暂不可发布。' };
   }
   const origin = consumerOrigin(
-    environment['CONSUMER_H5_ORIGIN'], environment['NODE_ENV'] === 'production',
+    environment['CONSUMER_H5_ORIGIN'],
+    environment['NODE_ENV'] === 'production',
   );
   if (!origin) return { ready: false, reason: '消费者 H5 正式域名尚未正确配置。' };
   const provider = environment['MODEL_PROVIDER'];
   const model = environment['MODEL_NAME'];
-  if (!provider || provider === 'mock' || provider.startsWith('replace-') ||
-      !model || model.trim() !== model || model.startsWith('replace-')) {
+  if (
+    provider !== 'chat_completions' ||
+    environment['CONVERSATION_WORKER_ENABLED'] !== 'true' ||
+    !model ||
+    model.trim() !== model ||
+    model.startsWith('replace-')
+  ) {
     return { ready: false, reason: '正式模型服务尚未配置。' };
   }
   const promptTemplateVersion = version(environment['PUBLISH_PROMPT_TEMPLATE_VERSION']);
@@ -48,8 +59,11 @@ export function publicationPolicy(environment: NodeJS.ProcessEnv = process.env):
     return { ready: false, reason: '发布策略版本尚未配置。' };
   }
   return {
-    ready: true, consumerOrigin: origin,
-    promptTemplateVersion, retrievalPolicyVersion, modelPolicyVersion,
+    ready: true,
+    consumerOrigin: origin,
+    promptTemplateVersion,
+    retrievalPolicyVersion,
+    modelPolicyVersion,
   };
 }
 
