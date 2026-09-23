@@ -268,10 +268,13 @@ export class MySqlOnboardingRepository implements OnboardingRepository {
   public async findMerchantBinding(merchantUserId: MerchantUserId): Promise<MerchantId | null> {
     return this.#withConnection(async (connection) => {
       const [rows] = await connection.execute<MerchantBindingRow[]>(
-        `SELECT merchant_id
-           FROM merchant_membership
-          WHERE merchant_user_id = ? AND status = 'active'
-          ORDER BY created_at ASC, merchant_id ASC
+        `SELECT mm.merchant_id
+           FROM merchant_membership mm
+           JOIN merchant m ON m.id = mm.merchant_id
+           JOIN merchant_user u ON u.id = mm.merchant_user_id
+          WHERE mm.merchant_user_id = ? AND mm.status = 'active'
+            AND m.status = 'active' AND u.status = 'active'
+          ORDER BY mm.created_at ASC, mm.merchant_id ASC
           LIMIT 2`,
         [stringToId(merchantUserId)],
       );
@@ -283,14 +286,20 @@ export class MySqlOnboardingRepository implements OnboardingRepository {
 
   public async listAssistants(
     merchantId: MerchantId,
+    merchantUserId: MerchantUserId,
   ): Promise<readonly { id: AssistantId; status: string }[]> {
     return this.#withConnection(async (connection) => {
       const [rows] = await connection.execute<(RowDataPacket & { id: Buffer; status: string })[]>(
-        `SELECT id, status
-           FROM assistant
-          WHERE merchant_id = ? AND status <> 'archived'
-          ORDER BY created_at ASC, id ASC`,
-        [stringToId(merchantId)],
+        `SELECT a.id, a.status
+           FROM assistant a
+           JOIN merchant m ON m.id = a.merchant_id
+           JOIN merchant_membership mm ON mm.merchant_id = m.id
+           JOIN merchant_user u ON u.id = mm.merchant_user_id
+          WHERE a.merchant_id = ? AND mm.merchant_user_id = ?
+            AND a.status <> 'archived' AND m.status = 'active'
+            AND mm.status = 'active' AND u.status = 'active'
+          ORDER BY a.created_at ASC, a.id ASC`,
+        [stringToId(merchantId), stringToId(merchantUserId)],
       );
       return rows.map((row) => ({ id: toAssistantId(idToString(row.id)), status: row.status }));
     });

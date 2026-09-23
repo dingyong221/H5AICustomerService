@@ -51,6 +51,33 @@ describe('MySQL onboarding repository merchant binding', () => {
       MerchantSelectionRequiredError,
     );
     expect(statements[0]).toMatch(/LIMIT 2/u);
+    expect(statements[0]).toMatch(/m\.status = 'active' AND u\.status = 'active'/u);
+  });
+
+  it('scopes assistant summaries to the active merchant membership', async () => {
+    const calls: Array<{ sql: string; values: readonly unknown[] }> = [];
+    const connection = {
+      execute: async (sql: string, values: readonly unknown[]) => {
+        calls.push({ sql, values });
+        return [[], []];
+      },
+      end: async () => undefined,
+    } as unknown as Connection;
+    const repository = new MySqlOnboardingRepository({
+      openConnection: async () => connection,
+      summary: { host: 'test', database: 'test', tlsRequested: false },
+      toJSON: () => ({ host: 'test', database: 'test', tlsRequested: false }),
+    });
+
+    await expect(
+      repository.listAssistants(toMerchantId('22222222222222222222222222222222'), merchantUserId),
+    ).resolves.toEqual([]);
+    expect(calls[0]?.sql).toMatch(/mm\.merchant_user_id = \?/u);
+    expect(calls[0]?.sql).toMatch(/mm\.status = 'active' AND u\.status = 'active'/u);
+    expect(calls[0]?.values).toEqual([
+      Buffer.from('22222222222222222222222222222222', 'hex'),
+      Buffer.from(merchantUserId, 'hex'),
+    ]);
   });
 
   it('returns the sole active membership without exposing a caller selection parameter', async () => {

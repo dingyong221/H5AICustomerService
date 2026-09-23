@@ -40,7 +40,10 @@ export interface OnboardingRepository {
   assertReady(): Promise<void>;
   resolveOrCreateMerchantUser(identity: VerifiedExternalIdentity): Promise<MerchantUserRecord>;
   findMerchantBinding(merchantUserId: MerchantUserId): Promise<MerchantId | null>;
-  listAssistants(merchantId: MerchantId): Promise<readonly AssistantManagementRecord[]>;
+  listAssistants(
+    merchantId: MerchantId,
+    merchantUserId: MerchantUserId,
+  ): Promise<readonly AssistantManagementRecord[]>;
   findLatestSession(merchantUserId: MerchantUserId): Promise<OnboardingSessionRecord | null>;
   findSession(
     merchantUserId: MerchantUserId,

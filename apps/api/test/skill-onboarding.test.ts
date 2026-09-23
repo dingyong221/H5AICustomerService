@@ -1,6 +1,6 @@
 import { createHmac, randomBytes } from 'node:crypto';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { UnavailableOnboardingRepository } from '@h5cs/database';
 import type {
@@ -21,7 +21,11 @@ import {
   toOnboardingSessionId,
 } from '@h5cs/domain';
 
-import { SkillOnboardingApplicationService } from '../src/skill/skill-onboarding.service.js';
+import {
+  MerchantBindingRequiredError,
+  OnboardingSessionNotFoundError,
+  SkillOnboardingApplicationService,
+} from '../src/skill/skill-onboarding.service.js';
 import { createRuntimeSkillOnboardingService } from '../src/skill/runtime.js';
 import type { GenerationCoordinator } from '../src/skill/generation-coordinator.js';
 import {
@@ -355,6 +359,105 @@ describe('Skill onboarding application service', () => {
       expect(many.selection_required).toBe(true);
       expect(many.assistants).toHaveLength(2);
     }
+  });
+
+  it('routes first-time creation to the existing assistant instead of starting another onboarding', async () => {
+    const repository = new TestRepository();
+    const createSession = vi.spyOn(repository, 'createSession');
+    const findSession = vi.spyOn(repository, 'findSession');
+    const service = new SkillOnboardingApplicationService(
+      new TestAuthenticator(),
+      repository,
+      readyGenerationCoordinator,
+      'https://console.example.test/manage',
+    );
+    repository.assistants = [
+      { id: toAssistantId('44444444444444444444444444444444'), status: 'active' },
+    ];
+
+    await expect(
+      service.execute('Bearer token', {
+        intent: 'create_customer_service',
+        resume_session_id: '33333333333333333333333333333333',
+      }),
+    ).resolves.toEqual({
+      action: 'open_management_console',
+      url: 'https://console.example.test/manage',
+      assistant: { assistant_ref: '44444444444444444444444444444444', status: 'active' },
+    });
+    repository.assistants = [
+      ...repository.assistants,
+      { id: toAssistantId('55555555555555555555555555555555'), status: 'paused' },
+    ];
+    const multiple = await service.execute('Bearer token', { intent: 'create_customer_service' });
+    expect(multiple.action).toBe('select_assistant');
+    expect(createSession).not.toHaveBeenCalled();
+    expect(findSession).not.toHaveBeenCalled();
+  });
+
+  it('does not create onboarding without an active merchant binding', async () => {
+    const repository = new TestRepository();
+    repository.findMerchantBinding = async () => null;
+    const createSession = vi.spyOn(repository, 'createSession');
+    const service = new SkillOnboardingApplicationService(
+      new TestAuthenticator(),
+      repository,
+      readyGenerationCoordinator,
+    );
+
+    await expect(
+      service.execute('Bearer token', { intent: 'create_customer_service' }),
+    ).rejects.toBeInstanceOf(MerchantBindingRequiredError);
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it('rejects an onboarding session pinned to a different merchant', async () => {
+    const repository = new TestRepository();
+    repository.session = {
+      id: toOnboardingSessionId('33333333333333333333333333333333'),
+      merchantUserId: repository.userId,
+      merchantId: toMerchantId('99999999999999999999999999999999'),
+      assistantId: null,
+      snapshot: createOnboardingSnapshot(),
+      version: 1,
+    };
+    const service = new SkillOnboardingApplicationService(
+      new TestAuthenticator(),
+      repository,
+      readyGenerationCoordinator,
+    );
+
+    await expect(
+      service.execute('Bearer token', { intent: 'create_customer_service' }),
+    ).rejects.toBeInstanceOf(OnboardingSessionNotFoundError);
+  });
+
+  it('checks the active merchant binding again before changing onboarding answers', async () => {
+    const repository = new TestRepository();
+    repository.session = {
+      id: toOnboardingSessionId('33333333333333333333333333333333'),
+      merchantUserId: repository.userId,
+      merchantId: repository.merchantId,
+      assistantId: null,
+      snapshot: createOnboardingSnapshot(),
+      version: 1,
+    };
+    repository.findMerchantBinding = async () => null;
+    const saveSession = vi.spyOn(repository, 'saveSession');
+    const service = new SkillOnboardingApplicationService(
+      new TestAuthenticator(),
+      repository,
+      readyGenerationCoordinator,
+    );
+
+    await expect(
+      service.advance({
+        authorizationHeader: 'Bearer token',
+        sessionId: '33333333333333333333333333333333',
+        event: { type: 'provide_industry', industryCode: 'retail' },
+      }),
+    ).rejects.toBeInstanceOf(MerchantBindingRequiredError);
+    expect(saveSession).not.toHaveBeenCalled();
   });
 });
 

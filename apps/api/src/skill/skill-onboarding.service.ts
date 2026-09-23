@@ -73,35 +73,24 @@ export class SkillOnboardingApplicationService {
       case 'open_management_console': {
         const merchantId = await this.#repository.findMerchantBinding(merchantUserId);
         if (merchantId === null) throw new MerchantBindingRequiredError();
-        const assistants = await this.#repository.listAssistants(merchantId);
+        const assistants = await this.#repository.listAssistants(merchantId, merchantUserId);
         if (assistants.length === 0) {
           return { action: 'start_first_onboarding', reason: 'no_assistant' };
         }
-        const url = this.#managementUrl();
-        if (assistants.length === 1) {
-          const assistant = assistants[0];
-          if (assistant === undefined) throw new Error('Assistant list invariant failed');
-          return {
-            action: 'open_management_console',
-            url,
-            assistant: { assistant_ref: assistant.id, status: assistant.status },
-          };
-        }
-        return {
-          action: 'select_assistant',
-          url,
-          selection_required: true,
-          assistants: assistants.map((assistant) => ({
-            assistant_ref: assistant.id,
-            status: assistant.status,
-          })),
-        };
+        return this.#existingAssistantsResult(assistants);
       }
       case 'create_customer_service': {
+        const merchantId = await this.#repository.findMerchantBinding(merchantUserId);
+        if (merchantId === null) throw new MerchantBindingRequiredError();
+        const assistants = await this.#repository.listAssistants(merchantId, merchantUserId);
+        if (assistants.length > 0) return this.#existingAssistantsResult(assistants);
         const session = await this.#resolveOnboardingSession(
           merchantUserId,
           request.resume_session_id,
         );
+        if (session.merchantId !== null && session.merchantId !== merchantId) {
+          throw new OnboardingSessionNotFoundError();
+        }
         return this.#toResult(session);
       }
     }
@@ -114,6 +103,11 @@ export class SkillOnboardingApplicationService {
       toOnboardingSessionId(command.sessionId),
     );
     if (session === null) throw new OnboardingSessionNotFoundError();
+    const merchantId = await this.#repository.findMerchantBinding(merchantUserId);
+    if (merchantId === null) throw new MerchantBindingRequiredError();
+    if (session.merchantId !== null && session.merchantId !== merchantId) {
+      throw new OnboardingSessionNotFoundError();
+    }
 
     if (command.event.type === 'confirm') {
       await this.#generationCoordinator.assertReady();
@@ -122,9 +116,6 @@ export class SkillOnboardingApplicationService {
     const nextSnapshot = transitionOnboarding(session.snapshot, command.event);
     let saved: OnboardingSessionRecord;
     if (command.event.type === 'generation_succeeded') {
-      const merchantId =
-        session.merchantId ?? (await this.#repository.findMerchantBinding(merchantUserId));
-      if (merchantId === null) throw new MerchantBindingRequiredError();
       saved = await this.#repository.saveGenerationResult(
         session,
         nextSnapshot,
@@ -174,6 +165,30 @@ export class SkillOnboardingApplicationService {
       onboarding_session_id: session.id,
       state: session.snapshot.state,
       missing_items: [...getOnboardingMissingItems(session.snapshot)],
+    };
+  }
+
+  #existingAssistantsResult(
+    assistants: Awaited<ReturnType<OnboardingRepository['listAssistants']>>,
+  ): SkillIntentResult {
+    const url = this.#managementUrl();
+    if (assistants.length === 1) {
+      const assistant = assistants[0];
+      if (assistant === undefined) throw new Error('Assistant list invariant failed');
+      return {
+        action: 'open_management_console',
+        url,
+        assistant: { assistant_ref: assistant.id, status: assistant.status },
+      };
+    }
+    return {
+      action: 'select_assistant',
+      url,
+      selection_required: true,
+      assistants: assistants.map((assistant) => ({
+        assistant_ref: assistant.id,
+        status: assistant.status,
+      })),
     };
   }
 
