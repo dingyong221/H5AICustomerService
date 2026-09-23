@@ -1,4 +1,5 @@
 export * from './config.js';
+export * from './conversation-turn-job-repository.js';
 export * from './assistant-lifecycle-repository.js';
 export * from './identity-authorization-repository.js';
 export * from './merchant-access-repository.js';

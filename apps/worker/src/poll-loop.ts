@@ -39,7 +39,7 @@ export class PollLoop {
   #schedule(): void {
     this.#timer = setTimeout(() => {
       this.#timer = undefined;
-      void this.runOnce().finally(() => {
+      void this.runOnce().catch(() => undefined).finally(() => {
         if (!this.#abortController.signal.aborted) this.#schedule();
       });
     }, this.#intervalMs);
