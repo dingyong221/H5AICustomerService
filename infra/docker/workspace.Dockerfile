@@ -35,7 +35,11 @@ RUN --mount=type=cache,id=h5cs-pnpm-store,target=/pnpm/store,sharing=locked \
     pnpm install --frozen-lockfile
 
 RUN pnpm exec turbo run build --filter="./apps/${APP_NAME}" \
-  && pnpm --filter "./apps/${APP_NAME}" --prod deploy --legacy /opt/deployed-app
+  && pnpm --filter "./apps/${APP_NAME}" --prod deploy --legacy /opt/deployed-app \
+  && if [ "${APP_KIND}" = api ]; then \
+       test -f /opt/deployed-app/node_modules/@h5cs/database/dist/config.js \
+       && node /opt/deployed-app/node_modules/@h5cs/database/scripts/migrate-managed.mjs --inventory >/dev/null; \
+     fi
 
 FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS runtime-base
 
