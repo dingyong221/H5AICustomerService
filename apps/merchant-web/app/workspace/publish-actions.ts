@@ -15,6 +15,7 @@ import { revalidatePath } from 'next/cache';
 import { headers } from 'next/headers';
 
 import { currentMerchantForWrite } from '../account/merchant-actions';
+import { publicApiReady } from './api-readiness';
 import { publicationPolicy, publicAssistantUrl } from './publication-policy';
 import { workerReady } from './worker-readiness';
 
@@ -63,8 +64,15 @@ export async function publishAssistantAction(
     return { ...unavailable, error: '请确认当前草稿版本及发布影响。' };
   const merchant = await currentMerchantForWrite(merchantId, csrfToken);
   if (!merchant) return { ...unavailable, error: '登录或安全校验已失效，请重新登录。' };
-  if (!(await workerReady())) {
+  const [workerAvailable, publicApiAvailable] = await Promise.all([
+    workerReady(),
+    publicApiReady(),
+  ]);
+  if (!workerAvailable) {
     return { ...unavailable, error: 'AI 对话服务尚未就绪，请稍后再试。' };
+  }
+  if (!publicApiAvailable) {
+    return { ...unavailable, error: '公开会话服务尚未就绪，请稍后再试。' };
   }
   const database = loadDatabaseConfig();
   if (!database.configured) return { ...unavailable, error: '数据库尚未配置。' };

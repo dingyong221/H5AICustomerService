@@ -8,6 +8,7 @@ import { toMerchantId, toMerchantUserId } from '@h5cs/domain';
 import { PageShell, StatusBadge } from '@h5cs/ui';
 
 import { currentMerchant } from '../../account/merchant-actions';
+import { assistantListStatus } from '../assistant-list-status';
 import { CreateAssistantForm } from '../create-assistant-form';
 
 export const dynamic = 'force-dynamic';
@@ -65,11 +66,7 @@ export default async function MerchantWorkspacePage({
                     <Link href={`/workspace/${merchantId}/assistants/${assistant.assistantId}`}>
                       <strong>{assistant.displayName}</strong>
                     </Link>
-                    <span>
-                      {assistant.knowledgeConfirmed
-                        ? '商家资料已确认，尚未发布'
-                        : '草稿，资料待确认'}
-                    </span>
+                    <span>{assistantListStatus(assistant)}</span>
                     <small>客服编号：{assistant.assistantId}</small>
                   </li>
                 ))}

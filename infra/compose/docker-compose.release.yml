@@ -91,6 +91,7 @@ services:
     env_file:
       - ${H5CS_MERCHANT_ENV_FILE:-/etc/h5-ai-customer-service/merchant-web.env}
     environment:
+      API_READINESS_URL: http://api:4000/readyz
       HOSTNAME: 0.0.0.0
       MYSQL_TLS_CA_FILE: /etc/ssl/certs/h5cs-managed-mysql-ca.pem
       NODE_ENV: production

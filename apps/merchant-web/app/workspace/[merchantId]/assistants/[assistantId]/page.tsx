@@ -9,10 +9,12 @@ import { toAssistantId, toMerchantId } from '@h5cs/domain';
 import { PageShell, StatusBadge } from '@h5cs/ui';
 
 import { currentMerchant } from '../../../../account/merchant-actions';
+import { publicApiReady } from '../../../api-readiness';
 import { ConfirmKnowledgeForm } from '../../../confirm-knowledge-form';
 import { EditDraftForm } from '../../../edit-draft-form';
 import { PublishAssistantForm } from '../../../publish-assistant-form';
 import { publicationPolicy, publicAssistantUrl } from '../../../publication-policy';
+import { workerReady } from '../../../worker-readiness';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,11 +43,20 @@ export default async function AssistantDraftPage({
   }
   if (!assistant) notFound();
   const policy = publicationPolicy();
+  const [workerAvailable, publicApiAvailable] = policy.ready
+    ? await Promise.all([workerReady(), publicApiReady()])
+    : [false, false];
   const merchantOrigin = process.env['MERCHANT_PUBLIC_ORIGIN'];
   const csrfCookieName = merchantOrigin?.startsWith('https:') ? '__Host-h5cs-csrf' : 'h5cs_csrf';
   const csrfToken = (await cookies()).get(csrfCookieName)?.value ?? '';
   let verifiedPublicUrl: string | null = null;
-  if (policy.ready && assistant.status === 'active' && assistant.activeReleaseId) {
+  if (
+    policy.ready &&
+    workerAvailable &&
+    publicApiAvailable &&
+    assistant.status === 'active' &&
+    assistant.activeReleaseId
+  ) {
     try {
       const publicSnapshot = await new MySqlAssistantLifecycleRepository(
         database.config,
@@ -58,14 +69,22 @@ export default async function AssistantDraftPage({
     }
   }
   const publishReady =
-    policy.ready && assistant.knowledgeConfirmed && assistant.status !== 'paused';
+    policy.ready &&
+    assistant.knowledgeConfirmed &&
+    assistant.status !== 'paused' &&
+    workerAvailable &&
+    publicApiAvailable;
   const publishReason = !policy.ready
     ? policy.reason
     : !assistant.knowledgeConfirmed
       ? '请先确认当前修订的业务资料。'
       : assistant.status === 'paused'
         ? '客服已暂停，需先恢复服务。'
-        : null;
+        : !workerAvailable
+          ? 'AI 对话服务尚未就绪，请稍后再试。'
+          : !publicApiAvailable
+            ? '公开会话服务尚未就绪，请稍后再试。'
+            : null;
   const facts = [
     ['细分行业', assistant.draft.industry],
     ['业务范围', assistant.draft.businessScope],

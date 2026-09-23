@@ -70,6 +70,10 @@ export class PublicSessionService {
     }
   }
 
+  public isConfigured(): boolean {
+    return this.issuer !== null;
+  }
+
   private cookieName(): string {
     return this.secure ? '__Host-h5cs_visitor' : 'h5cs_visitor';
   }

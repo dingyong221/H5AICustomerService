@@ -70,6 +70,10 @@ export class PublicTurnService {
     }
   }
 
+  public isConfigured(): boolean {
+    return this.store !== null && this.origin !== null;
+  }
+
   public async send(input: {
     sessionHandle: string;
     visitorNonce: string | null;
