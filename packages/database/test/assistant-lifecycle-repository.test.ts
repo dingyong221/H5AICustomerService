@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
@@ -28,6 +29,7 @@ const merchantUserId = toMerchantUserId('22'.repeat(16));
 const onboardingSessionId = toOnboardingSessionId('33'.repeat(16));
 const assistantId = toAssistantId('44'.repeat(16));
 const releaseId = '55'.repeat(16);
+const knowledgeRevisionId = 'aa'.repeat(16);
 const activeReleaseId = Buffer.from('99'.repeat(16), 'hex');
 const publicSlug = 'a-abcdefghijklmnop';
 
@@ -40,6 +42,17 @@ const idem = {
 
 const resultHeader = (affectedRows = 1): ResultSetHeader => ({ affectedRows }) as ResultSetHeader;
 
+const sampleDraft: AssistantDraftConfig = {
+  industry: 'home-service',
+  businessScope: '空调清洗服务咨询',
+  materialsSummary: '空调清洗服务手册',
+  pricingSummary: '挂机清洗：100 CNY',
+  promotionSummary: '已确认暂无优惠信息',
+  welcomeMessage: '你好，我是蓝天服务客服。',
+  insufficientInfoMessage: '当前资料不足，请联系商家确认。',
+};
+const sampleContentHash = createHash('sha256').update(JSON.stringify(sampleDraft), 'utf8').digest('hex');
+
 const managementRow = (overrides: Record<string, unknown> = {}) => ({
   assistant_id: Buffer.from(assistantId, 'hex'),
   merchant_id: Buffer.from(merchantId, 'hex'),
@@ -47,16 +60,13 @@ const managementRow = (overrides: Record<string, unknown> = {}) => ({
   public_slug: publicSlug,
   status: 'draft_only',
   draft_revision: 1,
-  config: {
-    industry: 'home-service',
-    businessScope: '空调清洗服务咨询',
-    materialsSummary: '空调清洗服务手册',
-    pricingSummary: '挂机清洗：100 CNY',
-    promotionSummary: '已确认暂无优惠信息',
-    welcomeMessage: '你好，我是蓝天服务客服。',
-    insufficientInfoMessage: '当前资料不足，请联系商家确认。',
+  config: sampleDraft,
+  validation: {
+    publishable: true,
+    confirmedRevision: 1,
+    knowledgeRevisionId,
+    contentHash: sampleContentHash,
   },
-  validation: { publishable: true },
   active_release_id: null,
   created_at: now,
   updated_at: now,
@@ -217,6 +227,55 @@ describe('MySQL assistant lifecycle repository', () => {
     expect(commit).toHaveBeenCalledOnce();
   });
 
+  it('records merchant-confirmed text as ready knowledge for the exact draft revision', async () => {
+    const { repository, calls, commit } = repositoryWith(async (statement) => {
+      if (statement.includes('FROM assistant a') && statement.includes('FOR UPDATE')) {
+        return [[managementRow({ validation: { publishable: false, reason: 'knowledge_not_verified' } })], []];
+      }
+      return [resultHeader(), []];
+    }, [
+      Buffer.from('bb'.repeat(16), 'hex'),
+      Buffer.from(knowledgeRevisionId, 'hex'),
+      Buffer.from('cc'.repeat(16), 'hex'),
+    ]);
+
+    await expect(repository.confirmDraftKnowledge({
+      merchantUserId,
+      merchantId,
+      assistantId,
+      expectedDraftRevision: 1,
+      now,
+    })).resolves.toEqual({ knowledgeRevisionId, draftRevision: 1 });
+    expect(calls[1]?.statement).toContain('INSERT INTO knowledge_source');
+    expect(calls[2]?.statement).toContain('INSERT INTO knowledge_revision');
+    expect(calls[2]?.values).toContain('merchant-confirmed-v1');
+    expect(calls[3]?.statement).toContain('UPDATE assistant_draft');
+    expect(calls[3]?.values[0]).toContain(`"knowledgeRevisionId":"${knowledgeRevisionId}"`);
+    expect(commit).toHaveBeenCalledOnce();
+  });
+
+  it('reuses a confirmed ready knowledge revision instead of creating a duplicate', async () => {
+    const { repository, calls, commit } = repositoryWith(async (statement) => {
+      if (statement.includes('FROM assistant a') && statement.includes('FOR UPDATE')) {
+        return [[managementRow()], []];
+      }
+      if (statement.includes('FROM knowledge_revision kr')) {
+        return [[{ id: Buffer.from(knowledgeRevisionId, 'hex') }], []];
+      }
+      throw new Error('unexpected write after confirmation');
+    });
+
+    await expect(repository.confirmDraftKnowledge({
+      merchantUserId,
+      merchantId,
+      assistantId,
+      expectedDraftRevision: 1,
+      now,
+    })).resolves.toEqual({ knowledgeRevisionId, draftRevision: 1 });
+    expect(calls).toHaveLength(2);
+    expect(commit).toHaveBeenCalledOnce();
+  });
+
   it('returns the original generated assistant after an idempotency race', async () => {
     const duplicate = Object.assign(new Error('duplicate'), { code: 'ER_DUP_ENTRY' });
     const { repository, calls, rollback } = repositoryWith(async (statement) => {
@@ -341,6 +400,9 @@ describe('MySQL assistant lifecycle repository', () => {
         if (statement.includes('FROM assistant a') && statement.includes('FOR UPDATE')) {
           return [[managementRow({ active_release_id: activeReleaseId, status: 'active' })], []];
         }
+        if (statement.includes('FROM knowledge_revision kr')) {
+          return [[{ id: Buffer.from(knowledgeRevisionId, 'hex') }], []];
+        }
         if (statement.includes('SELECT release_no')) return [[{ release_no: 2 }], []];
         return [resultHeader(), []];
       },
@@ -366,12 +428,13 @@ describe('MySQL assistant lifecycle repository', () => {
     ).resolves.toMatchObject({ releaseId, releaseNo: 3, draftRevision: 1, status: 'active' });
 
     expect(calls[1]?.statement).toMatch(/merchant_membership[\s\S]*FOR UPDATE/u);
-    expect(calls[2]?.statement).toMatch(/ORDER BY release_no DESC[\s\S]*FOR UPDATE/u);
-    expect(calls[4]?.statement).toMatch(/INSERT INTO assistant_release/u);
-    expect(calls[5]?.statement).toMatch(/INSERT INTO assistant_active_release/u);
-    expect(calls[6]?.statement).toMatch(/SET active_release_id = \?, status = 'active'/u);
-    expect(calls[7]?.statement).toMatch(/state = 'succeeded'/u);
-    expect(calls[8]?.statement).toMatch(/INSERT INTO outbox_event/u);
+    expect(calls[2]?.statement).toMatch(/knowledge_revision[\s\S]*status = 'ready'/u);
+    expect(calls[3]?.statement).toMatch(/ORDER BY release_no DESC[\s\S]*FOR UPDATE/u);
+    expect(calls[5]?.statement).toMatch(/INSERT INTO assistant_release/u);
+    expect(calls[6]?.statement).toMatch(/INSERT INTO assistant_active_release/u);
+    expect(calls[7]?.statement).toMatch(/SET active_release_id = \?, status = 'active'/u);
+    expect(calls[8]?.statement).toMatch(/state = 'succeeded'/u);
+    expect(calls[9]?.statement).toMatch(/INSERT INTO outbox_event/u);
     expect(commit).toHaveBeenCalledOnce();
   });
 
@@ -396,6 +459,30 @@ describe('MySQL assistant lifecycle repository', () => {
         now,
       }),
     ).rejects.toBeInstanceOf(AssistantPublishValidationError);
+    expect(calls.some((call) => call.statement.includes('INSERT INTO assistant_release'))).toBe(false);
+    expect(rollback).toHaveBeenCalledOnce();
+  });
+
+  it('does not publish when confirmed knowledge is no longer ready', async () => {
+    const { repository, calls, rollback } = repositoryWith(async (statement) => {
+      if (statement.includes('FROM assistant a') && statement.includes('FOR UPDATE')) {
+        return [[managementRow()], []];
+      }
+      if (statement.includes('FROM knowledge_revision kr')) return [[], []];
+      return [resultHeader(), []];
+    });
+
+    await expect(repository.publish({
+      merchantUserId,
+      merchantId,
+      assistantId,
+      expectedDraftRevision: 1,
+      promptTemplateVersion: 'prompt-v1',
+      retrievalPolicyVersion: 'retrieval-v1',
+      modelPolicyVersion: 'model-v1',
+      idempotency: idem,
+      now,
+    })).rejects.toBeInstanceOf(AssistantPublishValidationError);
     expect(calls.some((call) => call.statement.includes('INSERT INTO assistant_release'))).toBe(false);
     expect(rollback).toHaveBeenCalledOnce();
   });

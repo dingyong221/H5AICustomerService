@@ -72,26 +72,31 @@ a {
   max-width: 62rem;
 }
 
-.assistant-create-form {
+.assistant-create-form,
+.assistant-edit-form {
   display: grid;
   gap: 1rem;
 }
 
-.assistant-create-form label {
+.assistant-create-form label,
+.assistant-edit-form label {
   display: grid;
   font-weight: 700;
   gap: 0.4rem;
 }
 
 .assistant-create-form input,
-.assistant-create-form textarea {
+.assistant-create-form textarea,
+.assistant-edit-form input,
+.assistant-edit-form textarea {
   border: 1px solid #aebeb4;
   border-radius: 9px;
   font: inherit;
   padding: 0.75rem;
 }
 
-.assistant-create-form button {
+.assistant-create-form button,
+.assistant-edit-form button {
   background: #176f4b;
   border: 0;
   border-radius: 9px;
@@ -102,7 +107,8 @@ a {
   padding: 0.75rem 1rem;
 }
 
-.assistant-create-form button:disabled {
+.assistant-create-form button:disabled,
+.assistant-edit-form button:disabled {
   opacity: 0.6;
 }
 
@@ -116,6 +122,62 @@ a {
   display: grid;
   gap: 0.3rem;
   padding: 0.8rem 0;
+}
+
+.assistant-detail-card {
+  max-width: 62rem;
+}
+
+.assistant-facts {
+  display: grid;
+  gap: 0;
+}
+
+.assistant-facts div {
+  border-top: 1px solid #e0e9e3;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(8rem, 12rem) 1fr;
+  padding: 1rem 0;
+}
+
+.assistant-facts dt {
+  color: #416052;
+  font-weight: 700;
+}
+
+.assistant-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.assistant-confirm-form {
+  display: grid;
+  gap: 1rem;
+  justify-items: start;
+}
+
+.assistant-confirm-form label {
+  display: flex;
+  gap: 0.6rem;
+  line-height: 1.6;
+}
+
+.assistant-confirm-form button {
+  background: #176f4b;
+  border: 0;
+  border-radius: 9px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0.75rem 1rem;
+}
+
+.assistant-confirm-form button:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 .skip-link {
@@ -1310,6 +1372,10 @@ a {
 }
 
 @media (max-width: 720px) {
+  .assistant-facts div {
+    gap: 0.35rem;
+    grid-template-columns: 1fr;
+  }
   .merchant-layout {
     padding: 4.5rem 0 0;
   }

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 
 import { loadDatabaseConfig, MySqlAssistantLifecycleRepository } from '@h5cs/database';
 import { toMerchantId, toMerchantUserId } from '@h5cs/domain';
@@ -51,8 +52,10 @@ export default async function MerchantWorkspacePage({
               <ul className="assistant-workspace-list">
                 {assistants.map((assistant) => (
                   <li key={assistant.assistantId}>
-                    <strong>{assistant.displayName}</strong>
-                    <span>{assistant.status === 'draft_only' ? '草稿，尚未对消费者开放' : assistant.status}</span>
+                    <Link href={`/workspace/${merchantId}/assistants/${assistant.assistantId}`}>
+                      <strong>{assistant.displayName}</strong>
+                    </Link>
+                    <span>{assistant.knowledgeConfirmed ? '商家资料已确认，尚未发布' : '草稿，资料待确认'}</span>
                     <small>客服编号：{assistant.assistantId}</small>
                   </li>
                 ))}

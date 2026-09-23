@@ -42,13 +42,13 @@ type ManagementRow = RowDataPacket & {
   status: string;
   draft_revision: number;
   config: string | Record<string, unknown>;
+  validation: string | Record<string, unknown>;
   active_release_id: Buffer | null;
   created_at: Date;
   updated_at: Date;
 };
 
 type PublishRow = ManagementRow & {
-  validation: string | Record<string, unknown>;
   membership_status: string;
   merchant_status: string;
 };
@@ -81,6 +81,7 @@ type PublicRow = RowDataPacket & {
 const OPERATION_GENERATE = 'assistant.generate';
 const OPERATION_CREATE_MANUAL = 'assistant.create_manual';
 const OPERATION_PUBLISH = 'assistant.publish';
+const MANUAL_KNOWLEDGE_PARSER = 'merchant-confirmed-v1';
 const controlCharacters = /[\u0000-\u001f\u007f]/u;
 
 const newId = (): Buffer => randomBytes(16);
@@ -159,12 +160,25 @@ const text = (value: unknown, field: string, maximum: number): string => {
   return normalized;
 };
 
+const paragraphText = (value: unknown, field: string, maximum: number): string => {
+  if (typeof value !== 'string') {
+    throw new AssistantLifecyclePersistenceError(`${field} is invalid`);
+  }
+  const normalized = value.replace(/\r\n?/gu, '\n').trim();
+  if (
+    normalized.length === 0 ||
+    normalized.length > maximum ||
+    /[\u0000-\u0009\u000b-\u001f\u007f]/u.test(normalized)
+  ) throw new AssistantLifecyclePersistenceError(`${field} is invalid`);
+  return normalized;
+};
+
 const validateDraft = (draft: AssistantDraftConfig): AssistantDraftConfig => ({
   industry: text(draft.industry, 'industry', 128),
-  businessScope: text(draft.businessScope, 'businessScope', 2_000),
-  materialsSummary: text(draft.materialsSummary, 'materialsSummary', 4_000),
-  pricingSummary: text(draft.pricingSummary, 'pricingSummary', 4_000),
-  promotionSummary: text(draft.promotionSummary, 'promotionSummary', 4_000),
+  businessScope: paragraphText(draft.businessScope, 'businessScope', 2_000),
+  materialsSummary: paragraphText(draft.materialsSummary, 'materialsSummary', 4_000),
+  pricingSummary: paragraphText(draft.pricingSummary, 'pricingSummary', 4_000),
+  promotionSummary: paragraphText(draft.promotionSummary, 'promotionSummary', 4_000),
   welcomeMessage: text(draft.welcomeMessage, 'welcomeMessage', 500),
   insufficientInfoMessage: text(draft.insufficientInfoMessage, 'insufficientInfoMessage', 500),
 });
@@ -173,10 +187,10 @@ const parseDraft = (value: string | Record<string, unknown>): AssistantDraftConf
   const object = parseObject(value, 'draft config');
   return validateDraft({
     industry: text(object['industry'], 'industry', 128),
-    businessScope: text(object['businessScope'], 'businessScope', 2_000),
-    materialsSummary: text(object['materialsSummary'], 'materialsSummary', 4_000),
-    pricingSummary: text(object['pricingSummary'], 'pricingSummary', 4_000),
-    promotionSummary: text(object['promotionSummary'], 'promotionSummary', 4_000),
+    businessScope: paragraphText(object['businessScope'], 'businessScope', 2_000),
+    materialsSummary: paragraphText(object['materialsSummary'], 'materialsSummary', 4_000),
+    pricingSummary: paragraphText(object['pricingSummary'], 'pricingSummary', 4_000),
+    promotionSummary: paragraphText(object['promotionSummary'], 'promotionSummary', 4_000),
     welcomeMessage: text(object['welcomeMessage'], 'welcomeMessage', 500),
     insufficientInfoMessage: text(
       object['insufficientInfoMessage'],
@@ -184,6 +198,19 @@ const parseDraft = (value: string | Record<string, unknown>): AssistantDraftConf
       500,
     ),
   });
+};
+
+const draftConfirmed = (
+  validationValue: string | Record<string, unknown>,
+  draft: AssistantDraftConfig,
+  revision: number,
+): boolean => {
+  const validation = parseObject(validationValue, 'draft validation');
+  return validation['publishable'] === true &&
+    validation['confirmedRevision'] === revision &&
+    validation['contentHash'] === createHash('sha256').update(JSON.stringify(draft), 'utf8').digest('hex') &&
+    typeof validation['knowledgeRevisionId'] === 'string' &&
+    /^[0-9a-f]{32}$/u.test(validation['knowledgeRevisionId']);
 };
 
 const parseStatus = (value: string): AssistantManagementSnapshot['status'] => {
@@ -301,7 +328,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
     return this.#withConnection(async (connection) => {
       const [rows] = await connection.execute<ManagementRow[]>(
         `SELECT a.id AS assistant_id, a.merchant_id, a.display_name, a.public_slug,
-                a.status, a.draft_revision, d.config, a.active_release_id,
+                a.status, a.draft_revision, d.config, d.validation, a.active_release_id,
                 a.created_at, a.updated_at
            FROM assistant a
            JOIN assistant_draft d ON d.merchant_id = a.merchant_id AND d.assistant_id = a.id
@@ -399,6 +426,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
           status: 'draft_only',
           draftRevision: 1,
           draft,
+          knowledgeConfirmed: false,
           activeReleaseId: null,
           createdAt: input.now,
           updatedAt: input.now,
@@ -538,6 +566,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
           status: 'draft_only',
           draftRevision: 1,
           draft,
+          knowledgeConfirmed: false,
           activeReleaseId: null,
           createdAt: input.now,
           updatedAt: input.now,
@@ -620,6 +649,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
         status: parseStatus(current.status),
         draftRevision: nextRevision,
         draft,
+        knowledgeConfirmed: false,
         activeReleaseId:
           current.active_release_id === null
             ? null
@@ -627,6 +657,109 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
         createdAt: current.created_at,
         updatedAt: input.now,
       };
+    });
+  }
+
+  public async confirmDraftKnowledge(input: {
+    merchantUserId: MerchantUserId;
+    merchantId: MerchantId;
+    assistantId: AssistantId;
+    expectedDraftRevision: number;
+    now: Date;
+  }): Promise<{ knowledgeRevisionId: string; draftRevision: number }> {
+    validDate(input.now, 'now');
+    if (!Number.isSafeInteger(input.expectedDraftRevision) || input.expectedDraftRevision < 1) {
+      throw new AssistantLifecyclePersistenceError('expectedDraftRevision is invalid');
+    }
+    const merchantUserId = idBuffer(input.merchantUserId, 'merchantUserId');
+    const merchantId = idBuffer(input.merchantId, 'merchantId');
+    const assistantId = idBuffer(input.assistantId, 'assistantId');
+    return this.#withTransaction(async (connection) => {
+      const current = await this.#lockManagement(connection, merchantUserId, merchantId, assistantId);
+      if (
+        current === null ||
+        current.draft_revision !== input.expectedDraftRevision ||
+        current.status === 'paused'
+      ) throw new AssistantRevisionConflictError();
+      const draft = parseDraft(current.config);
+      const contentHash = createHash('sha256').update(JSON.stringify(draft), 'utf8').digest();
+      const previous = parseObject(current.validation, 'draft validation');
+      if (
+        previous['publishable'] === true &&
+        previous['confirmedRevision'] === input.expectedDraftRevision &&
+        previous['contentHash'] === contentHash.toString('hex') &&
+        typeof previous['knowledgeRevisionId'] === 'string' &&
+        /^[0-9a-f]{32}$/u.test(previous['knowledgeRevisionId']) &&
+        await this.#knowledgeReady(
+          connection,
+          merchantId,
+          assistantId,
+          idBuffer(previous['knowledgeRevisionId'], 'knowledgeRevisionId'),
+          contentHash,
+          input.now,
+        )
+      ) {
+        return {
+          knowledgeRevisionId: previous['knowledgeRevisionId'],
+          draftRevision: input.expectedDraftRevision,
+        };
+      }
+      const sourceId = this.#newId('knowledgeSourceId');
+      const knowledgeRevisionId = this.#newId('knowledgeRevisionId');
+      await connection.execute(
+        `INSERT INTO knowledge_source
+           (id, merchant_id, assistant_id, type, title, status, current_revision_no,
+            created_at, updated_at)
+         VALUES (?, ?, ?, 'merchant_confirmed_text', ?, 'active', 1, ?, ?)`,
+        [sourceId, merchantId, assistantId, `${current.display_name}：商家确认资料`, input.now, input.now],
+      );
+      await connection.execute(
+        `INSERT INTO knowledge_revision
+           (id, merchant_id, assistant_id, source_id, revision_no, status, content_hash,
+            source_metadata, parser_version, effective_from, created_at, processed_at)
+         VALUES (?, ?, ?, ?, 1, 'ready', ?, ?, ?, ?, ?, ?)`,
+        [
+          knowledgeRevisionId,
+          merchantId,
+          assistantId,
+          sourceId,
+          contentHash,
+          JSON.stringify({ kind: 'merchant_confirmed_text', draftRevision: input.expectedDraftRevision, facts: draft }),
+          MANUAL_KNOWLEDGE_PARSER,
+          input.now,
+          input.now,
+          input.now,
+        ],
+      );
+      const [updated] = await connection.execute<ResultSetHeader>(
+        `UPDATE assistant_draft
+            SET validation = ?, updated_by = ?, updated_at = ?
+          WHERE merchant_id = ? AND assistant_id = ? AND revision = ?`,
+        [
+          JSON.stringify({
+            publishable: true,
+            confirmedRevision: input.expectedDraftRevision,
+            knowledgeRevisionId: knowledgeRevisionId.toString('hex'),
+            contentHash: contentHash.toString('hex'),
+          }),
+          merchantUserId,
+          input.now,
+          merchantId,
+          assistantId,
+          input.expectedDraftRevision,
+        ],
+      );
+      if (updated.affectedRows !== 1) throw new AssistantRevisionConflictError();
+      await this.#writeOutbox(
+        connection,
+        merchantId,
+        'knowledge.confirmed',
+        'knowledge_revision',
+        knowledgeRevisionId,
+        { assistantId: input.assistantId, draftRevision: input.expectedDraftRevision },
+        input.now,
+      );
+      return { knowledgeRevisionId: knowledgeRevisionId.toString('hex'), draftRevision: input.expectedDraftRevision };
     });
   }
 
@@ -679,10 +812,21 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
           throw new AssistantPublishValidationError();
         }
         const validation = parseObject(current.validation, 'draft validation');
-        if (validation['publishable'] !== true) {
+        const draft = parseDraft(current.config);
+        const contentHash = createHash('sha256').update(JSON.stringify(draft), 'utf8').digest();
+        if (
+          validation['publishable'] !== true ||
+          validation['confirmedRevision'] !== input.expectedDraftRevision ||
+          validation['contentHash'] !== contentHash.toString('hex') ||
+          typeof validation['knowledgeRevisionId'] !== 'string' ||
+          !/^[0-9a-f]{32}$/u.test(validation['knowledgeRevisionId'])
+        ) {
           throw new AssistantPublishValidationError();
         }
-        const draft = parseDraft(current.config);
+        const knowledgeRevisionId = idBuffer(validation['knowledgeRevisionId'], 'knowledgeRevisionId');
+        if (!(await this.#knowledgeReady(
+          connection, merchantId, assistantId, knowledgeRevisionId, contentHash, input.now,
+        ))) throw new AssistantPublishValidationError();
         const [releaseRows] = await connection.execute<(RowDataPacket & { release_no: number })[]>(
           `SELECT release_no
              FROM assistant_release
@@ -696,6 +840,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
         const releaseId = this.#newId('releaseId');
         const configSnapshot = {
           draftRevision: input.expectedDraftRevision,
+          knowledgeRevisionId: validation['knowledgeRevisionId'],
           displayName: current.display_name,
           ...draft,
         };
@@ -833,7 +978,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
   ): Promise<AssistantManagementSnapshot | null> {
     const [rows] = await connection.execute<ManagementRow[]>(
       `SELECT a.id AS assistant_id, a.merchant_id, a.display_name, a.public_slug,
-              a.status, a.draft_revision, d.config, a.active_release_id,
+              a.status, a.draft_revision, d.config, d.validation, a.active_release_id,
               a.created_at, a.updated_at
          FROM assistant a
          JOIN assistant_draft d
@@ -873,7 +1018,32 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
     return rows[0] ?? null;
   }
 
+  async #knowledgeReady(
+    connection: Connection,
+    merchantId: Buffer,
+    assistantId: Buffer,
+    knowledgeRevisionId: Buffer,
+    contentHash: Buffer,
+    now: Date,
+  ): Promise<boolean> {
+    const [rows] = await connection.execute<RowDataPacket[]>(
+      `SELECT kr.id FROM knowledge_revision kr
+         JOIN knowledge_source ks
+           ON ks.merchant_id = kr.merchant_id AND ks.assistant_id = kr.assistant_id
+          AND ks.id = kr.source_id
+        WHERE kr.merchant_id = ? AND kr.assistant_id = ? AND kr.id = ?
+          AND kr.status = 'ready' AND kr.content_hash = ?
+          AND kr.effective_from <= ?
+          AND (kr.effective_until IS NULL OR kr.effective_until > ?)
+          AND ks.status = 'active'
+        LIMIT 1 FOR UPDATE`,
+      [merchantId, assistantId, knowledgeRevisionId, contentHash, now, now],
+    );
+    return rows.length === 1;
+  }
+
   #managementFromRow(row: ManagementRow): AssistantManagementSnapshot {
+    const draft = parseDraft(row.config);
     return {
       assistantId: toAssistantId(idString(row.assistant_id, 'assistantId')),
       merchantId: toMerchantId(idString(row.merchant_id, 'merchantId')),
@@ -881,7 +1051,8 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
       publicSlug: text(row.public_slug, 'publicSlug', 128),
       status: parseStatus(row.status),
       draftRevision: row.draft_revision,
-      draft: parseDraft(row.config),
+      draft,
+      knowledgeConfirmed: draftConfirmed(row.validation, draft, row.draft_revision),
       activeReleaseId:
         row.active_release_id === null
           ? null

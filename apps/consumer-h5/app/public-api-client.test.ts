@@ -38,6 +38,18 @@ const snapshot: OnlinePublicAssistantSnapshot = snapshotData;
 describe('public API response decoders', () => {
   it('accepts an exact online public snapshot', () => {
     expect(decodePublicAssistantSnapshot(envelope(snapshotData))).toEqual(snapshotData);
+    expect(decodePublicAssistantSnapshot(envelope({
+      ...snapshotData,
+      assistantDisplayName: '客'.repeat(200),
+    }))).toBeDefined();
+    expect(decodePublicAssistantSnapshot(envelope({
+      ...snapshotData,
+      assistantDisplayName: '客'.repeat(201),
+    }))).toBeUndefined();
+    expect(decodePublicAssistantSnapshot(envelope({
+      ...snapshotData,
+      businessScope: '服务 A\n服务 B',
+    }))?.businessScope).toBe('服务 A\n服务 B');
   });
 
   it('accepts the shared request ID grammar including dots and rejects short IDs', () => {

@@ -153,6 +153,14 @@ function boundedText(value: unknown, maximumLength: number): string | undefined 
   return normalized;
 }
 
+function boundedParagraph(value: unknown, maximumLength: number): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.replace(/\r\n?/gu, '\n').trim();
+  return normalized.length > 0 && normalized.length <= maximumLength &&
+    !/[\u0000-\u0009\u000b-\u001f\u007f]/u.test(normalized)
+    ? normalized : undefined;
+}
+
 function opaqueRef(value: unknown): string | undefined {
   const normalized = boundedText(value, 191);
   return normalized !== undefined && opaqueRefPattern.test(normalized) ? normalized : undefined;
@@ -239,9 +247,9 @@ export function decodePublicAssistantSnapshot(value: unknown):
   }
   const publicAssistantId = opaqueRef(data['publicAssistantId']);
   const merchantDisplayName = boundedText(data['merchantDisplayName'], 200);
-  const assistantDisplayName = boundedText(data['assistantDisplayName'], 120);
-  const businessScope = boundedText(data['businessScope'], 2_000);
-  const welcomeMessage = boundedText(data['welcomeMessage'], 2_000);
+  const assistantDisplayName = boundedText(data['assistantDisplayName'], 200);
+  const businessScope = boundedParagraph(data['businessScope'], 2_000);
+  const welcomeMessage = boundedParagraph(data['welcomeMessage'], 2_000);
   const releaseRef = opaqueRef(data['releaseRef']);
   if (
     publicAssistantId === undefined ||
@@ -387,7 +395,7 @@ function decodePublicMessage(value: unknown): PublicMessage | undefined {
     return undefined;
   }
   const messageId = opaqueRef(value['messageId']);
-  const content = boundedText(value['content'], 8_000);
+  const content = boundedParagraph(value['content'], 8_000);
   const createdAt = isoTimestamp(value['createdAt']);
   const clientMessageId =
     value['clientMessageId'] === undefined

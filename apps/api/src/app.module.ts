@@ -14,6 +14,8 @@ import { McpBearerAuthMiddleware } from './oauth/mcp-bearer-auth.middleware.js';
 import { WorkBuddyLocalAuthorizationController } from './oauth/workbuddy-local-authorization.controller.js';
 import { createRuntimeWorkBuddyLocalAuthorization } from './oauth/workbuddy-local-authorization.runtime.js';
 import { WorkBuddyLocalAuthorizationService } from './oauth/workbuddy-local-authorization.service.js';
+import { PublicAssistantController } from './public/public-assistant.controller.js';
+import { PublicAssistantService } from './public/public-assistant.service.js';
 import { RequestIdMiddleware } from './request-id.js';
 import { SkillOnboardingApplicationService } from './skill/skill-onboarding.service.js';
 import { createRuntimeSkillOnboardingService } from './skill/runtime.js';
@@ -25,9 +27,14 @@ import { SkillController } from './skill/skill.controller.js';
     SkillController,
     OAuthController,
     WorkBuddyLocalAuthorizationController,
+    PublicAssistantController,
   ],
   providers: [
     HealthService,
+    {
+      provide: PublicAssistantService,
+      useFactory: () => PublicAssistantService.fromEnvironment(),
+    },
     {
       provide: OAuthRuntime,
       useFactory: () => createRuntimeOAuth(),

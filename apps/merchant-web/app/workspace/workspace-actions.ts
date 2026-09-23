@@ -8,6 +8,7 @@ import { revalidatePath } from 'next/cache';
 import { headers } from 'next/headers';
 
 import { currentMerchant } from '../account/merchant-actions';
+import { parseAssistantDraftForm } from './draft-form';
 
 export type CreateAssistantState = Readonly<{
   error: string | null;
@@ -36,38 +37,16 @@ export async function createAssistantDraft(
   const session = await currentMerchant(merchantId);
   if (!session) return { error: '登录已失效或无权管理此商家。', created: null };
 
-  const field = (name: string, maximum: number): string | null => {
-    const value = formData.get(name);
-    if (typeof value !== 'string') return null;
-    const normalized = value.trim();
-    return normalized.length > 0 && normalized.length <= maximum &&
-      !/[\u0000-\u001f\u007f]/u.test(normalized)
-      ? normalized : null;
-  };
-  const displayName = field('displayName', 200);
-  const industry = field('industry', 128);
-  const businessScope = field('businessScope', 2_000);
-  const materialsSummary = field('materialsSummary', 4_000);
-  const pricingSummary = field('pricingSummary', 4_000);
-  const promotionSummary = field('promotionSummary', 4_000);
-  const welcomeMessage = field('welcomeMessage', 500);
-  const insufficientInfoMessage = field('insufficientInfoMessage', 500);
+  const displayNameValue = formData.get('displayName');
+  const displayName = typeof displayNameValue === 'string' ? displayNameValue.trim() : '';
+  const draft = parseAssistantDraftForm(formData);
   if (
-    !displayName || !industry || !businessScope || !materialsSummary ||
-    !pricingSummary || !promotionSummary || !welcomeMessage || !insufficientInfoMessage
+    displayName.length === 0 || displayName.length > 200 ||
+    /[\u0000-\u001f\u007f]/u.test(displayName) || !draft
   ) return { error: '请填写所有业务资料，单项内容不能超过对应长度。', created: null };
 
   const database = loadDatabaseConfig();
   if (!database.configured) return { error: '数据库尚未配置。', created: null };
-  const draft = {
-    industry,
-    businessScope,
-    materialsSummary,
-    pricingSummary,
-    promotionSummary,
-    welcomeMessage,
-    insufficientInfoMessage,
-  };
   const now = new Date();
   try {
     const repository = new MySqlAssistantLifecycleRepository(database.config);
