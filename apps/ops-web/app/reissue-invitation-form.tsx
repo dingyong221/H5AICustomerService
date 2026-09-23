@@ -17,7 +17,7 @@ export function ReissueInvitationForm({ merchantId }: { merchantId: string }) {
           <input name="confirm" required type="checkbox" value="invalidate_previous" />
           我确认旧领取链接将立即失效
         </label>
-        <button disabled={pending} type="submit">
+        <button disabled={pending || state.created !== null} type="submit">
           {pending ? '正在重新签发…' : '重新签发领取链接'}
         </button>
       </form>

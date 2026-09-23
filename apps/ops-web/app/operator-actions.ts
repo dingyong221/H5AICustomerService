@@ -125,7 +125,11 @@ export async function provisionMerchant(
       },
     };
   } catch {
-    return { error: '创建商家失败，未生成有效链接。请检查数据库连接并重试。', created: null };
+    return {
+      error:
+        '创建结果暂无法确认。请先刷新商家列表；若已出现等待领取的商家，请重新签发链接，不要重复创建。',
+      created: null,
+    };
   }
 }
 

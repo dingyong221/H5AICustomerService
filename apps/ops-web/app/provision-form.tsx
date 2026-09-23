@@ -22,7 +22,7 @@ export function ProvisionForm() {
             required
           />
         </label>
-        <button disabled={pending} type="submit">
+        <button disabled={pending || state.created !== null} type="submit">
           {pending ? '正在创建…' : '创建商家并生成领取链接'}
         </button>
       </form>

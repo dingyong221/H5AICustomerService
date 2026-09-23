@@ -115,7 +115,7 @@ export class MySqlPlatformProvisioningRepository {
         throw error;
       }
     } finally {
-      await connection.end();
+      await connection.end().catch(() => undefined);
     }
 
     return {
@@ -185,7 +185,7 @@ export class MySqlPlatformProvisioningRepository {
         throw error;
       }
     } finally {
-      await connection.end();
+      await connection.end().catch(() => undefined);
     }
 
     return {

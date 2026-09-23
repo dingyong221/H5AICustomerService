@@ -11,10 +11,13 @@ import {
 
 const resultHeader = { affectedRows: 1 } as ResultSetHeader;
 
-const repositoryWith = (failOn?: string, merchantStatus = 'pending_owner') => {
+const repositoryWith = (failOn?: string, merchantStatus = 'pending_owner', failEnd = false) => {
   const calls: Array<{ sql: string; values: readonly unknown[] }> = [];
   const commit = vi.fn(async () => undefined);
   const rollback = vi.fn(async () => undefined);
+  const end = vi.fn(async () => {
+    if (failEnd) throw new Error('simulated connection close failure');
+  });
   const connection = {
     execute: async (sql: string, values: readonly unknown[] = []) => {
       calls.push({ sql, values });
@@ -27,14 +30,20 @@ const repositoryWith = (failOn?: string, merchantStatus = 'pending_owner') => {
     beginTransaction: vi.fn(async () => undefined),
     commit,
     rollback,
-    end: vi.fn(async () => undefined),
+    end,
   } as unknown as Connection;
   const database = {
     openConnection: async () => connection,
     summary: { host: 'test', database: 'test', tlsRequested: false },
     toJSON: () => ({ host: 'test', database: 'test', tlsRequested: false }),
   } satisfies DatabaseConnectionConfig;
-  return { repository: new MySqlPlatformProvisioningRepository(database), calls, commit, rollback };
+  return {
+    repository: new MySqlPlatformProvisioningRepository(database),
+    calls,
+    commit,
+    rollback,
+    end,
+  };
 };
 
 describe('platform merchant provisioning', () => {
@@ -69,6 +78,15 @@ describe('platform merchant provisioning', () => {
     ).rejects.toThrow('simulated database failure');
     expect(commit).not.toHaveBeenCalled();
     expect(rollback).toHaveBeenCalledOnce();
+  });
+
+  it('still returns the one-time link after a committed create when connection cleanup fails', async () => {
+    const { repository, commit, rollback, end } = repositoryWith(undefined, 'pending_owner', true);
+    const created = await repository.provisionMerchant({ name: '示例商家', operatorId: 'ops-1' });
+    expect(created.setupToken).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(commit).toHaveBeenCalledOnce();
+    expect(rollback).not.toHaveBeenCalled();
+    expect(end).toHaveBeenCalledOnce();
   });
 
   it('reissues a pending invitation by expiring old links and auditing the new digest atomically', async () => {
@@ -123,5 +141,17 @@ describe('platform merchant provisioning', () => {
     ).rejects.toThrow('simulated database failure');
     expect(commit).not.toHaveBeenCalled();
     expect(rollback).toHaveBeenCalledOnce();
+  });
+
+  it('still returns a reissued link after commit when connection cleanup fails', async () => {
+    const { repository, commit, rollback, end } = repositoryWith(undefined, 'pending_owner', true);
+    const created = await repository.reissueInvitation({
+      merchantId: '22222222222222222222222222222222',
+      operatorId: 'ops-1',
+    });
+    expect(created.setupToken).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(commit).toHaveBeenCalledOnce();
+    expect(rollback).not.toHaveBeenCalled();
+    expect(end).toHaveBeenCalledOnce();
   });
 });
