@@ -52,7 +52,7 @@ jobs:
         shell: bash
         run: |
           docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml config --quiet
-          docker compose --env-file infra/compose/release.env.example --file infra/compose/docker-compose.release.yml config --quiet
+          docker compose --env-file infra/compose/release.env.example --file infra/compose/docker-compose.release.yml config --quiet --no-env-resolution
 
       - name: Check formatting
         run: pnpm format:check
@@ -119,6 +119,9 @@ jobs:
 
       - name: Apply reviewed MySQL migrations
         run: pnpm --filter @h5cs/database exec drizzle-kit migrate --config drizzle.config.ts
+
+      - name: Build API and workspace dependencies
+        run: pnpm exec turbo run build --filter=@h5cs/api --concurrency=1
 
       - name: Verify merchant-to-consumer persistence and public API
         run: pnpm --filter @h5cs/api test:integration
