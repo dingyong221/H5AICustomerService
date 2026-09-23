@@ -261,6 +261,36 @@ const assertReleaseComposePolicy = () => {
   const floating = directImages.filter((image) => !/@sha256:[0-9a-f]{64}$/u.test(image));
   if (floating.length > 0)
     fail(`Floating image references in release Compose: ${floating.join(', ')}`);
+
+  const caTarget = '/etc/ssl/certs/h5cs-managed-mysql-ca.pem';
+  const caHostPath = environment.match(/^H5CS_MYSQL_CA_HOST_FILE=(\/[\S]+)$/mu)?.[1];
+  const caMount =
+    compose.split(/^x-mysql-ca-volumes: &mysql-ca-volumes\s*$/mu)[1]?.split(/^services:/mu)[0] ??
+    '';
+  if (
+    !caHostPath ||
+    !caMount.includes('source: ${H5CS_MYSQL_CA_HOST_FILE:?') ||
+    !caMount.includes(`target: ${caTarget}`) ||
+    !caMount.includes('read_only: true')
+  ) {
+    fail('Release Compose must mount the managed MySQL CA read-only from an absolute host path.');
+  }
+  const services = compose.split(/^services:\s*$/mu)[1]?.split(/^networks:\s*$/mu)[0] ?? '';
+  const headings = [...services.matchAll(/^  ([a-z][a-z0-9-]*):\s*$/gmu)];
+  for (const name of ['api', 'worker', 'merchant-web', 'ops-web']) {
+    const index = headings.findIndex((match) => match[1] === name);
+    if (index < 0) fail(`Release Compose is missing ${name}.`);
+    const service = services.slice(
+      headings[index].index,
+      headings[index + 1]?.index ?? services.length,
+    );
+    if (
+      !service.includes(`MYSQL_TLS_CA_FILE: ${caTarget}`) ||
+      !service.includes('volumes: *mysql-ca-volumes')
+    ) {
+      fail(`Release Compose ${name} must use the managed MySQL CA mount.`);
+    }
+  }
 };
 
 const assertRequiredReleaseDocuments = () => {
