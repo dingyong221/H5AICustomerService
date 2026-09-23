@@ -210,6 +210,10 @@ describe('WorkBuddy MCP adapter', () => {
     });
     await client.callTool({ name: 'h5cs_management_open', arguments: {} });
     await client.callTool({
+      name: 'h5cs_management_open',
+      arguments: { assistant_ref: '44444444444444444444444444444444' },
+    });
+    await client.callTool({
       name: 'h5cs_onboarding_advance',
       arguments: {
         onboarding_session_id: TEST_SESSION_ID,
@@ -219,6 +223,10 @@ describe('WorkBuddy MCP adapter', () => {
 
     expect(execute.mock.calls[1]?.[0]).toBe('Bearer protocol-only-token');
     expect(execute.mock.calls[2]?.[0]).toBe('Bearer protocol-only-token');
+    expect(execute.mock.calls[3]?.[1]).toEqual({
+      intent: 'open_management_console',
+      assistant_ref: '44444444444444444444444444444444',
+    });
     expect(advance).toHaveBeenCalledWith({
       authorizationHeader: 'Bearer protocol-only-token',
       sessionId: TEST_SESSION_ID,

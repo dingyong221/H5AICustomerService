@@ -43,9 +43,14 @@ describe('complete onboarding submission', () => {
       advance,
       startOrResume: vi.fn(async () => ({
         action: 'open_management_console' as const,
-        assistant: { assistant_ref: '44444444444444444444444444444444', status: 'active' },
+        assistant: {
+          assistant_ref: '44444444444444444444444444444444',
+          display_name: '售前客服',
+          status: 'active',
+        },
         url: 'https://merchant.test/workspace',
       })),
+      openManagement: vi.fn(),
     };
 
     await expect(
@@ -70,6 +75,7 @@ describe('complete onboarding submission', () => {
         onboarding_session_id: sessionId,
         state: 'confirmation' as const,
       })),
+      openManagement: vi.fn(),
     };
 
     await expect(
@@ -99,7 +105,11 @@ describe('complete onboarding submission', () => {
       })
       .mockResolvedValueOnce({
         action: 'open_management_console',
-        assistant: { assistant_ref: '44444444444444444444444444444444', status: 'draft_only' },
+        assistant: {
+          assistant_ref: '44444444444444444444444444444444',
+          display_name: '新客服',
+          status: 'draft_only',
+        },
         url: 'https://merchant.test/workspace',
       });
     const client: OnboardingApiClient = {
@@ -108,6 +118,7 @@ describe('complete onboarding submission', () => {
         ...resultForEvent(event),
         state: event.type === 'confirm' ? ('manageable' as const) : resultForEvent(event).state,
       })),
+      openManagement: vi.fn(),
     };
 
     await expect(

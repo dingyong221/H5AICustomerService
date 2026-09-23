@@ -31,6 +31,13 @@ export class OnboardingSessionNotFoundError extends Error {
   }
 }
 
+export class AssistantSelectionNotFoundError extends Error {
+  public constructor() {
+    super('The assistant is not available to this merchant');
+    this.name = 'AssistantSelectionNotFoundError';
+  }
+}
+
 export class ManagementConsoleUnavailableError extends Error {
   public constructor() {
     super('The management console URL is not configured');
@@ -81,15 +88,16 @@ export class SkillOnboardingApplicationService {
         if (merchantId === null) throw new MerchantBindingRequiredError();
         const assistants = await this.#repository.listAssistants(merchantId, merchantUserId);
         if (assistants.length === 0) {
+          if (request.assistant_ref !== undefined) throw new AssistantSelectionNotFoundError();
           return { action: 'start_first_onboarding', reason: 'no_assistant' };
         }
-        return this.#existingAssistantsResult(assistants);
+        return this.#existingAssistantsResult(merchantId, assistants, request.assistant_ref);
       }
       case 'create_customer_service': {
         const merchantId = await this.#repository.findMerchantBinding(merchantUserId);
         if (merchantId === null) throw new MerchantBindingRequiredError();
         const assistants = await this.#repository.listAssistants(merchantId, merchantUserId);
-        if (assistants.length > 0) return this.#existingAssistantsResult(assistants);
+        if (assistants.length > 0) return this.#existingAssistantsResult(merchantId, assistants);
         const session = await this.#resolveOnboardingSession(
           merchantUserId,
           merchantId,
@@ -203,30 +211,41 @@ export class SkillOnboardingApplicationService {
   }
 
   #existingAssistantsResult(
+    merchantId: MerchantId,
     assistants: Awaited<ReturnType<OnboardingRepository['listAssistants']>>,
+    selectedRef?: string,
   ): SkillIntentResult {
-    const url = this.#managementUrl();
-    if (assistants.length === 1) {
-      const assistant = assistants[0];
+    if (selectedRef !== undefined || assistants.length === 1) {
+      const assistant =
+        selectedRef === undefined
+          ? assistants[0]
+          : assistants.find((candidate) => candidate.id === selectedRef);
+      if (selectedRef !== undefined && assistant === undefined)
+        throw new AssistantSelectionNotFoundError();
       if (assistant === undefined) throw new Error('Assistant list invariant failed');
       return {
         action: 'open_management_console',
-        url,
-        assistant: { assistant_ref: assistant.id, status: assistant.status },
+        url: this.#managementUrl(`/workspace/${merchantId}/assistants/${assistant.id}`),
+        assistant: {
+          assistant_ref: assistant.id,
+          display_name: assistant.displayName,
+          status: assistant.status,
+        },
       };
     }
     return {
       action: 'select_assistant',
-      url,
+      url: this.#managementUrl(`/workspace/${merchantId}`),
       selection_required: true,
       assistants: assistants.map((assistant) => ({
         assistant_ref: assistant.id,
+        display_name: assistant.displayName,
         status: assistant.status,
       })),
     };
   }
 
-  #managementUrl(): string {
+  #managementUrl(path = '/'): string {
     if (this.#managementConsoleUrl === undefined) {
       throw new ManagementConsoleUnavailableError();
     }
@@ -242,7 +261,7 @@ export class SkillOnboardingApplicationService {
       ) {
         throw new ManagementConsoleUnavailableError();
       }
-      return url.toString();
+      return new URL(path, url.origin).toString();
     } catch {
       throw new ManagementConsoleUnavailableError();
     }

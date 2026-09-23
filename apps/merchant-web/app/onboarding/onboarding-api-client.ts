@@ -102,6 +102,10 @@ export interface OnboardingApiClient {
     idempotencyKey: string;
     resumeSessionId?: string;
   }): Promise<OnboardingStartResult>;
+  openManagement(input: {
+    assistantRef: string;
+    idempotencyKey: string;
+  }): Promise<ExistingAssistantResult>;
 }
 
 interface ClientOptions {
@@ -194,7 +198,10 @@ function parseStartResult(payload: unknown, origin: string): OnboardingStartResu
     !Array.isArray(assistantRecords) ||
     assistantRecords.some((item) => {
       const assistant = record(item);
-      return assistant === undefined || !exactKeys(assistant, ['assistant_ref', 'status']);
+      return (
+        assistant === undefined ||
+        !exactKeys(assistant, ['assistant_ref', 'display_name', 'status'])
+      );
     }) ||
     !safeManagementUrl(result.url, origin)
   ) {
@@ -374,6 +381,23 @@ export function createOnboardingApiClient(options: ClientOptions): OnboardingApi
         ...(resumeSessionId === undefined ? {} : { resume_session_id: resumeSessionId }),
       });
       return parseStartResult(await request('intents', body, idempotencyKey), options.origin);
+    },
+    openManagement: async ({ assistantRef, idempotencyKey }) => {
+      const body = skillIntentRequestSchema.parse({
+        intent: 'open_management_console',
+        assistant_ref: assistantRef,
+      });
+      const result = parseStartResult(
+        await request('intents', body, idempotencyKey),
+        options.origin,
+      );
+      if (
+        result.action !== 'open_management_console' ||
+        result.assistant.assistant_ref !== assistantRef
+      ) {
+        throw new OnboardingClientError('invalid_response', '服务端未确认所选客服。');
+      }
+      return result;
     },
   };
 }

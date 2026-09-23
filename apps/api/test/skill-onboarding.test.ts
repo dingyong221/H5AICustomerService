@@ -346,7 +346,7 @@ describe('Skill onboarding application service', () => {
         }),
         version: session.version + 1,
       };
-      repository.assistants = [{ id: assistantId, status: 'draft_only' }];
+      repository.assistants = [{ id: assistantId, displayName: '新客服', status: 'draft_only' }];
       return assistantId;
     });
     const service = new SkillOnboardingApplicationService(
@@ -447,28 +447,67 @@ describe('Skill onboarding application service', () => {
     ).resolves.toEqual({ action: 'start_first_onboarding', reason: 'no_assistant' });
 
     repository.assistants = [
-      { id: toAssistantId('44444444444444444444444444444444'), status: 'active' },
+      {
+        id: toAssistantId('44444444444444444444444444444444'),
+        displayName: '售前客服',
+        status: 'active',
+      },
     ];
     const one = await service.execute('Bearer token', { intent: 'open_management_console' });
     expect(one).toEqual({
       action: 'open_management_console',
-      url: 'https://console.example.test/manage',
-      assistant: { assistant_ref: '44444444444444444444444444444444', status: 'active' },
+      url: 'https://console.example.test/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444',
+      assistant: {
+        assistant_ref: '44444444444444444444444444444444',
+        display_name: '售前客服',
+        status: 'active',
+      },
     });
-    expect(one.action === 'open_management_console' ? one.url : '').not.toContain(
-      '22222222222222222222222222222222',
-    );
+    expect(one.action === 'open_management_console' ? one.url : '').not.toContain('token');
 
     repository.assistants = [
-      { id: toAssistantId('44444444444444444444444444444444'), status: 'active' },
-      { id: toAssistantId('55555555555555555555555555555555'), status: 'paused' },
+      {
+        id: toAssistantId('44444444444444444444444444444444'),
+        displayName: '售前客服',
+        status: 'active',
+      },
+      {
+        id: toAssistantId('55555555555555555555555555555555'),
+        displayName: '售后客服',
+        status: 'paused',
+      },
     ];
     const many = await service.execute('Bearer token', { intent: 'open_management_console' });
     expect(many.action).toBe('select_assistant');
     if (many.action === 'select_assistant') {
       expect(many.selection_required).toBe(true);
       expect(many.assistants).toHaveLength(2);
+      expect(many.assistants.map((assistant) => assistant.display_name)).toEqual([
+        '售前客服',
+        '售后客服',
+      ]);
     }
+
+    await expect(
+      service.execute('Bearer token', {
+        intent: 'open_management_console',
+        assistant_ref: '55555555555555555555555555555555',
+      }),
+    ).resolves.toEqual({
+      action: 'open_management_console',
+      url: 'https://console.example.test/workspace/22222222222222222222222222222222/assistants/55555555555555555555555555555555',
+      assistant: {
+        assistant_ref: '55555555555555555555555555555555',
+        display_name: '售后客服',
+        status: 'paused',
+      },
+    });
+    await expect(
+      service.execute('Bearer token', {
+        intent: 'open_management_console',
+        assistant_ref: '66666666666666666666666666666666',
+      }),
+    ).rejects.toThrow('The assistant is not available to this merchant');
   });
 
   it('routes first-time creation to the existing assistant instead of starting another onboarding', async () => {
@@ -482,7 +521,11 @@ describe('Skill onboarding application service', () => {
       'https://console.example.test/manage',
     );
     repository.assistants = [
-      { id: toAssistantId('44444444444444444444444444444444'), status: 'active' },
+      {
+        id: toAssistantId('44444444444444444444444444444444'),
+        displayName: '售前客服',
+        status: 'active',
+      },
     ];
 
     await expect(
@@ -492,12 +535,20 @@ describe('Skill onboarding application service', () => {
       }),
     ).resolves.toEqual({
       action: 'open_management_console',
-      url: 'https://console.example.test/manage',
-      assistant: { assistant_ref: '44444444444444444444444444444444', status: 'active' },
+      url: 'https://console.example.test/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444',
+      assistant: {
+        assistant_ref: '44444444444444444444444444444444',
+        display_name: '售前客服',
+        status: 'active',
+      },
     });
     repository.assistants = [
       ...repository.assistants,
-      { id: toAssistantId('55555555555555555555555555555555'), status: 'paused' },
+      {
+        id: toAssistantId('55555555555555555555555555555555'),
+        displayName: '售后客服',
+        status: 'paused',
+      },
     ];
     const multiple = await service.execute('Bearer token', { intent: 'create_customer_service' });
     expect(multiple.action).toBe('select_assistant');

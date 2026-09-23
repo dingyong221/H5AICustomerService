@@ -119,6 +119,7 @@ describe('onboarding API client boundary', () => {
                 action: 'open_management_console',
                 assistant: {
                   assistant_ref: '44444444444444444444444444444444',
+                  display_name: '售前客服',
                   status: 'active',
                 },
                 url: 'https://merchant.test/workspace',
@@ -134,7 +135,11 @@ describe('onboarding API client boundary', () => {
 
     await expect(client.startOrResume({ idempotencyKey: 'reserved-key' })).resolves.toEqual({
       action: 'open_management_console',
-      assistant: { assistant_ref: '44444444444444444444444444444444', status: 'active' },
+      assistant: {
+        assistant_ref: '44444444444444444444444444444444',
+        display_name: '售前客服',
+        status: 'active',
+      },
       url: 'https://merchant.test/workspace',
     });
   });
@@ -155,6 +160,7 @@ describe('onboarding API client boundary', () => {
                   action: 'open_management_console',
                   assistant: {
                     assistant_ref: '44444444444444444444444444444444',
+                    display_name: '售前客服',
                     status: 'active',
                   },
                   url,
@@ -184,8 +190,16 @@ describe('onboarding API client boundary', () => {
               data: {
                 action: 'select_assistant',
                 assistants: [
-                  { assistant_ref: '44444444444444444444444444444444', status: 'active' },
-                  { assistant_ref: '55555555555555555555555555555555', status: 'paused' },
+                  {
+                    assistant_ref: '44444444444444444444444444444444',
+                    display_name: '售前客服',
+                    status: 'active',
+                  },
+                  {
+                    assistant_ref: '55555555555555555555555555555555',
+                    display_name: '售后客服',
+                    status: 'paused',
+                  },
                 ],
                 selection_required: true,
                 url: 'https://merchant.test/workspace',
@@ -202,6 +216,44 @@ describe('onboarding API client boundary', () => {
     await expect(client.startOrResume({ idempotencyKey: 'reserved-key' })).resolves.toMatchObject({
       action: 'select_assistant',
       selection_required: true,
+    });
+  });
+
+  it('sends an explicit assistant selection and accepts only a confirmed management link', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: {
+              action: 'open_management_console',
+              assistant: {
+                assistant_ref: '55555555555555555555555555555555',
+                display_name: '售后客服',
+                status: 'paused',
+              },
+              url: 'https://merchant.test/workspace/22222222222222222222222222222222/assistants/55555555555555555555555555555555',
+            },
+            request_id: 'request-selected',
+          }),
+          { status: 200 },
+        ),
+    );
+    const client = createOnboardingApiClient({
+      apiBaseUrl: '/api/v1/skill',
+      fetchImpl,
+      getAccessToken: () => 'token',
+      origin: 'https://merchant.test',
+    });
+
+    await expect(
+      client.openManagement({
+        assistantRef: '55555555555555555555555555555555',
+        idempotencyKey: 'reserved-key',
+      }),
+    ).resolves.toMatchObject({ action: 'open_management_console' });
+    expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body))).toEqual({
+      intent: 'open_management_console',
+      assistant_ref: '55555555555555555555555555555555',
     });
   });
 

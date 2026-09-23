@@ -24,7 +24,10 @@ export default async function AssistantDraftPage({
   const { merchantId, assistantId } = await params;
   if (!/^[0-9a-f]{32}$/u.test(merchantId) || !/^[0-9a-f]{32}$/u.test(assistantId)) notFound();
   const session = await currentMerchant(merchantId);
-  if (!session) redirect(`/account/login?merchant=${merchantId}`);
+  if (!session) {
+    const nextPath = `/workspace/${merchantId}/assistants/${assistantId}`;
+    redirect(`/account/login?merchant=${merchantId}&next=${encodeURIComponent(nextPath)}`);
+  }
   const database = loadDatabaseConfig();
   if (!database.configured) return <p role="alert">数据库尚未配置，无法读取客服草稿。</p>;
   let assistant;

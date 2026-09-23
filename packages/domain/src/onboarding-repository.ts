@@ -13,6 +13,7 @@ export type VerifiedExternalIdentity = Readonly<{
 
 export type AssistantManagementRecord = Readonly<{
   id: AssistantId;
+  displayName: string;
   status: string;
 }>;
 

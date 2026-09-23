@@ -131,18 +131,20 @@ export function buildWorkBuddyIdentityViewModel(
 }
 
 function toLoginGate(rawManagementUrl: string | undefined, applicationOrigin: string): string {
-  let nextPath = '/';
-
-  if (rawManagementUrl !== undefined) {
-    try {
-      const target = new URL(rawManagementUrl);
-      if (target.origin === applicationOrigin) nextPath = `${target.pathname}${target.search}`;
-    } catch {
-      nextPath = '/';
-    }
+  if (rawManagementUrl === undefined) return '/account/login';
+  try {
+    const target = new URL(rawManagementUrl);
+    if (target.origin !== applicationOrigin || target.search || target.hash)
+      return '/account/login';
+    const merchantId = /^\/workspace\/([0-9a-f]{32})(?:\/|$)/u.exec(target.pathname)?.[1];
+    if (!merchantId) return '/account/login';
+    const allowedPath = new RegExp(`^/workspace/${merchantId}(?:/assistants/[0-9a-f]{32})?$`, 'u');
+    return allowedPath.test(target.pathname)
+      ? `/account/login?merchant=${merchantId}&next=${encodeURIComponent(target.pathname)}`
+      : '/account/login';
+  } catch {
+    return '/account/login';
   }
-
-  return `/login?next=${encodeURIComponent(nextPath)}`;
 }
 
 export function buildWorkBuddyEntryViewModel(input: {

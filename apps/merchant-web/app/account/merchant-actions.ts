@@ -11,6 +11,8 @@ import {
   MySqlMerchantAccessRepository,
 } from '@h5cs/database';
 
+import { safeMerchantReturnPath } from './merchant-return-path';
+
 export type MerchantAccessState = Readonly<{ error: string | null }>;
 
 const getRepository = (): MySqlMerchantAccessRepository | null => {
@@ -144,6 +146,7 @@ export async function loginMerchant(
   const phone = formData.get('phone');
   const password = formData.get('password');
   const merchantIdInput = formData.get('merchantId');
+  const nextPathInput = formData.get('nextPath');
   if (typeof phone !== 'string' || typeof password !== 'string') {
     return { error: '请输入手机号和密码。' };
   }
@@ -163,5 +166,5 @@ export async function loginMerchant(
       error: error instanceof MerchantAccessError ? error.message : '登录失败，请稍后重试。',
     };
   }
-  redirect(`/workspace/${merchantId}`);
+  redirect(safeMerchantReturnPath(merchantId, nextPathInput) ?? `/workspace/${merchantId}`);
 }

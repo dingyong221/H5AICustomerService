@@ -59,6 +59,18 @@ describe('shared contracts', () => {
     expect(skillIntentRequestSchema.parse({ intent: 'open_management_console' }).intent).toBe(
       'open_management_console',
     );
+    expect(
+      skillIntentRequestSchema.parse({
+        intent: 'open_management_console',
+        assistant_ref: '44444444444444444444444444444444',
+      }),
+    ).toMatchObject({ assistant_ref: '44444444444444444444444444444444' });
+    expect(() =>
+      skillIntentRequestSchema.parse({
+        intent: 'open_management_console',
+        assistant_ref: '../other-merchant',
+      }),
+    ).toThrow();
     expect(skillIntentRequestSchema.parse({ intent: 'help' }).intent).toBe('help');
     expect(() =>
       skillIntentRequestSchema.parse({

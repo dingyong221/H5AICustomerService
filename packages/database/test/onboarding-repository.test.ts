@@ -124,6 +124,7 @@ describe('MySQL onboarding repository merchant binding', () => {
       repository.listAssistants(toMerchantId('22222222222222222222222222222222'), merchantUserId),
     ).resolves.toEqual([]);
     expect(calls[0]?.sql).toMatch(/mm\.merchant_user_id = \?/u);
+    expect(calls[0]?.sql).toMatch(/a\.display_name/u);
     expect(calls[0]?.sql).toMatch(/mm\.status = 'active' AND u\.status = 'active'/u);
     expect(calls[0]?.values).toEqual([
       Buffer.from('22222222222222222222222222222222', 'hex'),

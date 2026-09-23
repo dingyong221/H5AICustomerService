@@ -39,6 +39,10 @@ const createCustomerServiceIntentSchema = z
 const openManagementConsoleIntentSchema = z
   .object({
     intent: z.literal('open_management_console'),
+    assistant_ref: z
+      .string()
+      .regex(/^[0-9a-f]{32}$/u)
+      .optional(),
   })
   .strict();
 
@@ -67,6 +71,7 @@ export const skillIntentResultSchema = z.discriminatedUnion('action', [
     url: z.string().url(),
     assistant: z.object({
       assistant_ref: z.string().min(1).max(128),
+      display_name: z.string().min(1).max(200),
       status: z.string().min(1).max(32),
     }),
   }),
@@ -82,6 +87,7 @@ export const skillIntentResultSchema = z.discriminatedUnion('action', [
       .array(
         z.object({
           assistant_ref: z.string().min(1).max(128),
+          display_name: z.string().min(1).max(200),
           status: z.string().min(1).max(32),
         }),
       )

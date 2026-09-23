@@ -9,6 +9,7 @@ import {
 } from '@h5cs/domain';
 
 import {
+  AssistantSelectionNotFoundError,
   ManagementConsoleUnavailableError,
   MerchantBindingRequiredError,
   OnboardingSessionNotFoundError,
@@ -66,7 +67,10 @@ export const safeSkillHttpException = (error: unknown): HttpException | undefine
     );
   }
 
-  if (error instanceof OnboardingSessionNotFoundError) {
+  if (
+    error instanceof OnboardingSessionNotFoundError ||
+    error instanceof AssistantSelectionNotFoundError
+  ) {
     return new HttpException(
       safeBody('NOT_FOUND', 'Requested resource is unavailable', false),
       HttpStatus.NOT_FOUND,

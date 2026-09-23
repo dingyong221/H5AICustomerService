@@ -91,6 +91,8 @@ export function OnboardingForm({ apiBaseUrl, authorization }: OnboardingFormProp
   const [existingManagement, setExistingManagement] = useState<ExistingAssistantResult | null>(
     null,
   );
+  const [selectingAssistant, setSelectingAssistant] = useState<string | null>(null);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
   const [interaction, dispatch] = useReducer(
     reduceOnboardingInteraction,
     initialOnboardingInteractionState,
@@ -161,6 +163,27 @@ export function OnboardingForm({ apiBaseUrl, authorization }: OnboardingFormProp
             ? error
             : new OnboardingClientError('request_failed', '无法确认已有客服或引导进度。'),
       });
+    }
+  };
+
+  const selectAssistant = async (assistantRef: string) => {
+    if (!apiConfigured || !authorized || selectingAssistant !== null) return;
+    setSelectingAssistant(assistantRef);
+    setSelectionError(null);
+    try {
+      const selected = await client.openManagement({
+        assistantRef,
+        idempotencyKey: createIdempotencyKey(),
+      });
+      setExistingManagement(selected);
+    } catch (error) {
+      setSelectionError(
+        error instanceof OnboardingClientError
+          ? error.message
+          : '无法确认所选客服，请重新检查可访问列表。',
+      );
+    } finally {
+      setSelectingAssistant(null);
     }
   };
 
@@ -256,10 +279,33 @@ export function OnboardingForm({ apiBaseUrl, authorization }: OnboardingFormProp
           <h2>已找到这个商家的 AI 客服</h2>
           <p>
             {existingManagement.action === 'select_assistant'
-              ? `当前有 ${existingManagement.assistants.length} 个客服，请在后台明确选择。`
+              ? `当前有 ${existingManagement.assistants.length} 个客服，请明确选择要管理的客服。`
               : '无需再次生成。请在现有后台核对资料、管理知识和发布版本。'}
           </p>
-          <a href={existingManagement.url}>打开商家管理后台</a>
+          {existingManagement.action === 'select_assistant' ? (
+            <>
+              <ul>
+                {existingManagement.assistants.map((assistant) => (
+                  <li key={assistant.assistant_ref}>
+                    <strong>{assistant.display_name}</strong>（{assistant.status}）{' '}
+                    <Button
+                      disabled={selectingAssistant !== null}
+                      onClick={() => void selectAssistant(assistant.assistant_ref)}
+                      variant="secondary"
+                    >
+                      {selectingAssistant === assistant.assistant_ref ? '正在确认…' : '选择此客服'}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+              {selectionError ? <p role="alert">{selectionError}</p> : null}
+              <a href={existingManagement.url}>或在商家工作台选择</a>
+            </>
+          ) : (
+            <a href={existingManagement.url}>
+              打开「{existingManagement.assistant.display_name}」的管理后台
+            </a>
+          )}
         </section>
       ) : null}
 

@@ -287,10 +287,12 @@ export class MySqlOnboardingRepository implements OnboardingRepository {
   public async listAssistants(
     merchantId: MerchantId,
     merchantUserId: MerchantUserId,
-  ): Promise<readonly { id: AssistantId; status: string }[]> {
+  ): Promise<readonly { id: AssistantId; displayName: string; status: string }[]> {
     return this.#withConnection(async (connection) => {
-      const [rows] = await connection.execute<(RowDataPacket & { id: Buffer; status: string })[]>(
-        `SELECT a.id, a.status
+      const [rows] = await connection.execute<
+        (RowDataPacket & { id: Buffer; display_name: string; status: string })[]
+      >(
+        `SELECT a.id, a.display_name, a.status
            FROM assistant a
            JOIN merchant m ON m.id = a.merchant_id
            JOIN merchant_membership mm ON mm.merchant_id = m.id
@@ -301,7 +303,11 @@ export class MySqlOnboardingRepository implements OnboardingRepository {
           ORDER BY a.created_at ASC, a.id ASC`,
         [stringToId(merchantId), stringToId(merchantUserId)],
       );
-      return rows.map((row) => ({ id: toAssistantId(idToString(row.id)), status: row.status }));
+      return rows.map((row) => ({
+        id: toAssistantId(idToString(row.id)),
+        displayName: row.display_name,
+        status: row.status,
+      }));
     });
   }
 
