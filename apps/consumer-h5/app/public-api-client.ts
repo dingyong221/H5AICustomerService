@@ -113,6 +113,7 @@ export interface PublicAssistantApiClient {
     snapshot: OnlinePublicAssistantSnapshot;
     signal?: AbortSignal | undefined;
   }): Promise<PublicSession>;
+  endSession(input: { sessionHandle: string; signal?: AbortSignal | undefined }): Promise<boolean>;
   loadAssistant(
     publicSlug: string,
     signal?: AbortSignal | undefined,
@@ -839,6 +840,44 @@ export function createPublicAssistantApiClient(
         throw new PublicApiClientError('invalid_response', '咨询记录与当前会话不匹配。');
       }
       return history;
+    },
+
+    async endSession({ sessionHandle, signal }) {
+      if (sessionHandleRef(sessionHandle) === undefined) {
+        throw new PublicApiClientError('invalid_input', '咨询会话标识无效。');
+      }
+      let response: Response;
+      try {
+        response = await fetchImpl(endpointFor(`sessions/${sessionHandle}/end`), {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' },
+          method: 'POST',
+          redirect: 'error',
+          ...(signal === undefined ? {} : { signal }),
+        });
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        throw new PublicApiClientError('unavailable', '无法结束原咨询，请重试。', {
+          retryable: true,
+        });
+      }
+      if (response.status === 404) return false;
+      if (response.status !== 200) {
+        throw new PublicApiClientError('request_failed', '服务端未确认结束原咨询。', {
+          ...(await readFailureOptions(response, response.status >= 500)),
+        });
+      }
+      const data = decodeEnvelope(await readJson(response));
+      if (
+        !data ||
+        !hasExactKeys(data, ['sessionHandle', 'state']) ||
+        data['sessionHandle'] !== sessionHandle ||
+        data['state'] !== 'ended'
+      ) {
+        throw new PublicApiClientError('invalid_response', '结束咨询结果无效。');
+      }
+      return true;
     },
 
     async sendMessage({ clientMessageId, content, sessionHandle, signal }) {

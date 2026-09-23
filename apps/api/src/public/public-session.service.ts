@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 
 import {
   BadRequestException,
+  ConflictException,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -10,11 +11,16 @@ import {
   loadDatabaseConfig,
   MySqlPublicSessionRepository,
   PublicSessionUnavailableError,
+  PublicTurnConflictError,
 } from '@h5cs/database';
-import type { PublicSessionCreated, PublicSessionHistory } from '@h5cs/database';
+import type {
+  PublicSessionCreated,
+  PublicSessionEnded,
+  PublicSessionHistory,
+} from '@h5cs/database';
 
 type SessionIssuer = Pick<MySqlPublicSessionRepository, 'createSession'> &
-  Partial<Pick<MySqlPublicSessionRepository, 'resumeSession' | 'readHistory'>>;
+  Partial<Pick<MySqlPublicSessionRepository, 'resumeSession' | 'readHistory' | 'endSession'>>;
 
 const visitorCookieSeconds = 30 * 24 * 60 * 60;
 
@@ -164,6 +170,25 @@ export class PublicSessionService {
       return history;
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
+      throw new ServiceUnavailableException('Conversation service unavailable');
+    }
+  }
+
+  public async end(
+    sessionHandle: string,
+    cookieHeader: string | undefined,
+  ): Promise<PublicSessionEnded> {
+    if (!this.issuer?.endSession) {
+      throw new ServiceUnavailableException('Conversation service unavailable');
+    }
+    const nonce = this.visitorNonce(cookieHeader);
+    if (!nonce) throw new NotFoundException('Session not available');
+    try {
+      return await this.issuer.endSession({ sessionHandle, visitorNonce: nonce, now: new Date() });
+    } catch (error) {
+      if (error instanceof PublicSessionUnavailableError)
+        throw new NotFoundException('Session not available');
+      if (error instanceof PublicTurnConflictError) throw new ConflictException(error.code);
       throw new ServiceUnavailableException('Conversation service unavailable');
     }
   }

@@ -2,6 +2,8 @@ import { HttpStatus, Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { describe, expect, it, vi } from 'vitest';
 
+import { PublicTurnConflictError } from '@h5cs/database';
+
 import { AppModule } from '../src/app.module.js';
 import type { EventStreamResponseLike } from '../src/http-types.js';
 import { PublicSessionService } from '../src/public/public-session.service.js';
@@ -121,6 +123,34 @@ describe('public visitor session issuance', () => {
     expect(readHistory).toHaveBeenCalledWith(session.sessionHandle, nonce, expect.any(Date));
   });
 
+  it('requires the visitor cookie to end a session and preserves an in-flight conflict', async () => {
+    const nonce = 'A'.repeat(43);
+    const endSession = vi.fn(async () => ({
+      sessionHandle: session.sessionHandle,
+      state: 'ended' as const,
+    }));
+    const service = new PublicSessionService(
+      { createSession: vi.fn(async () => session), endSession },
+      true,
+    );
+    await expect(service.end(session.sessionHandle, undefined)).rejects.toMatchObject({
+      status: HttpStatus.NOT_FOUND,
+    });
+    expect(endSession).not.toHaveBeenCalled();
+    await expect(
+      service.end(session.sessionHandle, `__Host-h5cs_visitor=${nonce}`),
+    ).resolves.toEqual({ sessionHandle: session.sessionHandle, state: 'ended' });
+    expect(endSession).toHaveBeenCalledWith({
+      sessionHandle: session.sessionHandle,
+      visitorNonce: nonce,
+      now: expect.any(Date),
+    });
+    endSession.mockRejectedValueOnce(new PublicTurnConflictError('TURN_IN_PROGRESS'));
+    await expect(
+      service.end(session.sessionHandle, `__Host-h5cs_visitor=${nonce}`),
+    ).rejects.toMatchObject({ status: HttpStatus.CONFLICT });
+  });
+
   it('keeps the actual public session route unavailable before the full conversation runtime is ready', async () => {
     const previous = process.env['PUBLIC_CONVERSATION_ENABLED'];
     process.env['PUBLIC_CONVERSATION_ENABLED'] = 'false';
@@ -140,12 +170,18 @@ describe('public visitor session issuance', () => {
       const history = await fetch(
         `${await app.getUrl()}/api/v1/public/sessions/${session.sessionHandle}/history`,
       );
+      const ended = await fetch(
+        `${await app.getUrl()}/api/v1/public/sessions/${session.sessionHandle}/end`,
+        { method: 'POST' },
+      );
       expect(response.status).toBe(HttpStatus.SERVICE_UNAVAILABLE);
       expect(response.headers.get('set-cookie')).toBeNull();
       expect(resumed.status).toBe(HttpStatus.SERVICE_UNAVAILABLE);
       expect(history.status).toBe(HttpStatus.SERVICE_UNAVAILABLE);
+      expect(ended.status).toBe(HttpStatus.SERVICE_UNAVAILABLE);
       expect(resumed.headers.get('cache-control')).toBe('no-store');
       expect(history.headers.get('cache-control')).toBe('no-store');
+      expect(ended.headers.get('cache-control')).toBe('no-store');
     } finally {
       await app.close();
       if (previous === undefined) delete process.env['PUBLIC_CONVERSATION_ENABLED'];

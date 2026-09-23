@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 
-import type { Connection, RowDataPacket } from 'mysql2/promise';
+import type { Connection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
 import type { DatabaseConnectionConfig } from './config.js';
 
@@ -62,6 +62,11 @@ type ActiveSessionRow = RowDataPacket & {
   next_sequence: number;
 };
 
+type EndSessionRow = RowDataPacket & {
+  status: string;
+  active_turn_id: Buffer | null;
+};
+
 type TurnMessageRow = RowDataPacket & {
   id: Buffer;
   seq_no: number;
@@ -80,6 +85,8 @@ export type PublicSessionCreated = Readonly<{
   state: 'active';
   createdAt: string;
 }>;
+
+export type PublicSessionEnded = Readonly<{ sessionHandle: string; state: 'ended' }>;
 
 export type PublicSessionContext = Readonly<{
   sessionId: string;
@@ -535,6 +542,44 @@ export class MySqlPublicSessionRepository {
     } finally {
       await connection.end();
     }
+  }
+
+  public async endSession(input: {
+    sessionHandle: string;
+    visitorNonce: string;
+    now: Date;
+  }): Promise<PublicSessionEnded> {
+    const handle = this.#authorizedHandle(input.sessionHandle, input.visitorNonce);
+    if (!handle || !Number.isFinite(input.now.getTime())) {
+      throw new PublicSessionUnavailableError();
+    }
+    return this.#withTransaction(async (connection) => {
+      const [rows] = await connection.execute<EndSessionRow[]>(
+        `SELECT status, active_turn_id
+           FROM conversation_session
+          WHERE id = ? AND visitor_credential_id = ?
+          LIMIT 1 FOR UPDATE`,
+        [handle.sessionId, handle.visitorCredentialId],
+      );
+      const session = rows[0];
+      if (!session || (session.status !== 'active' && session.status !== 'ended')) {
+        throw new PublicSessionUnavailableError();
+      }
+      if (session.status === 'ended') {
+        return { sessionHandle: input.sessionHandle, state: 'ended' };
+      }
+      if (session.active_turn_id) throw new PublicTurnConflictError('TURN_IN_PROGRESS');
+      const [updated] = await connection.execute<ResultSetHeader>(
+        `UPDATE conversation_session
+            SET status = 'ended', ended_at = ?, ended_reason = 'visitor_restart',
+                last_activity_at = ?, expires_at = ?, updated_at = ?, version = version + 1
+          WHERE id = ? AND visitor_credential_id = ? AND status = 'active'
+            AND active_turn_id IS NULL`,
+        [input.now, input.now, input.now, input.now, handle.sessionId, handle.visitorCredentialId],
+      );
+      if (updated.affectedRows !== 1) throw new PublicSessionUnavailableError();
+      return { sessionHandle: input.sessionHandle, state: 'ended' };
+    });
   }
 
   public async acceptTurn(input: {

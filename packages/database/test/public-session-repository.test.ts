@@ -309,6 +309,59 @@ describe('MySQL public visitor sessions', () => {
     ).resolves.toBeNull();
   });
 
+  it('ends a bound session once and rejects another visitor or an in-flight turn', async () => {
+    let issuedSessionId: Buffer | undefined;
+    let issuedCredentialId: Buffer | undefined;
+    let status = 'active';
+    let activeTurnId: Buffer | null = null;
+    const { repository, calls } = repositoryWith(async (statement, values) => {
+      if (statement.includes('SELECT cs.release_id')) return [[], []];
+      if (statement.includes('SELECT a.id AS assistant_id')) {
+        return [
+          [{ assistant_id: assistantId, merchant_id: merchantId, release_id: releaseId }],
+          [],
+        ];
+      }
+      if (statement.includes('INSERT INTO conversation_session')) {
+        issuedSessionId = values[0] as Buffer;
+        issuedCredentialId = values[4] as Buffer;
+      }
+      if (statement.includes('SELECT status, active_turn_id')) {
+        return [
+          (values[0] as Buffer).equals(issuedSessionId!) &&
+          (values[1] as Buffer).equals(issuedCredentialId!)
+            ? [{ status, active_turn_id: activeTurnId }]
+            : [],
+          [],
+        ];
+      }
+      if (statement.includes("SET status = 'ended'")) status = 'ended';
+      return [resultHeader, []];
+    });
+    const issued = await repository.createSession({
+      publicSlug,
+      sessionRequestId,
+      visitorNonce,
+      now,
+    });
+    const input = { sessionHandle: issued.sessionHandle, visitorNonce, now };
+    activeTurnId = Buffer.from('88'.repeat(16), 'hex');
+    await expect(repository.endSession(input)).rejects.toMatchObject({ code: 'TURN_IN_PROGRESS' });
+    activeTurnId = null;
+    await expect(repository.endSession(input)).resolves.toEqual({
+      sessionHandle: issued.sessionHandle,
+      state: 'ended',
+    });
+    await expect(repository.endSession(input)).resolves.toEqual({
+      sessionHandle: issued.sessionHandle,
+      state: 'ended',
+    });
+    await expect(
+      repository.endSession({ ...input, visitorNonce: randomBytes(32).toString('base64url') }),
+    ).rejects.toBeInstanceOf(PublicSessionUnavailableError);
+    expect(calls.filter((call) => call.statement.includes("SET status = 'ended'"))).toHaveLength(1);
+  });
+
   it('accepts one message and queues one durable job, then returns the same turn on retry', async () => {
     let credentialId: Buffer | undefined;
     let activeTurnId: Buffer | null = null;

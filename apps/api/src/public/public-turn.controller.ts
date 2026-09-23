@@ -21,6 +21,17 @@ export class PublicTurnController {
     return this.sessions.history(sessionHandle, cookieHeader);
   }
 
+  @Post('/:sessionHandle/end')
+  @HttpCode(200)
+  public async end(
+    @Param('sessionHandle') sessionHandle: string,
+    @Headers('cookie') cookieHeader: string | undefined,
+    @Res({ passthrough: true }) response: ResponseLike,
+  ) {
+    response.setHeader('Cache-Control', 'no-store');
+    return this.sessions.end(sessionHandle, cookieHeader);
+  }
+
   @Post('/:sessionHandle/messages')
   @HttpCode(202)
   public async send(

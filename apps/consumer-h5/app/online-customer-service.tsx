@@ -81,6 +81,7 @@ export function OnlineCustomerService({
   const [conversation, setConversation] = useState<ConversationState>(initialConversationState);
   const [activeSnapshot, setActiveSnapshot] = useState(snapshot);
   const [draft, setDraft] = useState('');
+  const [ending, setEnding] = useState(false);
   const [restoreStatus, setRestoreStatus] = useState<'restoring' | 'ready' | 'failed'>('restoring');
   const [restoreAttempt, setRestoreAttempt] = useState(0);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
@@ -270,6 +271,7 @@ export function OnlineCustomerService({
     const content = draft.trim();
     if (
       restoreStatus !== 'ready' ||
+      ending ||
       content.length === 0 ||
       content.length > 2_000 ||
       conversation.pending !== undefined
@@ -290,8 +292,42 @@ export function OnlineCustomerService({
     setConversation(nextState);
   }
 
+  async function startNewConsultation(): Promise<void> {
+    const session = conversation.session;
+    if (
+      !session ||
+      conversation.pending !== undefined ||
+      ending ||
+      !window.confirm('结束本次咨询并开始新的咨询？当前对话上下文不会带入新咨询。')
+    ) {
+      return;
+    }
+    const controller = new AbortController();
+    activeController.current = controller;
+    setEnding(true);
+    try {
+      const client = createPublicAssistantApiClient({
+        apiBaseUrl,
+        origin: window.location.origin,
+      });
+      await client.endSession({ sessionHandle: session.sessionHandle, signal: controller.signal });
+      try {
+        clearSessionReference(window.sessionStorage, publicSlug);
+      } catch {
+        // Browser storage is optional; reloading still starts a fresh consultation.
+      }
+      sessionRequestIdRef.current = null;
+      window.location.reload();
+    } catch (error) {
+      if (!controller.signal.aborted) setRecoveryNotice(failureDetails(error).message);
+    } finally {
+      if (activeController.current === controller) activeController.current = undefined;
+      setEnding(false);
+    }
+  }
+
   const pending = conversation.pending;
-  const inputDisabled = restoreStatus !== 'ready' || pending !== undefined;
+  const inputDisabled = restoreStatus !== 'ready' || pending !== undefined || ending;
 
   return (
     <main className="consumer-page">
@@ -309,6 +345,16 @@ export function OnlineCustomerService({
               <p>{activeSnapshot.merchantDisplayName} · 在线</p>
             </div>
           </div>
+          {conversation.session ? (
+            <button
+              className="new-consultation-button"
+              disabled={pending !== undefined || ending}
+              onClick={() => void startNewConsultation()}
+              type="button"
+            >
+              {ending ? '正在结束…' : '新建咨询'}
+            </button>
+          ) : null}
         </header>
 
         <aside className="scope-notice">

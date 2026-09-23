@@ -360,6 +360,39 @@ describe('public assistant API client', () => {
     ]);
   });
 
+  it('ends only the selected session with its visitor cookie and validates the confirmation', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(envelope({ sessionHandle, state: 'ended' })))
+      .mockResolvedValueOnce(jsonResponse({}, 404))
+      .mockResolvedValueOnce(
+        jsonResponse(envelope({ sessionHandle: otherSessionHandle, state: 'ended' })),
+      )
+      .mockResolvedValueOnce(jsonResponse({}, 503));
+    const client = createPublicAssistantApiClient({
+      apiBaseUrl: '/api/v1/public',
+      fetchImpl,
+      origin,
+    });
+
+    await expect(client.endSession({ sessionHandle })).resolves.toBe(true);
+    await expect(client.endSession({ sessionHandle })).resolves.toBe(false);
+    await expect(client.endSession({ sessionHandle })).rejects.toMatchObject({
+      kind: 'invalid_response',
+    });
+    await expect(client.endSession({ sessionHandle })).rejects.toMatchObject({
+      kind: 'request_failed',
+    });
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(
+      `${origin}/api/v1/public/sessions/${sessionHandle}/end`,
+    );
+    expect(fetchImpl.mock.calls[0]?.[1]).toMatchObject({
+      cache: 'no-store',
+      credentials: 'same-origin',
+      method: 'POST',
+    });
+  });
+
   it('fails closed for unknown, paused, malformed, and unavailable snapshots', async () => {
     const responses = [
       jsonResponse({}, 404),
