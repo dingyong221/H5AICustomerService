@@ -252,6 +252,70 @@ describe('public API response decoders', () => {
 });
 
 describe('public assistant API client', () => {
+  it('reads same-origin SSE states with cookies and a validated terminal result', async () => {
+    const turnId = 'turn_1234567890';
+    const clientMessageId = 'message_client_1234567890';
+    const accepted = {
+      messages: [
+        {
+          clientMessageId,
+          content: '多少钱？',
+          createdAt: '2026-09-21T08:00:00.000Z',
+          messageId: 'server_message_1',
+          role: 'visitor',
+          sequence: 1,
+        },
+      ],
+      sessionHandle,
+      state: 'accepted',
+      traceId: 'trace_1234567890',
+      turnId,
+    };
+    const completed = {
+      ...accepted,
+      messages: [
+        ...accepted.messages,
+        {
+          content: '请以商家最终报价为准。',
+          createdAt: '2026-09-21T08:00:01.000Z',
+          messageId: 'server_message_2',
+          role: 'assistant',
+          sequence: 2,
+        },
+      ],
+      state: 'completed',
+    };
+    const stream = `event: accepted\ndata: ${JSON.stringify(accepted)}\n\n: keepalive\n\nevent: completed\ndata: ${JSON.stringify(completed)}\n\n`;
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () =>
+        new Response(stream, { headers: { 'Content-Type': 'text/event-stream; charset=utf-8' } }),
+    );
+    const client = createPublicAssistantApiClient({
+      apiBaseUrl: '/api/v1/public',
+      fetchImpl,
+      origin,
+    });
+    const received = [];
+    for await (const result of client.streamTurn({
+      clientMessageId,
+      eventsUrl: `${origin}/api/v1/public/sessions/${sessionHandle}/turns/${turnId}/events`,
+      sessionHandle,
+      turnId,
+    })) {
+      received.push(result.state);
+    }
+    expect(received).toEqual(['accepted', 'completed']);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      `${origin}/api/v1/public/sessions/${sessionHandle}/turns/${turnId}/events`,
+      expect.objectContaining({
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { Accept: 'text/event-stream' },
+        method: 'GET',
+      }),
+    );
+  });
+
   it('uses same-origin credentialed GETs for resume and history', async () => {
     const session = {
       createdAt: '2026-09-21T08:00:00.000Z',

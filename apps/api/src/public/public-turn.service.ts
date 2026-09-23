@@ -31,10 +31,25 @@ const originFrom = (value: string | undefined, production: boolean): string | nu
   }
 };
 
+const waitForPoll = (milliseconds: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve) => {
+    if (signal.aborted) return resolve();
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+
 export class PublicTurnService {
   public constructor(
     private readonly store: TurnStore | null,
     private readonly origin: string | null,
+    private readonly pollIntervalMs = 1_000,
   ) {}
 
   public static fromEnvironment(environment: NodeJS.ProcessEnv = process.env): PublicTurnService {
@@ -121,6 +136,26 @@ export class PublicTurnService {
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
       throw new ServiceUnavailableException('Conversation service unavailable');
+    }
+  }
+
+  public async *stream(
+    sessionHandle: string,
+    visitorNonce: string | null,
+    turnId: string,
+    signal: AbortSignal,
+    first: PublicTurnResult,
+  ): AsyncGenerator<PublicTurnResult> {
+    let previousState = first.state;
+    while (previousState !== 'completed' && previousState !== 'failed' && !signal.aborted) {
+      await waitForPoll(this.pollIntervalMs, signal);
+      if (signal.aborted) return;
+      const result = await this.read(sessionHandle, visitorNonce, turnId);
+      if (signal.aborted) return;
+      if (result.state !== previousState) {
+        previousState = result.state;
+        yield result;
+      }
     }
   }
 }

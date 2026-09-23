@@ -1,9 +1,11 @@
-import { HttpStatus } from '@nestjs/common';
+import { HttpStatus, Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { describe, expect, it, vi } from 'vitest';
 
 import { AppModule } from '../src/app.module.js';
+import type { EventStreamResponseLike } from '../src/http-types.js';
 import { PublicSessionService } from '../src/public/public-session.service.js';
+import { PublicTurnController } from '../src/public/public-turn.controller.js';
 import { PublicTurnService } from '../src/public/public-turn.service.js';
 
 const sessionRequestId = `session_request_${'11'.repeat(16)}`;
@@ -212,14 +214,133 @@ describe('public conversation turn contract', () => {
         body: JSON.stringify({ clientMessageId: messageId, content: '多少钱？' }),
       });
       const read = await fetch(`${base}/api/v1/public/sessions/${handle}/turns/${turnId}`);
+      const events = await fetch(
+        `${base}/api/v1/public/sessions/${handle}/turns/${turnId}/events`,
+        {
+          headers: { Accept: 'text/event-stream' },
+        },
+      );
       expect(sent.status).toBe(HttpStatus.SERVICE_UNAVAILABLE);
       expect(read.status).toBe(HttpStatus.SERVICE_UNAVAILABLE);
+      expect(events.status).toBe(HttpStatus.SERVICE_UNAVAILABLE);
       expect(sent.headers.get('cache-control')).toBe('no-store');
       expect(read.headers.get('cache-control')).toBe('no-store');
+      expect(events.headers.get('cache-control')).toBe('no-store');
     } finally {
       await app.close();
       if (previous === undefined) delete process.env['PUBLIC_CONVERSATION_ENABLED'];
       else process.env['PUBLIC_CONVERSATION_ENABLED'] = previous;
+    }
+  });
+
+  it('streams authorized turn state changes and closes at the terminal result', async () => {
+    const accepted = {
+      sessionHandle: handle,
+      turnId,
+      traceId: `trace_${'88'.repeat(16)}`,
+      state: 'accepted' as const,
+      messages: [],
+    };
+    const processing = { ...accepted, state: 'processing' as const };
+    const completed = { ...accepted, state: 'completed' as const };
+    const results = [accepted, processing, completed];
+    const readTurn = vi.fn(async () => results.shift() ?? completed);
+    const turns = new PublicTurnService(
+      { acceptTurn: vi.fn(), readTurn },
+      'https://h5cs.1rying.com',
+      1,
+    );
+    const controller = new PublicTurnController(turns, new PublicSessionService(null, true));
+    const headers = new Map<string, string>();
+    const written: string[] = [];
+    let ended = false;
+    const response: EventStreamResponseLike = {
+      setHeader(name: string, value: string) {
+        headers.set(name.toLowerCase(), value);
+      },
+      status() {
+        return this;
+      },
+      json() {
+        return undefined;
+      },
+      on() {},
+      write(chunk: string) {
+        written.push(chunk);
+        return true;
+      },
+      end() {
+        ended = true;
+      },
+    };
+    const nonce = 'A'.repeat(43);
+    await controller.events(handle, turnId, `__Host-h5cs_visitor=${nonce}`, response);
+    expect(readTurn).toHaveBeenCalledTimes(3);
+    expect(readTurn).toHaveBeenCalledWith(handle, nonce, turnId, expect.any(Date));
+    expect(written.map((chunk) => chunk.split('\n')[0])).toEqual([
+      'event: accepted',
+      'event: processing',
+      'event: completed',
+    ]);
+    expect(written.join('')).not.toContain(nonce);
+    expect(headers.get('content-type')).toBe('text/event-stream; charset=utf-8');
+    expect(headers.get('x-accel-buffering')).toBe('no');
+    expect(ended).toBe(true);
+    await expect(controller.events(handle, turnId, undefined, response)).rejects.toMatchObject({
+      status: HttpStatus.NOT_FOUND,
+    });
+    expect(readTurn).toHaveBeenCalledTimes(3);
+  });
+
+  it('serves SSE over the actual HTTP route without turning events into JSON envelopes', async () => {
+    const visitorMessage = {
+      messageId: '77'.repeat(16),
+      sequence: 1,
+      role: 'visitor' as const,
+      content: '多少钱？',
+      createdAt: '2026-09-24T00:00:00.000Z',
+      clientMessageId: messageId,
+    };
+    const accepted = {
+      sessionHandle: handle,
+      turnId,
+      traceId: `trace_${'88'.repeat(16)}`,
+      state: 'accepted' as const,
+      messages: [visitorMessage],
+    };
+    const completed = { ...accepted, state: 'completed' as const };
+    const results = [accepted, completed];
+    const turns = new PublicTurnService(
+      { acceptTurn: vi.fn(), readTurn: vi.fn(async () => results.shift() ?? completed) },
+      'https://h5cs.1rying.com',
+      1,
+    );
+    @Module({
+      controllers: [PublicTurnController],
+      providers: [
+        { provide: PublicTurnService, useValue: turns },
+        { provide: PublicSessionService, useValue: new PublicSessionService(null, true) },
+      ],
+    })
+    class EventTestModule {}
+    const app = await NestFactory.create(EventTestModule, { logger: false });
+    try {
+      await app.listen(0, '127.0.0.1');
+      const url = `${await app.getUrl()}/api/v1/public/sessions/${handle}/turns/${turnId}/events`;
+      const unauthorized = await fetch(url, { headers: { Accept: 'text/event-stream' } });
+      expect(unauthorized.status).toBe(HttpStatus.NOT_FOUND);
+      const response = await fetch(url, {
+        headers: { Accept: 'text/event-stream', Cookie: `__Host-h5cs_visitor=${'A'.repeat(43)}` },
+      });
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toContain('text/event-stream');
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      const body = await response.text();
+      expect(body).toContain('event: accepted\n');
+      expect(body).toContain('event: completed\n');
+      expect(body).not.toContain('"request_id"');
+    } finally {
+      await app.close();
     }
   });
 });

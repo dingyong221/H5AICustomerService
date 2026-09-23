@@ -133,6 +133,13 @@ export interface PublicAssistantApiClient {
     signal?: AbortSignal | undefined;
     turnId: string;
   }): Promise<TurnResult>;
+  streamTurn(input: {
+    clientMessageId: string;
+    eventsUrl: string;
+    sessionHandle: string;
+    signal?: AbortSignal | undefined;
+    turnId: string;
+  }): AsyncGenerator<TurnResult>;
   sendMessage(input: {
     clientMessageId: string;
     content: string;
@@ -543,10 +550,9 @@ export function decodePublicSessionHistory(value: unknown): PublicSessionHistory
   };
 }
 
-export function decodeTurnResult(value: unknown): TurnResult | undefined {
-  const data = decodeEnvelope(value);
+function decodeTurnResultData(data: unknown): TurnResult | undefined {
   if (
-    data === undefined ||
+    !isRecord(data) ||
     !hasExactKeys(data, ['sessionHandle', 'turnId', 'state', 'traceId', 'messages'], ['error']) ||
     (data['state'] !== 'accepted' &&
       data['state'] !== 'processing' &&
@@ -589,6 +595,10 @@ export function decodeTurnResult(value: unknown): TurnResult | undefined {
         traceId,
         turnId,
       };
+}
+
+export function decodeTurnResult(value: unknown): TurnResult | undefined {
+  return decodeTurnResultData(decodeEnvelope(value));
 }
 
 function resolveApiBaseUrl(apiBaseUrl: string | undefined, origin: string | undefined): URL {
@@ -647,6 +657,41 @@ async function readFailureOptions(
   return decoded === undefined
     ? { retryable: fallbackRetryable }
     : { requestId: decoded.requestId, retryable: decoded.retryable };
+}
+
+function decodeTurnEvent(
+  frame: string,
+  expected: { clientMessageId: string; sessionHandle: string; turnId: string },
+): TurnResult | null {
+  if (frame.startsWith(':')) return null;
+  const lines = frame.split('\n');
+  if (lines.length !== 2 || !lines[0]?.startsWith('event: ') || !lines[1]?.startsWith('data: ')) {
+    throw new PublicApiClientError('invalid_response', '咨询事件格式无效。');
+  }
+  const eventName = lines[0].slice(7);
+  if (eventName === 'unavailable') {
+    throw new PublicApiClientError('unavailable', '实时更新暂不可用。', { retryable: true });
+  }
+  let payload: unknown;
+  try {
+    payload = JSON.parse(lines[1].slice(6)) as unknown;
+  } catch {
+    throw new PublicApiClientError('invalid_response', '咨询事件内容无效。');
+  }
+  const result = decodeTurnResultData(payload);
+  if (
+    !result ||
+    result.state !== eventName ||
+    result.sessionHandle !== expected.sessionHandle ||
+    result.turnId !== expected.turnId ||
+    !result.messages.some(
+      (message) =>
+        message.role === 'visitor' && message.clientMessageId === expected.clientMessageId,
+    )
+  ) {
+    throw new PublicApiClientError('invalid_response', '咨询事件与当前消息不匹配。');
+  }
+  return result;
 }
 
 export function createPublicAssistantApiClient(
@@ -843,6 +888,72 @@ export function createPublicAssistantApiClient(
         throw new PublicApiClientError('invalid_response', '服务端返回了无效的消息状态。');
       }
       return accepted;
+    },
+
+    async *streamTurn({ clientMessageId, eventsUrl, sessionHandle, signal, turnId }) {
+      const safeUrl = resolveTrustedPublicUrl(eventsUrl, baseUrl, '/api/v1/public/');
+      const endpoint = safeUrl === undefined ? undefined : decodeTurnEndpoint(safeUrl, 'events');
+      if (
+        safeUrl === undefined ||
+        endpoint?.sessionHandle !== sessionHandle ||
+        endpoint.turnId !== turnId ||
+        !clientIdPattern.test(clientMessageId) ||
+        sessionHandleRef(sessionHandle) === undefined ||
+        opaqueRef(turnId) === undefined
+      ) {
+        throw new PublicApiClientError('invalid_input', '咨询事件地址无效。');
+      }
+      let response: Response;
+      try {
+        response = await fetchImpl(safeUrl, {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers: { Accept: 'text/event-stream' },
+          method: 'GET',
+          redirect: 'error',
+          ...(signal === undefined ? {} : { signal }),
+        });
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        throw new PublicApiClientError('unavailable', '实时更新暂不可用。', { retryable: true });
+      }
+      if (
+        response.status !== 200 ||
+        !response.headers.get('content-type')?.toLowerCase().startsWith('text/event-stream') ||
+        !response.body
+      ) {
+        throw new PublicApiClientError('unavailable', '实时更新暂不可用。', { retryable: true });
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      try {
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          buffer = (buffer + decoder.decode(chunk.value, { stream: true })).replaceAll(
+            '\r\n',
+            '\n',
+          );
+          if (buffer.length > 262_144) {
+            throw new PublicApiClientError('invalid_response', '咨询事件过长。');
+          }
+          let end = buffer.indexOf('\n\n');
+          while (end >= 0) {
+            const frame = buffer.slice(0, end);
+            buffer = buffer.slice(end + 2);
+            const result = decodeTurnEvent(frame, { clientMessageId, sessionHandle, turnId });
+            if (result) {
+              yield result;
+              if (result.state === 'completed' || result.state === 'failed') return;
+            }
+            end = buffer.indexOf('\n\n');
+          }
+        }
+      } finally {
+        await reader.cancel().catch(() => undefined);
+      }
+      throw new PublicApiClientError('unavailable', '实时更新已中断。', { retryable: true });
     },
 
     async readTurn({ clientMessageId, resultUrl, sessionHandle, signal, turnId }) {

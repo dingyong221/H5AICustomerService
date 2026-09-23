@@ -223,6 +223,23 @@ export function OnlineCustomerService({
         workingState = markAccepted(workingState, accepted);
         setConversation(workingState);
 
+        try {
+          for await (const result of client.streamTurn({
+            clientMessageId: pending.clientMessageId,
+            eventsUrl: accepted.eventsUrl,
+            sessionHandle: session.sessionHandle,
+            signal: controller.signal,
+            turnId: accepted.turnId,
+          })) {
+            workingState = applyTurnResult(workingState, result);
+            setConversation(workingState);
+            if (!shouldContinuePolling(result.state)) return;
+          }
+        } catch (error) {
+          if (controller.signal.aborted) throw error;
+          // A dropped or unsupported event stream resumes through the durable result endpoint.
+        }
+
         let completedPolls = 0;
         while (!controller.signal.aborted) {
           const result = await client.readTurn({
