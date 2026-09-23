@@ -38,9 +38,8 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
   expect(/^#[A-Za-z0-9_-]{43}$/u.test(setupUrl.hash)).toBe(true);
 
   const merchantPage = await browser.newPage();
-  await merchantPage.goto('http://127.0.0.1:3000/setup');
   await merchantPage.evaluate((token) => {
-    window.location.replace(`/setup#${token}`);
+    window.location.replace(`http://127.0.0.1:3000/setup#${token}`);
   }, setupUrl.hash.slice(1));
   await expect(merchantPage.getByRole('button', { name: '领取商家后台' })).toBeEnabled();
   await merchantPage.getByLabel('负责人手机号').fill('13700137000');
