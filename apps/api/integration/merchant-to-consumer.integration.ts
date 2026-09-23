@@ -191,7 +191,7 @@ describe('real MySQL merchant-to-consumer flow', () => {
         merchantId: merchant.id,
         assistantId: created.assistantId,
         releaseId: release.releaseId,
-        turnId: accepted.turnId,
+        turnId: accepted.turnId.replace(/^t_/u, ''),
       });
       expect(claim?.facts.materialsSummary).toBe(draft.materialsSummary);
       await jobs.complete(claim!, '提供上门空调清洗服务，具体范围请向商家确认。', new Date());

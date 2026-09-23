@@ -50,9 +50,13 @@ jobs:
 
       - name: Validate local infrastructure configuration
         shell: bash
+        env:
+          H5CS_RUNTIME_ENV_FILE: ${{ github.workspace }}/.env.example
+          H5CS_MERCHANT_ENV_FILE: ${{ github.workspace }}/.env.example
+          H5CS_OPS_ENV_FILE: ${{ github.workspace }}/.env.example
         run: |
           docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml config --quiet
-          docker compose --env-file infra/compose/release.env.example --file infra/compose/docker-compose.release.yml config --quiet --no-env-resolution
+          docker compose --env-file infra/compose/release.env.example --file infra/compose/docker-compose.release.yml config --quiet
 
       - name: Check formatting
         run: pnpm format:check
