@@ -1,0 +1,174 @@
+name: Candidate container images (no production deployment)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: candidate-images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  quality:
+    name: Verify repository release gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+    steps:
+      - name: Check out exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Install pnpm 11
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.19.0
+          run_install: false
+      - name: Set up Node.js 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Resolve version from the checked-out package
+        id: version
+        shell: bash
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != "v${version}" ]]; then
+            echo "Tag and package version do not match" >&2
+            exit 1
+          fi
+          echo "value=${version}" >> "${GITHUB_OUTPUT}"
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run full repository release gate
+        run: node scripts/quality/release-gate.mjs repository --version "${{ steps.version.outputs.value }}"
+
+  images:
+    name: Build ${{ matrix.app }} image
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: api
+            kind: api
+            target: api
+          - app: worker
+            kind: worker
+            target: worker
+          - app: merchant-web
+            kind: web
+            target: web
+          - app: consumer-h5
+            kind: web
+            target: web
+          - app: ops-web
+            kind: web
+            target: web
+    steps:
+      - name: Check out exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Resolve lowercase image name
+        id: image
+        shell: bash
+        env:
+          APP_NAME: ${{ matrix.app }}
+        run: |
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}/${APP_NAME}" >> "${GITHUB_OUTPUT}"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Log in to GHCR using repository token
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push immutable candidate image
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: infra/docker/workspace.Dockerfile
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          build-args: |
+            APP_KIND=${{ matrix.kind }}
+            APP_NAME=${{ matrix.app }}
+            NEXT_PUBLIC_APP_ENV=production
+            NEXT_PUBLIC_API_BASE_URL=/api/v1
+            NEXT_PUBLIC_MERCHANT_API_BASE_URL=/api/v1
+            NEXT_PUBLIC_PUBLIC_API_BASE_URL=/api/v1/public
+      - name: Attest provenance when the repository plan supports it
+        if: ${{ !github.event.repository.private || vars.H5CS_PRIVATE_ATTESTATIONS_ENABLED == 'true' }}
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+      - name: Record immutable image digest
+        shell: bash
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          APP_NAME: ${{ matrix.app }}
+        run: |
+          [[ "${IMAGE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+          printf '%s@%s\n' "${IMAGE_NAME}" "${IMAGE_DIGEST}" > "${APP_NAME}.digest.txt"
+      - name: Upload digest evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: image-digest-${{ matrix.app }}
+          path: ${{ matrix.app }}.digest.txt
+          if-no-files-found: error
+          retention-days: 90
+
+  digest-manifest:
+    name: Collect five image digests
+    needs: images
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Download digest evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: image-digest-*
+          path: digests
+          merge-multiple: true
+      - name: Verify exact candidate image set
+        shell: bash
+        run: |
+          test "$(find digests -maxdepth 1 -name '*.digest.txt' -type f | wc -l)" -eq 5
+          sort digests/*.digest.txt > candidate-images.txt
+          test "$(grep -Ec '^ghcr\.io/[a-z0-9_-]+/[a-z0-9_-]+/(api|worker|merchant-web|consumer-h5|ops-web)@sha256:[0-9a-f]{64}$' candidate-images.txt)" -eq 5
+      - name: Upload candidate image manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: candidate-images-${{ github.sha }}
+          path: candidate-images.txt
+          if-no-files-found: error
+          retention-days: 90
+      - name: Preserve production boundary
+        run: |
+          echo "Images are candidate artifacts only. No production deployment occurred."
+          echo "Private repositories without supported attestation must remain production No-Go."

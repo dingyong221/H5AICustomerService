@@ -1,8 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-ARG NODE_VERSION=24
-
-FROM node:${NODE_VERSION}-bookworm-slim AS toolchain
+FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS toolchain
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=${PNPM_HOME}:${PATH}
@@ -39,9 +37,10 @@ RUN --mount=type=cache,id=h5cs-pnpm-store,target=/pnpm/store,sharing=locked \
 RUN pnpm exec turbo run build --filter="./apps/${APP_NAME}" \
   && pnpm --filter "./apps/${APP_NAME}" --prod deploy --legacy /opt/deployed-app
 
-FROM node:${NODE_VERSION}-bookworm-slim AS runtime-base
+FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS runtime-base
 
 ENV NODE_ENV=production
+LABEL org.opencontainers.image.source="https://github.com/dingyong221/H5AICustomerService"
 
 WORKDIR /app
 
