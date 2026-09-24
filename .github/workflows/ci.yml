@@ -6,7 +6,6 @@ on:
   push:
     branches:
       - main
-      - codex/platform-provisioning
 
 permissions:
   contents: read
