@@ -79,7 +79,7 @@ export default defineConfig({
       url: 'http://127.0.0.1:3002/login',
       env: {
         ...common,
-        NODE_ENV: 'production',
+        NODE_ENV: 'test',
         OPS_ADMIN_USERNAME: 'browser_test_operator',
         OPS_ADMIN_PASSWORD_HASH: `scrypt:${operatorSalt.toString('base64url')}:${scryptSync(operatorPassword, operatorSalt, 64).toString('base64url')}`,
         OPS_SESSION_SIGNING_KEY: randomBytes(32).toString('base64url'),
@@ -94,7 +94,7 @@ export default defineConfig({
       url: 'http://127.0.0.1:3000/setup',
       env: {
         ...common,
-        NODE_ENV: 'production',
+        NODE_ENV: 'test',
         MERCHANT_PUBLIC_ORIGIN: 'http://127.0.0.1:3000',
         MERCHANT_PHONE_LOOKUP_KEY: randomBytes(32).toString('base64url'),
         CONSUMER_H5_ORIGIN: 'http://127.0.0.1:3001',
