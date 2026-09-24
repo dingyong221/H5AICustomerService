@@ -35,7 +35,7 @@ RUN --mount=type=cache,id=h5cs-pnpm-store,target=/pnpm/store,sharing=locked \
     pnpm install --frozen-lockfile
 
 RUN pnpm exec turbo run build --filter="./apps/${APP_NAME}" \
-  && pnpm --filter "./apps/${APP_NAME}" --prod deploy --legacy /opt/deployed-app \
+  && pnpm --config.inject-workspace-packages=true --filter "./apps/${APP_NAME}" --prod deploy /opt/deployed-app \
   && if [ "${APP_KIND}" = api ]; then \
        test -f /opt/deployed-app/node_modules/@h5cs/database/dist/config.js \
        && node /opt/deployed-app/node_modules/@h5cs/database/scripts/migrate-managed.mjs --inventory >/dev/null; \
