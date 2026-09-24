@@ -53,8 +53,26 @@ probe() {
   return 1
 }
 
-probe api 14100 4000 /livez 1280m
-probe worker 13111 3011 /livez 1536m
-probe merchant-web 13100 3000 /account/login 512m
-probe consumer-h5 13101 3000 / 512m
-probe ops-web 13102 3000 /login 512m
+if (($# > 1)); then
+  printf 'Usage: %s [api|worker|merchant-web|consumer-h5|ops-web]\n' "$0" >&2
+  exit 64
+fi
+
+services=(api worker merchant-web consumer-h5 ops-web)
+if (($# == 1)); then
+  services=("$1")
+fi
+
+for service in "${services[@]}"; do
+  case "$service" in
+    api) probe api 14100 4000 /livez 1280m ;;
+    worker) probe worker 13111 3011 /livez 1536m ;;
+    merchant-web) probe merchant-web 13100 3000 /account/login 512m ;;
+    consumer-h5) probe consumer-h5 13101 3000 / 512m ;;
+    ops-web) probe ops-web 13102 3000 /login 512m ;;
+    *)
+      printf 'Unknown service: %s\n' "$service" >&2
+      exit 64
+      ;;
+  esac
+done
