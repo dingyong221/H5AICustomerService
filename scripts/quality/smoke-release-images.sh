@@ -16,6 +16,10 @@ probe() {
   local path="$4"
   local memory="$5"
   local status='000'
+  local -a smoke_environment=()
+  if [[ "$service" == 'api' ]]; then
+    smoke_environment=(--env OAUTH_ISSUER=https://smoke.invalid)
+  fi
   active_container="h5cs-${service}-smoke"
 
   docker run --detach \
@@ -26,6 +30,7 @@ probe() {
     --security-opt no-new-privileges \
     --memory "$memory" \
     --publish "127.0.0.1:${host_port}:${container_port}" \
+    "${smoke_environment[@]}" \
     "h5cs-${service}:ci" >/dev/null
 
   for _ in $(seq 1 45); do
