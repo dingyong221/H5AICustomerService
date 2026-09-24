@@ -51,10 +51,10 @@ jobs:
       - name: Validate local infrastructure configuration
         shell: bash
         env:
-          H5CS_API_ENV_FILE: ${{ github.workspace }}/.env.example
-          H5CS_WORKER_ENV_FILE: ${{ github.workspace }}/.env.example
-          H5CS_MERCHANT_ENV_FILE: ${{ github.workspace }}/.env.example
-          H5CS_OPS_ENV_FILE: ${{ github.workspace }}/.env.example
+          H5CS_API_ENV_FILE: ${{ github.workspace }}/infra/compose/api.env.example
+          H5CS_WORKER_ENV_FILE: ${{ github.workspace }}/infra/compose/worker.env.example
+          H5CS_MERCHANT_ENV_FILE: ${{ github.workspace }}/infra/compose/merchant-web.env.example
+          H5CS_OPS_ENV_FILE: ${{ github.workspace }}/infra/compose/ops-web.env.example
         run: |
           docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml config --quiet
           docker compose --env-file infra/compose/release.env.example --file infra/compose/docker-compose.release.yml config --quiet
