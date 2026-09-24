@@ -188,9 +188,21 @@ jobs:
     name: Build five release container targets
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    env:
+      CI: 'true'
+      H5CS_MYSQL_DATABASE: h5cs_integration_ci
+      H5CS_MYSQL_USER: h5cs_ci
+      H5CS_MYSQL_PASSWORD: local-dev-ci-only
+      H5CS_MYSQL_ROOT_PASSWORD: local-dev-root-only
+      H5CS_INTEGRATION_MYSQL_URL: mysql://h5cs_ci:local-dev-ci-only@127.0.0.1:3306/h5cs_integration_ci
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js 24 for runtime probes
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
 
       - name: Build image targets without publishing
         shell: bash
@@ -211,3 +223,13 @@ jobs:
 
       - name: Smoke packaged runtime under release restrictions
         run: bash scripts/quality/smoke-release-images.sh
+
+      - name: Start isolated loopback MySQL for packaged runtime probes
+        run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml up -d --wait mysql
+
+      - name: Probe packaged API and Worker against real MySQL
+        run: bash scripts/quality/smoke-release-images-db.sh
+
+      - name: Stop isolated MySQL
+        if: always()
+        run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml down
