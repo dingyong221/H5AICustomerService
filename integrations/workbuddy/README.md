@@ -109,18 +109,18 @@ consent 必须绑定用户、外部身份、商家、client、resource、scopes�
 
 ## 尚未完成且阻止发布的内容
 
-- 缺少官方要求的 `icon.svg`/`icon.png`/`icon.jpg`，也未准备隐私、权限用途、支持与撤销说明等审核材料。
+- 已补齐官方要求的市场图标 `icon.svg`；隐私、权限用途、支持与撤销说明等审核材料仍未准备。
 - 已实现OAuth MySQL仓储/迁移并在显式`MYSQL_DATABASE_URL`时装配，但尚无托管生产库；正式签名密钥/KMS、平台登录与授权同意会话、身份绑定解析器或撤销端点仍未实现。因此DCR之外的authorize/token和受保护调用继续fail closed，不会假成功。
 - WorkBuddy 第三方应用尚未注册/审核；本地 authorize/换票/身份桥接和 callback/consent/UI/迁移/MySQL 仓储草案虽已出现，state + browser-session 摘要及配置版本也已在本地 consume 路径核对，但默认 runtime 与平台登录/授权适配器仍不可用。完整 redirect/scope/merchant 事务快照、外部身份一对一上线、针对具体 client/resource/scopes/membership 的显式商家 consent、加密 token 保管、单飞刷新、phoneverification 和解绑流程均未形成可运行闭环；官方远端撤销入口也尚未确认。
 - 没有可用于生产的账号绑定、托管私网 MySQL、客服生成服务和目标 WorkBuddy 客户端实机证据。
 - `mcp.json` 中的正式 HTTPS 地址只是部署目标；本轮没有部署该路由，也没有提交审核。
 - 未写入 Client ID、Token、密钥或任何真实凭据；未来凭据仍只能由安全连接流程提供。
 
-在图标、OAuth、账号绑定、数据库、生成闭环、远程部署和真实 WorkBuddy 客户端验证完成前，**禁止将本目录打包上传、提交审核或对外发布**。
+在 OAuth、账号绑定、数据库、生成闭环、远程部署、审核材料和真实 WorkBuddy 客户端验证完成前，**禁止将本目录打包上传、提交审核或对外发布**。
 
-## 当前目录与最终包差距
+## 当前目录结构与最终包差距
 
-当前目录已经具有元信息、单 Server MCP 配置和 Skill；最终包仍至少需要图标：
+当前目录已经具有元信息、单 Server MCP 配置、图标和 Skill；以下结构齐备并不代表可以提交审核：
 
 ```text
 h5-ai-customer-service/

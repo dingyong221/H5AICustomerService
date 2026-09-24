@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">H5 AI 客服</title>
+  <path
+    d="M14 7C8.5 7 4 11.5 4 17v25c0 5.5 4.5 10 10 10v8l13-8h23c5.5 0 10-4.5 10-10V17c0-5.5-4.5-10-10-10H14Z"
+    fill="#176b4d"
+  />
+  <path
+    d="M32 17c1.1 7.7 3.3 9.9 11 11-7.7 1.1-9.9 3.3-11 11-1.1-7.7-3.3-9.9-11-11 7.7-1.1 9.9-3.3 11-11Z"
+    fill="#fff"
+  />
+  <circle cx="44" cy="19" r="2" fill="#fff" />
+  <path d="M22 44h20" fill="none" stroke="#fff" stroke-linecap="round" stroke-width="3" />
+</svg>

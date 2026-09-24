@@ -382,6 +382,51 @@ const assertRequiredReleaseDocuments = () => {
   }
 };
 
+const assertWorkBuddyPackageStructure = (version) => {
+  const directory = 'integrations/workbuddy';
+  const metadata = readJson(`${directory}/connector-meta.json`);
+  const connection = readJson(`${directory}/mcp.json`);
+  const source = metadata.source;
+  const servers = connection.mcpServers;
+  if (
+    !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(source ?? '') ||
+    metadata.version !== version ||
+    !servers ||
+    Object.keys(servers).length !== 1 ||
+    servers[source]?.type !== 'streamableHttp'
+  ) {
+    fail('WorkBuddy connector metadata and the single MCP server must match this release.');
+  }
+  const endpoint = new URL(servers[source].url);
+  if (
+    endpoint.protocol !== 'https:' ||
+    endpoint.pathname !== '/mcp' ||
+    endpoint.search ||
+    endpoint.hash ||
+    endpoint.username ||
+    endpoint.password
+  ) {
+    fail('WorkBuddy MCP endpoint must be an HTTPS /mcp URL without embedded credentials.');
+  }
+  let icon;
+  try {
+    icon = readFileSync(resolve(repositoryRoot, directory, 'icon.svg'), 'utf8');
+  } catch {
+    fail('WorkBuddy connector requires icon.svg.');
+  }
+  if (
+    Buffer.byteLength(icon, 'utf8') > 20_000 ||
+    !/^<svg\s[^>]*xmlns="http:\/\/www\.w3\.org\/2000\/svg"[^>]*viewBox="[^"]+"/u.test(
+      icon.trim(),
+    ) ||
+    /<!DOCTYPE\b|<(?:script|foreignObject|style)\b|\bon[a-z]+\s*=|\b(?:href|xlink:href)\s*=|url\s*\(/iu.test(
+      icon,
+    )
+  ) {
+    fail('WorkBuddy icon.svg must be a small self-contained SVG without active or linked content.');
+  }
+};
+
 const assertStaticPolicy = (expectedVersion) => {
   log('[gate] static release policy');
   const version = assertVersionPolicy(expectedVersion);
@@ -390,6 +435,7 @@ const assertStaticPolicy = (expectedVersion) => {
   assertNoHistoricalSecrets();
   assertReleaseComposePolicy();
   assertRequiredReleaseDocuments();
+  assertWorkBuddyPackageStructure(version);
   git(['diff', '--check']);
   log(`[gate] static policy passed for v${version}`);
   return version;
