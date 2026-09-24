@@ -1,6 +1,10 @@
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 
 const SESSION_SECONDS = 8 * 60 * 60;
+const derivePassword = (password: string, salt: Buffer, length: number): Promise<Buffer> =>
+  new Promise((resolve, reject) => {
+    scrypt(password, salt, length, (error, key) => (error ? reject(error) : resolve(key)));
+  });
 
 export type OperatorAuthConfig = Readonly<{
   username: string;
@@ -46,19 +50,25 @@ export const loadOperatorAuthConfig = (
 export const operatorCookieName = (config: OperatorAuthConfig): string =>
   config.secure ? '__Host-h5cs_ops' : 'h5cs_ops';
 
-export const verifyOperatorPassword = (
+export const verifyOperatorPassword = async (
   config: OperatorAuthConfig,
   username: string,
   password: string,
-): boolean => {
+): Promise<boolean> => {
   const parts = config.passwordHash.split(':');
   if (parts.length !== 3 || parts[0] !== 'scrypt') return false;
   const salt = Buffer.from(parts[1] ?? '', 'base64url');
   const expected = Buffer.from(parts[2] ?? '', 'base64url');
-  if (salt.byteLength < 16 || expected.byteLength !== 64 || password.length > 1_024) return false;
-  const actual = scryptSync(password, salt, expected.byteLength);
-  const usernameMatch = username === config.username;
-  return usernameMatch && timingSafeEqual(actual, expected);
+  if (salt.byteLength < 16 || expected.byteLength !== 64 || password.length > 1_024) {
+    return false;
+  }
+  try {
+    const actual = await derivePassword(password, salt, expected.byteLength);
+    const usernameMatch = username === config.username;
+    return usernameMatch && timingSafeEqual(actual, expected);
+  } catch {
+    return false;
+  }
 };
 
 const signature = (config: OperatorAuthConfig, payload: string): Buffer =>

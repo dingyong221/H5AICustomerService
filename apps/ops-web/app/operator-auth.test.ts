@@ -29,12 +29,18 @@ describe('platform operator authentication', () => {
     ).toBeNull();
   });
 
-  it('verifies the configured credential and rejects changed credentials', () => {
+  it('verifies the configured credential and rejects changed credentials', async () => {
     const config = loadOperatorAuthConfig(environment());
     expect(config).not.toBeNull();
-    expect(verifyOperatorPassword(config!, 'h5cs-admin', 'a-long-test-password')).toBe(true);
-    expect(verifyOperatorPassword(config!, 'other-admin', 'a-long-test-password')).toBe(false);
-    expect(verifyOperatorPassword(config!, 'h5cs-admin', 'wrong-password')).toBe(false);
+    await expect(
+      verifyOperatorPassword(config!, 'h5cs-admin', 'a-long-test-password'),
+    ).resolves.toBe(true);
+    await expect(
+      verifyOperatorPassword(config!, 'other-admin', 'a-long-test-password'),
+    ).resolves.toBe(false);
+    await expect(verifyOperatorPassword(config!, 'h5cs-admin', 'wrong-password')).resolves.toBe(
+      false,
+    );
   });
 
   it('accepts only a signed unexpired operator session', () => {

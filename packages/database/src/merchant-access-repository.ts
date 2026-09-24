@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 
 import type { Connection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
@@ -46,6 +46,10 @@ export class MerchantAccessError extends Error {
 }
 
 const tokenDigest = (value: string): Buffer => createHash('sha256').update(value, 'ascii').digest();
+const derivePassword = (password: string, salt: Buffer, length: number): Promise<Buffer> =>
+  new Promise((resolve, reject) => {
+    scrypt(password, salt, length, (error, key) => (error ? reject(error) : resolve(key)));
+  });
 
 const hexId = (value: string): Buffer => {
   if (!/^[0-9a-f]{32}$/iu.test(value)) throw new MerchantAccessError('Merchant ID is invalid');
@@ -68,11 +72,11 @@ const passwordValue = (value: string): string => {
   return value;
 };
 
-const comparePassword = (password: string, row: CredentialRow): boolean => {
+const comparePassword = async (password: string, row: CredentialRow): Promise<boolean> => {
   if (row.password_salt.byteLength !== 16 || row.password_hash.byteLength !== 64) {
     throw new MerchantAccessError('Stored password credential is invalid');
   }
-  const actual = scryptSync(password, row.password_salt, 64);
+  const actual = await derivePassword(password, row.password_salt, 64);
   return timingSafeEqual(actual, row.password_hash);
 };
 
@@ -133,13 +137,13 @@ export class MySqlMerchantAccessRepository {
         );
         let merchantUserId = credentials[0]?.merchant_user_id;
         if (credentials[0]) {
-          if (!comparePassword(password, credentials[0])) {
+          if (!(await comparePassword(password, credentials[0]))) {
             throw new MerchantAccessError('此手机号已有账号，请使用原密码领取');
           }
         } else {
           merchantUserId = randomBytes(16);
           const salt = randomBytes(16);
-          const hash = scryptSync(password, salt, 64);
+          const hash = await derivePassword(password, salt, 64);
           await connection.execute(
             `INSERT INTO merchant_user (id, status, created_at, updated_at)
              VALUES (?, 'active', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
@@ -214,7 +218,7 @@ export class MySqlMerchantAccessRepository {
         [phoneDigest],
       );
       const credential = credentials[0];
-      if (!credential || !comparePassword(password, credential)) {
+      if (!credential || !(await comparePassword(password, credential))) {
         throw new MerchantAccessError('手机号或密码不正确');
       }
       const parameters: Buffer[] = [credential.merchant_user_id];

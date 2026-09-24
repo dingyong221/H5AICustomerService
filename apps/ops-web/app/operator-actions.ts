@@ -73,7 +73,7 @@ export async function loginOperator(
   if (
     typeof username !== 'string' ||
     typeof password !== 'string' ||
-    !verifyOperatorPassword(config, username, password)
+    !(await verifyOperatorPassword(config, username, password))
   ) {
     return { error: '账号或密码不正确。' };
   }

@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, scryptSync } from 'node:crypto';
 
 import { describe, expect, it, vi } from 'vitest';
 import type { Connection, ResultSetHeader } from 'mysql2/promise';
@@ -16,7 +16,11 @@ const setupToken = randomBytes(32).toString('base64url');
 const password = 'a-long-test-password';
 const resultHeader = { affectedRows: 1 } as ResultSetHeader;
 
-const repositoryWith = (invitationExpired = false, revokedRows = 1) => {
+const repositoryWith = (
+  invitationExpired = false,
+  revokedRows = 1,
+  existingCredential?: { salt: Buffer; hash: Buffer },
+) => {
   const calls: Array<{ sql: string; values: readonly unknown[] }> = [];
   const commit = vi.fn(async () => undefined);
   const rollback = vi.fn(async () => undefined);
@@ -36,7 +40,20 @@ const repositoryWith = (invitationExpired = false, revokedRows = 1) => {
           [],
         ];
       }
-      if (sql.includes('FROM merchant_password_credential')) return [[], []];
+      if (sql.includes('FROM merchant_password_credential')) {
+        return [
+          existingCredential
+            ? [
+                {
+                  merchant_user_id: merchantUserId,
+                  password_salt: existingCredential.salt,
+                  password_hash: existingCredential.hash,
+                },
+              ]
+            : [],
+          [],
+        ];
+      }
       if (sql.includes('FROM platform_login_session')) {
         return [
           [
@@ -108,6 +125,33 @@ describe('merchant invitation and scoped session', () => {
     expect(calls.some((call) => call.sql.includes('INSERT INTO merchant_membership'))).toBe(false);
     expect(commit).not.toHaveBeenCalled();
     expect(rollback).toHaveBeenCalledOnce();
+  });
+
+  it('reuses an existing owner only after asynchronous password verification', async () => {
+    const salt = randomBytes(16);
+    const existingCredential = { salt, hash: scryptSync(password, salt, 64) };
+    const { repository, calls, commit } = repositoryWith(false, 1, existingCredential);
+    const session = await repository.claimInvitation({
+      setupToken,
+      phone: '13800138000',
+      password,
+    });
+    expect(session.merchantUserId).toBe(merchantUserId.toString('hex'));
+    expect(calls.some((call) => call.sql.includes('INSERT INTO merchant_user'))).toBe(false);
+    expect(commit).toHaveBeenCalledOnce();
+
+    const rejected = repositoryWith(false, 1, existingCredential);
+    await expect(
+      rejected.repository.claimInvitation({
+        setupToken,
+        phone: '13800138000',
+        password: 'another-long-password',
+      }),
+    ).rejects.toThrow('此手机号已有账号');
+    expect(
+      rejected.calls.some((call) => call.sql.includes('INSERT INTO merchant_membership')),
+    ).toBe(false);
+    expect(rejected.rollback).toHaveBeenCalledOnce();
   });
 
   it('resolves a valid session only through the merchant bound when issued', async () => {
