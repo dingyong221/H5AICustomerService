@@ -33,7 +33,7 @@ services:
     image: ${H5CS_API_IMAGE:?set H5CS_API_IMAGE to an immutable image digest}
     pull_policy: always
     env_file:
-      - ${H5CS_RUNTIME_ENV_FILE:-/etc/h5-ai-customer-service/runtime.env}
+      - ${H5CS_API_ENV_FILE:-/etc/h5-ai-customer-service/api.env}
     environment:
       APP_ENV: production
       HOST: 0.0.0.0
@@ -61,7 +61,7 @@ services:
     image: ${H5CS_WORKER_IMAGE:?set H5CS_WORKER_IMAGE to an immutable image digest}
     pull_policy: always
     env_file:
-      - ${H5CS_RUNTIME_ENV_FILE:-/etc/h5-ai-customer-service/runtime.env}
+      - ${H5CS_WORKER_ENV_FILE:-/etc/h5-ai-customer-service/worker.env}
     environment:
       APP_ENV: production
       MYSQL_TLS_CA_FILE: /etc/ssl/certs/h5cs-managed-mysql-ca.pem

@@ -25,7 +25,8 @@ jobs:
     timeout-minutes: 45
     env:
       CI: 'true'
-      H5CS_RUNTIME_ENV_FILE: ${{ github.workspace }}/.env.example
+      H5CS_API_ENV_FILE: ${{ github.workspace }}/.env.example
+      H5CS_WORKER_ENV_FILE: ${{ github.workspace }}/.env.example
       H5CS_MERCHANT_ENV_FILE: ${{ github.workspace }}/.env.example
       H5CS_OPS_ENV_FILE: ${{ github.workspace }}/.env.example
 

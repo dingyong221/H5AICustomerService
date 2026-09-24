@@ -291,6 +291,76 @@ const assertReleaseComposePolicy = () => {
       fail(`Release Compose ${name} must use the managed MySQL CA mount.`);
     }
   }
+
+  const serviceEnvironmentContracts = new Map([
+    [
+      'api',
+      {
+        variable: 'H5CS_API_ENV_FILE',
+        required: ['MYSQL_DATABASE_URL', 'OAUTH_ISSUER', 'WORKBUDDY_OPEN_API_CLIENT_SECRET'],
+      },
+    ],
+    [
+      'worker',
+      {
+        variable: 'H5CS_WORKER_ENV_FILE',
+        required: ['MYSQL_DATABASE_URL', 'CONVERSATION_WORKER_ENABLED', 'MODEL_API_KEY'],
+      },
+    ],
+    [
+      'merchant-web',
+      {
+        variable: 'H5CS_MERCHANT_ENV_FILE',
+        required: [
+          'MYSQL_DATABASE_URL',
+          'MERCHANT_PHONE_LOOKUP_KEY',
+          'PUBLIC_CONVERSATION_ENABLED',
+          'PUBLISH_MODEL_POLICY_VERSION',
+        ],
+      },
+    ],
+    [
+      'ops-web',
+      {
+        variable: 'H5CS_OPS_ENV_FILE',
+        required: [
+          'MYSQL_DATABASE_URL',
+          'OPS_ADMIN_PASSWORD_HASH',
+          'OPS_SESSION_SIGNING_KEY',
+          'MANAGEMENT_CONSOLE_URL',
+        ],
+      },
+    ],
+  ]);
+  for (const [name, contract] of serviceEnvironmentContracts) {
+    const index = headings.findIndex((match) => match[1] === name);
+    const service = services.slice(
+      headings[index].index,
+      headings[index + 1]?.index ?? services.length,
+    );
+    const path = `/etc/h5-ai-customer-service/${name}.env`;
+    const reference = '- ${' + contract.variable + ':-' + path + '}';
+    if (!service.includes(reference))
+      fail(`Release Compose ${name} must use ${contract.variable}.`);
+    if (!environment.includes(`${contract.variable}=${path}`)) {
+      fail(`release.env.example must point ${contract.variable} to its dedicated server file.`);
+    }
+    const template = readFileSync(
+      resolve(repositoryRoot, `infra/compose/${name}.env.example`),
+      'utf8',
+    );
+    for (const key of contract.required) {
+      if (!new RegExp(`^${key}=`, 'mu').test(template)) {
+        fail(`infra/compose/${name}.env.example must declare ${key}.`);
+      }
+    }
+    if (name !== 'worker' && /^MODEL_API_KEY=/mu.test(template)) {
+      fail(`MODEL_API_KEY must not be in the ${name} environment template.`);
+    }
+    if (name !== 'api' && /^WORKBUDDY_OPEN_API_CLIENT_SECRET=/mu.test(template)) {
+      fail(`WorkBuddy client secret must not be in the ${name} environment template.`);
+    }
+  }
 };
 
 const assertRequiredReleaseDocuments = () => {
