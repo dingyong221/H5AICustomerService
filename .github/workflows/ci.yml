@@ -171,13 +171,13 @@ jobs:
       - name: Apply reviewed MySQL migrations
         run: pnpm --filter @h5cs/database exec drizzle-kit migrate --config drizzle.config.ts
 
-      - name: Build API, Worker and workspace dependencies
-        run: pnpm exec turbo run build --filter=@h5cs/api --filter=@h5cs/worker --concurrency=1
+      - name: Build API, Worker and the three production Web apps
+        run: pnpm exec turbo run build --filter=@h5cs/api --filter=@h5cs/worker --filter=@h5cs/ops-web --filter=@h5cs/merchant-web --filter=@h5cs/consumer-h5 --concurrency=1
 
       - name: Install Chromium for isolated browser acceptance
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Verify operator, merchant and consumer browser workflow
+      - name: Verify production-build operator, merchant and consumer browser workflow
         run: pnpm test:e2e
 
       - name: Stop disposable MySQL

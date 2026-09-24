@@ -75,11 +75,11 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
-      command: 'pnpm --filter @h5cs/ops-web dev',
+      command: 'pnpm --filter @h5cs/ops-web start',
       url: 'http://127.0.0.1:3002/login',
       env: {
         ...common,
-        NODE_ENV: 'development',
+        NODE_ENV: 'production',
         OPS_ADMIN_USERNAME: 'browser_test_operator',
         OPS_ADMIN_PASSWORD_HASH: `scrypt:${operatorSalt.toString('base64url')}:${scryptSync(operatorPassword, operatorSalt, 64).toString('base64url')}`,
         OPS_SESSION_SIGNING_KEY: randomBytes(32).toString('base64url'),
@@ -90,11 +90,11 @@ export default defineConfig({
       timeout: 120_000,
     },
     {
-      command: 'pnpm --filter @h5cs/merchant-web dev',
+      command: 'pnpm --filter @h5cs/merchant-web start',
       url: 'http://127.0.0.1:3000/setup',
       env: {
         ...common,
-        NODE_ENV: 'development',
+        NODE_ENV: 'production',
         MERCHANT_PUBLIC_ORIGIN: 'http://127.0.0.1:3000',
         MERCHANT_PHONE_LOOKUP_KEY: randomBytes(32).toString('base64url'),
         CONSUMER_H5_ORIGIN: 'http://127.0.0.1:3001',
@@ -112,16 +112,20 @@ export default defineConfig({
       timeout: 120_000,
     },
     {
-      command: 'pnpm --filter @h5cs/consumer-h5 dev',
-      url: 'http://127.0.0.1:3001/',
+      command: 'pnpm --filter @h5cs/consumer-h5 exec next start --port 3003',
+      url: 'http://127.0.0.1:3003/',
       env: {
-        NODE_ENV: 'development',
+        NODE_ENV: 'production',
         CONSUMER_H5_ORIGIN: 'http://127.0.0.1:3001',
         NEXT_PUBLIC_PUBLIC_API_BASE_URL: '/api/v1/public',
-        H5CS_DEV_PUBLIC_API_ORIGIN: 'http://127.0.0.1:4000',
       },
       reuseExistingServer: false,
       timeout: 120_000,
+    },
+    {
+      command: 'node tests/e2e/public-gateway.mjs',
+      url: 'http://127.0.0.1:3001/_gateway-health',
+      reuseExistingServer: false,
     },
   ],
 });
