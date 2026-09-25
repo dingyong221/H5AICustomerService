@@ -65,12 +65,13 @@ jobs:
           docker compose --env-file infra/compose/release.env.example --file infra/compose/docker-compose.release.yml --file infra/compose/docker-compose.release.model-secret.yml config --quiet
           docker compose --env-file infra/compose/release.env.example --file infra/compose/docker-compose.release.yml --file infra/compose/docker-compose.release.single-node-mysql.yml --file infra/compose/docker-compose.release.migration.single-node-mysql.yml --profile migration config --quiet
 
-      - name: Validate candidate single-domain Nginx syntax
+      - name: Validate candidate single-domain Nginx syntax and routing
         shell: bash
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq nginx
           bash scripts/quality/verify-nginx-single-domain.sh
+          bash scripts/quality/verify-nginx-routing.sh
 
       - name: Check formatting
         run: pnpm format:check
