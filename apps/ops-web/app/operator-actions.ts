@@ -9,6 +9,7 @@ import {
   MerchantInvitationNotReissuableError,
   MerchantProvisionAlreadyAppliedError,
   MerchantProvisionIdempotencyConflictError,
+  MySqlOperatorLoginThrottleRepository,
   MySqlPlatformProvisioningRepository,
 } from '@h5cs/database';
 
@@ -16,6 +17,7 @@ import {
   createOperatorSession,
   loadOperatorAuthConfig,
   operatorCookieName,
+  operatorLoginSourceDigest,
   resolveOperatorSession,
   verifyOperatorPassword,
 } from './operator-auth';
@@ -50,6 +52,18 @@ export async function loginOperator(
   if (!(await requestOriginValid(config.publicOrigin))) {
     return { error: '请求来源校验失败，请从正式运营地址重新打开。' };
   }
+  const database = loadDatabaseConfig();
+  if (!database.configured) return { error: '登录服务暂不可用，请稍后再试。' };
+  const throttle = new MySqlOperatorLoginThrottleRepository(database.config);
+  // Only the loopback Nginx proxy may supply this header; never use client-controlled X-Forwarded-For.
+  const sourceDigest = operatorLoginSourceDigest(config, (await headers()).get('x-real-ip'));
+  try {
+    if (!(await throttle.consumeAttempt(sourceDigest))) {
+      return { error: '登录尝试过多，请 15 分钟后再试。' };
+    }
+  } catch {
+    return { error: '登录服务暂不可用，请稍后再试。' };
+  }
   const username = formData.get('username');
   const password = formData.get('password');
   if (
@@ -58,6 +72,11 @@ export async function loginOperator(
     !(await verifyOperatorPassword(config, username, password))
   ) {
     return { error: '账号或密码不正确。' };
+  }
+  try {
+    await throttle.clear(sourceDigest);
+  } catch {
+    return { error: '登录服务暂不可用，请稍后再试。' };
   }
   (await cookies()).set(operatorCookieName(config), createOperatorSession(config), {
     httpOnly: true,

@@ -78,6 +78,13 @@
       "when": 1790326377968,
       "tag": "0010_slippery_fenris",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1790327596807,
+      "tag": "0011_closed_maximus",
+      "breakpoints": true
     }
   ]
 }

@@ -20,7 +20,8 @@ Release evidence、审批记录和探针结果不得包含 Secret、Token、Cook
 3. 使用 `infra/compose/release.env.example` 的同结构脱敏 locator 文件运行 release Compose `config --quiet`；五个 `H5CS_*_IMAGE` 必须是 registry `@sha256:` 引用。确认 `H5CS_MYSQL_CA_HOST_FILE` 指向主机上经核对的可信 CA PEM，文件由 root 管理且可供非 root 容器用户读取，四个数据库客户端容器均只读挂载它；仅有环境变量而无实际挂载不可切流。随后对每个镜像执行 registry digest、签名和 provenance 验证；基础镜像与运行镜像均不得依赖浮动 tag。
 4. 在 Staging 部署相同 digest，验证 `/startupz`、`/livez`、`/readyz`、SSE、Job、租户隔离、幂等、审计与真实外部依赖。
 5. 验证 MySQL 备份/PITR、Schema expand 兼容、metadata lock 风险和旧应用兼容。托管方案按 [托管 MySQL 迁移执行边界](managed-mysql-migration.md)；当前获批的本机单机方案还须按 [单机 MySQL 运行记录](single-node-mysql.md)确认离机备份、容量和故障域风险，再使用同一受控迁移程序核对清单哈希、目标 DNS/库及实际 TLS 连接。迁移失败不自动向下迁移。
-6. 运行 production evidence gate。命令非零时停止：
+6. 验证运营 Web 只经 loopback Nginx 代理访问，Nginx 必须覆盖传入的 `X-Real-IP` 为真实 `$remote_addr`，不得透传客户端自填值；运营登录依赖 MySQL 中的每来源 15 分钟/5 次尝试限制，数据库或限流表不可用时登录应拒绝。额外验证恶意 `X-Forwarded-For` 不能改变限流来源。
+7. 运行 production evidence gate。命令非零时停止：
 
 ```text
 node scripts/quality/release-gate.mjs production --version 0.1.0 --evidence <approved-production-evidence.json>

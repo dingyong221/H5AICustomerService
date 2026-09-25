@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
+import { isIP } from 'node:net';
 
 const SESSION_SECONDS = 8 * 60 * 60;
 const derivePassword = (password: string, salt: Buffer, length: number): Promise<Buffer> =>
@@ -49,6 +50,17 @@ export const loadOperatorAuthConfig = (
 
 export const operatorCookieName = (config: OperatorAuthConfig): string =>
   config.secure ? '__Host-h5cs_ops' : 'h5cs_ops';
+
+export const operatorLoginSourceDigest = (
+  config: OperatorAuthConfig,
+  trustedRealIp: string | null,
+): Buffer => {
+  const source = trustedRealIp && isIP(trustedRealIp) ? trustedRealIp : 'unknown';
+  return createHmac('sha256', config.sessionKey)
+    .update('operator-login-source\0', 'ascii')
+    .update(source, 'ascii')
+    .digest();
+};
 
 export const verifyOperatorPassword = async (
   config: OperatorAuthConfig,

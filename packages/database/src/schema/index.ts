@@ -119,6 +119,20 @@ export const platformLoginSessions = mysqlTable(
   ],
 );
 
+export const platformOperatorLoginThrottles = mysqlTable(
+  'platform_operator_login_throttle',
+  {
+    sourceDigest: digest('source_digest').notNull(),
+    attempts: int('attempts', { unsigned: true }).notNull().default(0),
+    windowStartedAt: utcDateTime('window_started_at').notNull(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sourceDigest], name: 'pk_platform_operator_login_throttle' }),
+    index('idx_platform_operator_login_throttle_updated').on(table.updatedAt),
+  ],
+);
+
 export const externalIdentities = mysqlTable(
   'external_identity',
   {

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createOperatorSession,
   loadOperatorAuthConfig,
+  operatorLoginSourceDigest,
   resolveOperatorSession,
   verifyOperatorPassword,
 } from './operator-auth';
@@ -52,5 +53,16 @@ describe('platform operator authentication', () => {
     expect(resolveOperatorSession(config!, `${token}x`, now)).toBeNull();
     expect(resolveOperatorSession(config!, token, now + 8 * 60 * 60 * 1_000)).toBeNull();
     expect(resolveOperatorSession(loadOperatorAuthConfig(environment())!, token, now)).toBeNull();
+  });
+
+  it('keys login throttling to a trusted IP without storing its plaintext value', () => {
+    const config = loadOperatorAuthConfig(environment())!;
+    const first = operatorLoginSourceDigest(config, '203.0.113.11');
+    expect(first).toHaveLength(32);
+    expect(first).toEqual(operatorLoginSourceDigest(config, '203.0.113.11'));
+    expect(first).not.toEqual(operatorLoginSourceDigest(config, '203.0.113.12'));
+    expect(operatorLoginSourceDigest(config, 'untrusted, 203.0.113.11')).toEqual(
+      operatorLoginSourceDigest(config, null),
+    );
   });
 });

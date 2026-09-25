@@ -9,6 +9,7 @@ import {
   MySqlConversationTurnJobRepository,
   MySqlMerchantAccessRepository,
   MySqlMerchantConversationRepository,
+  MySqlOperatorLoginThrottleRepository,
   MySqlPlatformProvisioningRepository,
   MerchantProvisionAlreadyAppliedError,
   MerchantProvisionIdempotencyConflictError,
@@ -77,6 +78,18 @@ describe('real MySQL merchant-to-consumer flow', () => {
     expect(
       (await repository.listMerchants()).filter((merchant) => merchant.name === name),
     ).toHaveLength(1);
+  });
+
+  it('enforces a shared MySQL operator login attempt window and permits explicit reset', async () => {
+    const throttle = new MySqlOperatorLoginThrottleRepository(database);
+    const sourceDigest = randomBytes(32);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await expect(throttle.consumeAttempt(sourceDigest)).resolves.toBe(true);
+    }
+    await expect(throttle.consumeAttempt(sourceDigest)).resolves.toBe(false);
+    await throttle.clear(sourceDigest);
+    await expect(throttle.consumeAttempt(sourceDigest)).resolves.toBe(true);
+    await throttle.clear(sourceDigest);
   });
 
   it('provisions, claims, publishes and serves one isolated completed consultation', async () => {

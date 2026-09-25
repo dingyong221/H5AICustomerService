@@ -5,6 +5,7 @@ export * from './identity-authorization-repository.js';
 export * from './merchant-access-repository.js';
 export * from './merchant-conversation-repository.js';
 export * from './onboarding-repository.js';
+export * from './operator-login-throttle-repository.js';
 export * from './oauth-repository.js';
 export * from './platform-login-session-repository.js';
 export * from './platform-provisioning-repository.js';
