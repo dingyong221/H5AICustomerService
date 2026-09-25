@@ -1,4 +1,4 @@
-import { mkdtempSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -6,11 +6,42 @@ import { describe, expect, it } from 'vitest';
 
 import {
   MigrationPreflightError,
+  migrationDatabaseUrl,
   migrationInventory,
   parseMigrationArguments,
 } from '../scripts/migrate-managed.mjs';
 
 describe('managed MySQL migration preflight', () => {
+  it('reads a bounded migration URL from one protected file source without exposing it in errors', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'h5cs-migration-secret-'));
+    const path = join(directory, 'migration-url');
+    const secret = 'mysql://migrator:test-secret@mysql.internal/h5cs_prod?ssl-mode=VERIFY_IDENTITY';
+    writeFileSync(path, `${secret}\n`);
+    try {
+      expect(() => migrationDatabaseUrl({})).toThrow('Dedicated migration database URL is missing');
+      expect(migrationDatabaseUrl({ MYSQL_MIGRATION_DATABASE_URL_FILE: path })).toBe(secret);
+      expect(() =>
+        migrationDatabaseUrl({
+          MYSQL_MIGRATION_DATABASE_URL_FILE: path,
+          MYSQL_MIGRATION_DATABASE_URL: secret,
+        }),
+      ).toThrow('ambiguous sources');
+      expect(() =>
+        migrationDatabaseUrl({ MYSQL_MIGRATION_DATABASE_URL_FILE: 'relative/migration-url' }),
+      ).toThrow('path must be absolute');
+      writeFileSync(path, `${secret}\nanother-line`);
+      expect(() => migrationDatabaseUrl({ MYSQL_MIGRATION_DATABASE_URL_FILE: path })).toThrow(
+        'file is invalid',
+      );
+      unlinkSync(path);
+      expect(() => migrationDatabaseUrl({ MYSQL_MIGRATION_DATABASE_URL_FILE: path })).toThrow(
+        'file is unavailable',
+      );
+    } finally {
+      if (existsSync(path)) unlinkSync(path);
+      rmdirSync(directory);
+    }
+  });
   it('lists every repository migration with a stable plan hash', () => {
     const first = migrationInventory();
     const second = migrationInventory();

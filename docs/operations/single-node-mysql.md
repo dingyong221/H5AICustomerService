@@ -21,3 +21,5 @@
 首次安装后建立了本地基线备份 `h5cs-prod-20260925T043309Z.sql.gz`（600 字节，空业务 Schema），SHA-256 校验通过，并在隔离容器中成功导入、确认目标库存在。此时表数为 0，因此该演练只验证备份/导入链路，不证明未来业务数据可恢复；正式 Schema 和数据写入后必须重新演练并做记录数、租户、Release、Job、Usage 对账。
 
 目前仅完成数据库服务和账号的基础安装与 TLS/网络验证。尚未执行生产 Schema 迁移，也未接入业务、离机备份、PITR 或正式流量。根盘只有 50 GiB，MySQL、应用镜像和备份会争用同一故障域；备份不能只留在本机。若磁盘或数据库异常，先停止写入并保全卷和日志，不得盲目重建容器、删除卷或重跑初始化脚本。`provision-single-node-mysql.sh` 只用于空卷首次安装，检测到现有容器/卷会拒绝重跑。
+
+后续生产 Schema 迁移须先完成离机备份与恢复演练、变更审批，并取得已发布且验签的 API 镜像摘要。只读核对迁移清单后，使用 `docker-compose.release.yml`、`docker-compose.release.single-node-mysql.yml` 和 `docker-compose.release.migration.single-node-mysql.yml` 组合执行一次性 `migrator` profile。该容器仅接入数据库内部网络，没有对外端口，以非 root 用户读取受限的迁移连接串文件及 CA；变更单必须填写并确认备份引用、变更 ID、迁移计划 SHA-256 和目标库。此配置只是待执行路径，不代表已获当次生产迁移授权，也不得绕过发布 Runbook 的门禁。

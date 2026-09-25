@@ -53,12 +53,17 @@ jobs:
           H5CS_API_ENV_FILE: ${{ github.workspace }}/infra/compose/api.env.example
           H5CS_WORKER_ENV_FILE: ${{ github.workspace }}/infra/compose/worker.env.example
           H5CS_MODEL_API_KEY_HOST_FILE: ${{ github.workspace }}/infra/compose/worker.env.example
+          H5CS_MIGRATION_URL_HOST_FILE: ${{ github.workspace }}/infra/compose/api.env.example
+          H5CS_MIGRATION_BACKUP_REF: ci-validation-only
+          H5CS_MIGRATION_CHANGE_ID: ci-validation-only
+          H5CS_MIGRATION_PLAN_SHA256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           H5CS_MERCHANT_ENV_FILE: ${{ github.workspace }}/infra/compose/merchant-web.env.example
           H5CS_OPS_ENV_FILE: ${{ github.workspace }}/infra/compose/ops-web.env.example
         run: |
           docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml config --quiet
           docker compose --env-file infra/compose/release.env.example --file infra/compose/docker-compose.release.yml config --quiet
           docker compose --env-file infra/compose/release.env.example --file infra/compose/docker-compose.release.yml --file infra/compose/docker-compose.release.model-secret.yml config --quiet
+          docker compose --env-file infra/compose/release.env.example --file infra/compose/docker-compose.release.yml --file infra/compose/docker-compose.release.single-node-mysql.yml --file infra/compose/docker-compose.release.migration.single-node-mysql.yml --profile migration config --quiet
 
       - name: Check formatting
         run: pnpm format:check

@@ -1,0 +1,38 @@
+# Include only for a separately approved production Schema migration.
+# Never run this service as part of the normal application deployment.
+services:
+  migrator:
+    profiles: [migration]
+    image: ${H5CS_API_IMAGE:?set H5CS_API_IMAGE to the approved immutable API digest}
+    pull_policy: always
+    user: '1000:1000'
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    networks: [mysql_data]
+    environment:
+      APP_ENV: production
+      NODE_ENV: production
+      MYSQL_TLS_CA_FILE: /etc/ssl/certs/h5cs-managed-mysql-ca.pem
+      MYSQL_MIGRATION_DATABASE_URL_FILE: /run/secrets/h5cs-migration-url
+      H5CS_MIGRATION_BACKUP_REF: ${H5CS_MIGRATION_BACKUP_REF:?set a verified offsite backup reference}
+      H5CS_MIGRATION_CHANGE_ID: ${H5CS_MIGRATION_CHANGE_ID:?set the approved change ID}
+    volumes:
+      - type: bind
+        source: ${H5CS_MYSQL_CA_HOST_FILE:?set the verified MySQL CA PEM path}
+        target: /etc/ssl/certs/h5cs-managed-mysql-ca.pem
+        read_only: true
+      - type: bind
+        source: ${H5CS_MIGRATION_URL_HOST_FILE:?set the protected migration URL file path}
+        target: /run/secrets/h5cs-migration-url
+        read_only: true
+    entrypoint: [node, node_modules/@h5cs/database/scripts/migrate-managed.mjs]
+    command:
+      - --apply
+      - --target=production
+      - --expect-host=mysql.h5cs.internal
+      - --expect-database=h5_ai_customer_service_prod
+      - --accept-plan-sha256=${H5CS_MIGRATION_PLAN_SHA256:?set the reviewed plan SHA-256}

@@ -6,7 +6,7 @@ API 镜像构建阶段会在部署包中运行一次 `--inventory`，确保迁�
 
 ## 前置条件
 
-- 使用独立的迁移账号，而非 API/Worker 日常账号；从受控 Secret 注入 `MYSQL_MIGRATION_DATABASE_URL`，不要把连接串放进命令行、聊天、仓库或日志。
+- 使用独立的迁移账号，而非 API/Worker 日常账号；优先将连接串存放于受限、只读的独立文件，并以绝对路径设置 `MYSQL_MIGRATION_DATABASE_URL_FILE`。受控 Secret 环境也可使用 `MYSQL_MIGRATION_DATABASE_URL`，但两者不可同时设置。不要把连接串放进命令行、聊天、仓库或日志。文件挂载时须核对非 root 迁移进程的读取权限；不得为排障改为全员可读。
 - URL 主机必须是证书匹配的私网 DNS 名称，带 `?ssl-mode=VERIFY_IDENTITY`；`MYSQL_TLS_CA_FILE` 指向容器/主机内绝对路径的可信 CA 文件。迁移程序会将 CA、`rejectUnauthorized: true` 和主机名校验传给 MySQL 驱动，并核对实际连接的 `Ssl_cipher`。
 - 发布 Compose 的 `H5CS_MYSQL_CA_HOST_FILE` 指向主机上由管理员核对并保护完整性的 CA PEM；API、Worker、商家 Web 和运营 Web 将它只读挂载为 `/etc/ssl/certs/h5cs-managed-mysql-ca.pem`。镜像以非 root 的 `node` 用户运行，主机上的 CA 文件应为 `root:root`、权限 `0644`，其父目录须可遍历；CA 证书是公开信任材料，不是私钥。迁移命令若在其他执行环境运行，应使用该环境可读取的绝对路径；不得把 CA 文件烘入公开镜像或用关闭证书验证代替挂载。
 - 先在 Staging 以同一代码提交和迁移清单演练。生产执行前确认全量备份与 binlog/PITR 可用、隔离恢复已验证，并准备变更单和回滚方案。MySQL DDL 不保证事务式回滚，脚本失败后不得盲目重试。

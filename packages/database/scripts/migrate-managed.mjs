@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { isIP } from 'node:net';
-import { resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const migrationsFolder = fileURLToPath(new URL('../migrations/', import.meta.url));
@@ -87,6 +87,35 @@ export function parseMigrationArguments(args) {
   };
 }
 
+export function migrationDatabaseUrl(environment = process.env) {
+  const inline = environment.MYSQL_MIGRATION_DATABASE_URL;
+  const path = environment.MYSQL_MIGRATION_DATABASE_URL_FILE;
+  if (inline && path) {
+    throw new MigrationPreflightError('Migration database URL has ambiguous sources');
+  }
+  if (!path) {
+    if (!inline) throw new MigrationPreflightError('Dedicated migration database URL is missing');
+    return inline;
+  }
+  if (!isAbsolute(path)) {
+    throw new MigrationPreflightError('Migration database URL file path must be absolute');
+  }
+  try {
+    const file = lstatSync(path);
+    if (!file.isFile() || file.size < 1 || file.size > 4098) {
+      throw new MigrationPreflightError('Migration database URL file is invalid');
+    }
+    const value = readFileSync(path, 'utf8').replace(/\r?\n$/u, '');
+    if (value.length < 1 || value.length > 4096 || /[\r\n]/u.test(value)) {
+      throw new MigrationPreflightError('Migration database URL file is invalid');
+    }
+    return value;
+  } catch (error) {
+    if (error instanceof MigrationPreflightError) throw error;
+    throw new MigrationPreflightError('Migration database URL file is unavailable');
+  }
+}
+
 const row = (value) => (Array.isArray(value) && value.length === 1 ? value[0] : null);
 
 async function verifyLiveConnection(connection, expectedDatabase) {
@@ -116,9 +145,7 @@ async function applyMigrations(options, inventory) {
   ) {
     throw new MigrationPreflightError('Production migration requires backup and change references');
   }
-  const migrationUrl = process.env.MYSQL_MIGRATION_DATABASE_URL;
-  if (!migrationUrl)
-    throw new MigrationPreflightError('Dedicated migration database URL is missing');
+  const migrationUrl = migrationDatabaseUrl();
   const { loadDatabaseConfig } = await import('../dist/config.js');
   const loaded = loadDatabaseConfig({
     ...process.env,
