@@ -57,7 +57,7 @@ node scripts/quality/release-gate.mjs production --version 0.1.0 --evidence <app
 - 消费者 H5 固定链接、静态 buildId、Session 新建/恢复、SSE 和消息幂等；
 - 当前 Assistant Release、商家登录、知识 Job、发布/回滚、Usage 对账和审计记录；
 - API 与 Worker 使用 previous digest，数据库连接/Schema 兼容、无异常锁或重复 Job；
-- WorkBuddy OAuth/身份绑定/商家 consent 的安全失败路径，以及 Token 不混用；
+- 本阶段 Web-only 网关对 MCP、OAuth、Skill 路径返回 404；若未来另行启用 WorkBuddy，须增加 OAuth/身份绑定/商家 consent 与 Token 边界验收；
 - 5xx、P95、错误率和告警恢复到基线，真实告警关闭有审计理由。
 
 验证失败则保持业务 No-Go，不得因回切动作完成而关闭事故。

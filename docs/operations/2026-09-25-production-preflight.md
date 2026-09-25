@@ -25,4 +25,4 @@
 1. 确定 `h5cs.1rying.com` 的正式路由方案和证书申请授权/通知邮箱；在此之前不得切换 HTTP 维护配置或宣称 HTTPS ready。
 2. 确定并授权离机备份目标，完成定时全量备份、binlog 归档、隔离恢复及容量告警；同盘空库备份不能代替这些证据。
 3. 获得候选镜像推送授权后，按仓库工作流生成五个不可变 digest 并验证签名、来源证明；不得用未签名镜像绕过生产门禁。
-4. 按 [`release-and-rollback-runbook.md`](release-and-rollback-runbook.md) 完成 Staging、正式模型/WorkBuddy 凭据、变更审批、生产迁移、切流与回滚演练。生产迁移和切流需要各自的当次授权。
+4. 按 [`release-and-rollback-runbook.md`](release-and-rollback-runbook.md) 完成 Staging、正式模型凭据、变更审批、生产迁移、切流与回滚演练。WorkBuddy 已暂停，其公网入口须验证关闭；生产迁移和切流需要各自的当次授权。
