@@ -30,7 +30,7 @@ trap 'docker stop --time 30 "$container" >/dev/null 2>&1 || true' EXIT
 ready=0
 for ((attempt=0; attempt<90; attempt++)); do
   if docker exec "$container" sh -ec \
-    'MYSQL_PWD="$(cat /run/secrets/root-password)"; export MYSQL_PWD; exec mysqladmin ping --protocol=socket -uroot --silent' \
+    'MYSQL_PWD="$(cat /run/secrets/root-password)"; export MYSQL_PWD; exec mysql --protocol=socket -uroot --batch --skip-column-names --execute="SELECT 1"' \
     >/dev/null 2>&1; then
     ready=1
     break
