@@ -1,4 +1,5 @@
 import type { SkillIntentRequest, SkillIntentResult } from '@h5cs/contracts';
+import type { IndustryTemplateGuide } from '@h5cs/database';
 import type {
   MerchantId,
   MerchantUserId,
@@ -51,22 +52,29 @@ export type AdvanceOnboardingCommand = Readonly<{
   event: OnboardingEvent;
 }>;
 
+export interface IndustryGuideCatalog {
+  listActive(): Promise<readonly IndustryTemplateGuide[]>;
+}
+
 export class SkillOnboardingApplicationService {
   readonly #authenticator: WorkBuddyAuthenticator;
   readonly #repository: OnboardingRepository;
   readonly #generationCoordinator: GenerationCoordinator;
   readonly #managementConsoleUrl: string | undefined;
+  readonly #industryGuides: IndustryGuideCatalog | undefined;
 
   public constructor(
     authenticator: WorkBuddyAuthenticator,
     repository: OnboardingRepository,
     generationCoordinator: GenerationCoordinator,
     managementConsoleUrl?: string,
+    industryGuides?: IndustryGuideCatalog,
   ) {
     this.#authenticator = authenticator;
     this.#repository = repository;
     this.#generationCoordinator = generationCoordinator;
     this.#managementConsoleUrl = managementConsoleUrl;
+    this.#industryGuides = industryGuides;
   }
 
   public async execute(
@@ -201,12 +209,48 @@ export class SkillOnboardingApplicationService {
     });
   }
 
-  #toResult(session: OnboardingSessionRecord): SkillIntentResult {
+  async #toResult(session: OnboardingSessionRecord): Promise<SkillIntentResult> {
+    const industryCode = session.snapshot.answers.industryCode;
+    let guides: readonly IndustryTemplateGuide[] | undefined;
+    if (
+      this.#industryGuides &&
+      (session.snapshot.state === 'industry' ||
+        session.snapshot.state === 'materials' ||
+        session.snapshot.state === 'policy')
+    ) {
+      try {
+        guides = await this.#industryGuides.listActive();
+      } catch {
+        guides = undefined;
+      }
+    }
+    const selectedGuide = guides?.find((guide) => guide.code === industryCode);
     return {
       action: 'continue_onboarding',
       onboarding_session_id: session.id,
       state: session.snapshot.state,
       missing_items: [...getOnboardingMissingItems(session.snapshot)],
+      ...(session.snapshot.state === 'industry' && guides
+        ? {
+            industry_options: guides.map((guide) => ({
+              code: guide.code,
+              display_name: guide.displayName,
+              version: guide.version,
+            })),
+          }
+        : {}),
+      ...(selectedGuide
+        ? {
+            industry_guide: {
+              code: selectedGuide.code,
+              display_name: selectedGuide.displayName,
+              version: selectedGuide.version,
+              reference_notes: selectedGuide.referenceNotes,
+              required_materials: [...selectedGuide.requiredMaterials],
+              required_policies: [...selectedGuide.requiredPolicies],
+            },
+          }
+        : {}),
     };
   }
 

@@ -228,6 +228,69 @@ describe('Skill onboarding application service', () => {
     expect(result.missing_items.map((item) => item.code)).toContain('offering');
   });
 
+  it('offers active industry guidance without saving it as merchant facts', async () => {
+    const repository = new TestRepository();
+    let active = true;
+    const service = new SkillOnboardingApplicationService(
+      new TestAuthenticator(),
+      repository,
+      readyGenerationCoordinator,
+      'https://console.example.test/',
+      {
+        listActive: async () =>
+          active
+            ? [
+                {
+                  id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                  code: 'home_service',
+                  version: 2,
+                  status: 'active',
+                  displayName: '家居服务',
+                  referenceNotes: '请核实是否提供上门服务。',
+                  requiredMaterials: ['服务项目', '服务范围'],
+                  requiredPolicies: ['报价条件'],
+                },
+              ]
+            : [],
+      },
+    );
+    const start = await service.execute('Bearer verified-token', {
+      intent: 'create_customer_service',
+    });
+    expect(start).toMatchObject({
+      action: 'continue_onboarding',
+      state: 'industry',
+      industry_options: [{ code: 'home_service', display_name: '家居服务', version: 2 }],
+    });
+    if (start.action !== 'continue_onboarding') return;
+    const next = await service.advance({
+      authorizationHeader: 'Bearer verified-token',
+      sessionId: start.onboarding_session_id,
+      event: { type: 'provide_industry', industryCode: 'home_service' },
+    });
+    expect(next).toMatchObject({
+      action: 'continue_onboarding',
+      state: 'materials',
+      industry_guide: {
+        code: 'home_service',
+        reference_notes: '请核实是否提供上门服务。',
+        required_materials: ['服务项目', '服务范围'],
+        required_policies: ['报价条件'],
+      },
+    });
+    expect(repository.session?.snapshot.answers).toEqual({
+      industryCode: 'home_service',
+      merchantConfirmed: false,
+    });
+    active = false;
+    const resumed = await service.execute('Bearer verified-token', {
+      intent: 'create_customer_service',
+      resume_session_id: start.onboarding_session_id,
+    });
+    if (resumed.action !== 'continue_onboarding') return;
+    expect(resumed.industry_guide).toBeUndefined();
+  });
+
   it('records generated assistant ownership through the dedicated repository operation', async () => {
     const repository = new TestRepository();
     repository.session = {

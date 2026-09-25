@@ -1,6 +1,7 @@
 import {
   loadDatabaseConfig,
   MySqlAssistantLifecycleRepository,
+  MySqlIndustryTemplateRepository,
   MySqlOnboardingRepository,
   UnavailableOnboardingRepository,
 } from '@h5cs/database';
@@ -32,5 +33,6 @@ export const createRuntimeSkillOnboardingService = (
     repository,
     generation,
     environment['MANAGEMENT_CONSOLE_URL'],
+    database.configured ? new MySqlIndustryTemplateRepository(database.config) : undefined,
   );
 };

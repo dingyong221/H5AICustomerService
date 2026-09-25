@@ -89,6 +89,21 @@ describe('shared contracts', () => {
         missing_items: [{ code: 'industry_code', message: '请选择行业' }],
       }).action,
     ).toBe('continue_onboarding');
+    const guided = skillIntentResultSchema.parse({
+      action: 'continue_onboarding',
+      onboarding_session_id: '33333333333333333333333333333333',
+      state: 'materials',
+      missing_items: [],
+      industry_guide: {
+        code: 'home_service',
+        display_name: '家居服务',
+        version: 2,
+        reference_notes: '仅提示核实资料。',
+        required_materials: ['服务项目'],
+        required_policies: ['价格条件'],
+      },
+    });
+    expect(guided.action).toBe('continue_onboarding');
   });
 
   it('rejects malformed external onboarding session IDs', () => {
