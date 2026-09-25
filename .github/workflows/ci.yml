@@ -137,6 +137,9 @@ jobs:
       - name: Verify merchant-to-consumer persistence and public API
         run: pnpm --filter @h5cs/api test:integration
 
+      - name: Drill non-empty logical backup and isolated restore
+        run: bash scripts/quality/verify-ci-mysql-restore.sh
+
       - name: Stop disposable MySQL
         if: always()
         run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml down
