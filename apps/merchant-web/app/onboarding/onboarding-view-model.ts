@@ -45,6 +45,7 @@ export interface OnboardingViewModel {
   helpHref: string;
   identity: WorkBuddyIdentityViewModel;
   isReadOnly: boolean;
+  managementUrl: string | undefined;
   missingItems: readonly MissingItemViewModel[];
   missingItemsLabel: string;
   primaryActionLabel: string;
@@ -188,12 +189,18 @@ function getStepStatus(
 }
 
 export function buildOnboardingViewModel(input: {
+  applicationOrigin?: string;
   apiConnected: boolean;
   authorization: WorkBuddyAuthorization;
   result?: SkillIntentResult;
 }): OnboardingViewModel {
   const continuation = input.result?.action === 'continue_onboarding' ? input.result : undefined;
   const state = continuation?.state;
+  const rawManagementUrl = state === 'manageable' ? continuation?.management_url : undefined;
+  const loginGate = toLoginGate(
+    rawManagementUrl,
+    input.applicationOrigin ?? 'https://h5cs.1rying.com',
+  );
   const authorized = input.authorization === 'authorized';
   const actionable = input.apiConnected && authorized;
   const missingItems = (continuation?.missing_items ?? []).map((item) => {
@@ -214,6 +221,7 @@ export function buildOnboardingViewModel(input: {
     helpHref: '/onboarding#help',
     identity: buildWorkBuddyIdentityViewModel(input.authorization),
     isReadOnly: !actionable,
+    managementUrl: rawManagementUrl && loginGate !== '/account/login' ? loginGate : undefined,
     missingItems,
     missingItemsLabel:
       continuation === undefined

@@ -65,6 +65,7 @@ export const skillIntentResultSchema = z.discriminatedUnion('action', [
     onboarding_session_id: onboardingSessionIdSchema,
     state: onboardingStateSchema,
     missing_items: z.array(onboardingMissingItemSchema),
+    management_url: z.string().url().optional(),
     industry_options: z
       .array(
         z.object({

@@ -104,6 +104,15 @@ describe('shared contracts', () => {
       },
     });
     expect(guided.action).toBe('continue_onboarding');
+    const generated = skillIntentResultSchema.parse({
+      action: 'continue_onboarding',
+      onboarding_session_id: '33333333333333333333333333333333',
+      state: 'manageable',
+      missing_items: [],
+      management_url:
+        'https://console.example.test/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444',
+    });
+    expect(generated).toHaveProperty('management_url');
   });
 
   it('rejects malformed external onboarding session IDs', () => {

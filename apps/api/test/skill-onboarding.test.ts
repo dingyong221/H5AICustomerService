@@ -425,7 +425,12 @@ describe('Skill onboarding application service', () => {
         sessionId: repository.session.id,
         event: { type: 'confirm' },
       }),
-    ).resolves.toMatchObject({ action: 'continue_onboarding', state: 'manageable' });
+    ).resolves.toMatchObject({
+      action: 'continue_onboarding',
+      state: 'manageable',
+      management_url:
+        'https://console.example.test/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444',
+    });
     expect(generate).toHaveBeenCalledOnce();
     await expect(
       service.execute('Bearer token', { intent: 'create_customer_service' }),
@@ -465,7 +470,12 @@ describe('Skill onboarding application service', () => {
     ).rejects.toThrow('unknown database outcome');
     await expect(
       service.execute('Bearer token', { intent: 'create_customer_service' }),
-    ).resolves.toMatchObject({ action: 'continue_onboarding', state: 'manageable' });
+    ).resolves.toMatchObject({
+      action: 'continue_onboarding',
+      state: 'manageable',
+      management_url:
+        'https://console.example.test/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444',
+    });
     expect(generate).toHaveBeenCalledTimes(2);
     expect(generate.mock.calls[0]?.[0].id).toBe(generate.mock.calls[1]?.[0].id);
   });

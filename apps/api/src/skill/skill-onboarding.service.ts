@@ -211,6 +211,15 @@ export class SkillOnboardingApplicationService {
 
   async #toResult(session: OnboardingSessionRecord): Promise<SkillIntentResult> {
     const industryCode = session.snapshot.answers.industryCode;
+    const generatedAssistantId = session.assistantId ?? session.snapshot.generatedAssistantId;
+    if (
+      session.snapshot.state === 'manageable' &&
+      session.assistantId !== null &&
+      session.snapshot.generatedAssistantId !== undefined &&
+      session.assistantId !== session.snapshot.generatedAssistantId
+    ) {
+      throw new Error('Generated assistant ownership is inconsistent');
+    }
     let guides: readonly IndustryTemplateGuide[] | undefined;
     if (
       this.#industryGuides &&
@@ -230,6 +239,13 @@ export class SkillOnboardingApplicationService {
       onboarding_session_id: session.id,
       state: session.snapshot.state,
       missing_items: [...getOnboardingMissingItems(session.snapshot)],
+      ...(session.snapshot.state === 'manageable' && generatedAssistantId
+        ? {
+            management_url: this.#managementUrl(
+              `/workspace/${session.merchantId}/assistants/${generatedAssistantId}`,
+            ),
+          }
+        : {}),
       ...(session.snapshot.state === 'industry' && guides
         ? {
             industry_options: guides.map((guide) => ({

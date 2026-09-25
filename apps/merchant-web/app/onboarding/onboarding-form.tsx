@@ -104,6 +104,7 @@ export function OnboardingForm({ apiBaseUrl, authorization }: OnboardingFormProp
     ['saving', 'generating', 'pausing', 'resuming'].includes(interaction.status);
   const canWrite = apiConfigured && authorized && !busy;
   const serverViewModel = buildOnboardingViewModel({
+    ...(typeof window === 'undefined' ? {} : { applicationOrigin: window.location.origin }),
     apiConnected: apiConfigured,
     authorization,
     ...(interaction.result === undefined ? {} : { result: interaction.result }),
@@ -306,6 +307,14 @@ export function OnboardingForm({ apiBaseUrl, authorization }: OnboardingFormProp
               打开「{existingManagement.assistant.display_name}」的管理后台
             </a>
           )}
+        </section>
+      ) : null}
+
+      {!existingManagement && serverViewModel.managementUrl ? (
+        <section className="onboarding-step-card" role="status">
+          <h2>AI 客服草稿已生成</h2>
+          <p>请进入管理后台核对资料、测试并明确发布；当前草稿尚未向消费者开放。</p>
+          <a href={serverViewModel.managementUrl}>打开新客服的管理后台</a>
         </section>
       ) : null}
 

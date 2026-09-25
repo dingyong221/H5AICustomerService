@@ -84,6 +84,31 @@ describe('WorkBuddy view models', () => {
     expect(viewModel.canCancel).toBe(false);
   });
 
+  it('shows a generated draft link only through the local login gate', () => {
+    const result = {
+      action: 'continue_onboarding' as const,
+      missing_items: [],
+      onboarding_session_id: '33333333333333333333333333333333',
+      state: 'manageable' as const,
+      management_url:
+        'https://h5cs.1rying.com/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444',
+    };
+    const own = buildOnboardingViewModel({
+      applicationOrigin: 'https://h5cs.1rying.com',
+      apiConnected: true,
+      authorization: 'authorized',
+      result,
+    });
+    expect(own.managementUrl).toContain('/account/login?merchant=22222222222222222222222222222222');
+    const foreign = buildOnboardingViewModel({
+      applicationOrigin: 'https://different.example.test',
+      apiConnected: true,
+      authorization: 'authorized',
+      result,
+    });
+    expect(foreign.managementUrl).toBeUndefined();
+  });
+
   it('always gates management URLs behind login and rejects foreign origins', () => {
     const sameOrigin = buildWorkBuddyEntryViewModel({
       applicationOrigin: 'https://h5cs.1rying.com',

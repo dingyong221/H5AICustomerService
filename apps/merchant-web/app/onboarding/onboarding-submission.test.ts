@@ -133,4 +133,32 @@ describe('complete onboarding submission', () => {
     });
     expect(startOrResume).toHaveBeenCalledTimes(2);
   });
+
+  it('uses the generated draft link from the confirmation response without a second request', async () => {
+    const startOrResume = vi.fn<OnboardingApiClient['startOrResume']>(async () => ({
+      action: 'continue_onboarding',
+      missing_items: [],
+      onboarding_session_id: sessionId,
+      state: 'industry',
+    }));
+    const managementUrl =
+      'https://merchant.test/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444';
+    const client: OnboardingApiClient = {
+      startOrResume,
+      advance: vi.fn(async ({ event }) => ({
+        ...resultForEvent(event),
+        state: event.type === 'confirm' ? ('manageable' as const) : resultForEvent(event).state,
+        ...(event.type === 'confirm' ? { management_url: managementUrl } : {}),
+      })),
+      openManagement: vi.fn(),
+    };
+    await expect(
+      submitCompleteOnboarding({
+        client,
+        createIdempotencyKey: () => 'reserved-key',
+        values: completeValues,
+      }),
+    ).resolves.toMatchObject({ state: 'manageable', management_url: managementUrl });
+    expect(startOrResume).toHaveBeenCalledOnce();
+  });
 });

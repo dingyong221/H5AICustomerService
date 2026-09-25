@@ -45,7 +45,7 @@ export async function submitCompleteOnboarding({
     });
   }
 
-  if (result.state === 'manageable') {
+  if (result.state === 'manageable' && !result.management_url) {
     try {
       const management = await client.startOrResume({ idempotencyKey: createIdempotencyKey() });
       if (management.action !== 'continue_onboarding') return management;
