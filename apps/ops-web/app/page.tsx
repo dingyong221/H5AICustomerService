@@ -55,8 +55,8 @@ function ShieldIcon() {
 
 const operationAreas = [
   {
-    description: '查看商家、客服正式版本、服务状态和试点额度。',
-    href: '#merchants',
+    description: '查看商家领取状态、客服草稿和正式版本。',
+    href: '#assistants',
     icon: <BuildingIcon />,
     id: 'merchants',
     label: '商家与客服',
@@ -77,6 +77,13 @@ const operationAreas = [
   },
 ];
 
+const assistantStateLabel = (status: string, activeReleaseId: string | null): string => {
+  if (status === 'active') return activeReleaseId ? '已发布' : '状态待核对';
+  if (status === 'paused') return '已暂停';
+  if (status === 'draft_only') return '草稿';
+  return '其他状态';
+};
+
 export default async function OperationsDashboardPage() {
   const operator = await currentOperator();
   if (!operator) redirect('/login');
@@ -84,8 +91,11 @@ export default async function OperationsDashboardPage() {
   const managementBase = managementBaseUrl(process.env['MANAGEMENT_CONSOLE_URL']);
   let merchants: Awaited<ReturnType<MySqlPlatformProvisioningRepository['listMerchants']>> = [];
   let audits: Awaited<ReturnType<MySqlPlatformProvisioningRepository['listPlatformAudits']>> = [];
+  let assistants: Awaited<ReturnType<MySqlPlatformProvisioningRepository['listAssistantStates']>> =
+    [];
   let databaseReady = false;
   let auditReady = false;
+  let assistantsReady = false;
   if (database.configured) {
     const repository = new MySqlPlatformProvisioningRepository(database.config);
     try {
@@ -99,6 +109,12 @@ export default async function OperationsDashboardPage() {
       auditReady = true;
     } catch {
       auditReady = false;
+    }
+    try {
+      assistants = await repository.listAssistantStates();
+      assistantsReady = true;
+    } catch {
+      assistantsReady = false;
     }
   }
   return (
@@ -193,6 +209,41 @@ export default async function OperationsDashboardPage() {
         ) : null}
       </section>
 
+      <section aria-labelledby="assistants-heading" className="attention-panel" id="assistants">
+        <div className="section-heading">
+          <div>
+            <p>商家与客服</p>
+            <h2 id="assistants-heading">最近客服状态</h2>
+          </div>
+          <StatusBadge tone={assistantsReady ? 'info' : 'warning'}>
+            {assistantsReady ? '已连接' : '暂不可用'}
+          </StatusBadge>
+        </div>
+        <p>仅展示最近 50 个客服的数据库状态；“已发布”不代表公开对话服务当前健康。</p>
+        {!assistantsReady ? (
+          <p role="alert">客服状态查询失败，不能据此判断没有客服。</p>
+        ) : assistants.length === 0 ? (
+          <p>目前没有客服记录。</p>
+        ) : (
+          <ol className="ops-assistant-list">
+            {assistants.map((assistant) => (
+              <li key={assistant.id}>
+                <strong>{assistant.displayName}</strong>
+                <span>{assistantStateLabel(assistant.status, assistant.activeReleaseId)}</span>
+                <small>商家：{assistant.merchantName}</small>
+                {assistant.activeReleaseId ? (
+                  <small>正式版本：{assistant.activeReleaseId}</small>
+                ) : null}
+                <time dateTime={assistant.updatedAt.toISOString()}>
+                  更新于{' '}
+                  {assistant.updatedAt.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
+                </time>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
+
       <section aria-labelledby="areas-heading" className="operation-areas">
         <div className="section-heading">
           <div>
@@ -203,7 +254,7 @@ export default async function OperationsDashboardPage() {
         </div>
         <div className="operation-area-grid">
           {operationAreas.map((area) => (
-            <article className="operation-area-card" id={area.id} key={area.id}>
+            <article className="operation-area-card" id={`${area.id}-area`} key={area.id}>
               <div aria-hidden="true" className="operation-area-card__icon">
                 {area.icon}
               </div>
@@ -211,9 +262,10 @@ export default async function OperationsDashboardPage() {
                 <h3>{area.label}</h3>
                 <p>{area.description}</p>
               </div>
-              {area.id === 'audit' && auditReady ? (
+              {(area.id === 'audit' && auditReady) ||
+              (area.id === 'merchants' && databaseReady && assistantsReady) ? (
                 <a className="ops-area-link" href={area.href}>
-                  查看记录
+                  {area.id === 'merchants' ? '查看状态' : '查看记录'}
                 </a>
               ) : (
                 <Button disabled size="small" variant="secondary">

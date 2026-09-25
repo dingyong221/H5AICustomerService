@@ -166,6 +166,14 @@ describe('real MySQL merchant-to-consumer flow', () => {
       releaseRef: release.releaseId,
       assistantName: created.displayName,
     });
+    expect(
+      (await provisioner.listAssistantStates()).find((item) => item.id === created.assistantId),
+    ).toMatchObject({
+      merchantId: merchant.id,
+      displayName: created.displayName,
+      status: 'active',
+      activeReleaseId: release.releaseId,
+    });
 
     const revised = await assistants.saveDraft({
       merchantUserId,

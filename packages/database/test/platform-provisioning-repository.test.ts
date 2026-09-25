@@ -49,6 +49,52 @@ const repositoryWith = (failOn?: string, merchantStatus = 'pending_owner', failE
 };
 
 describe('platform merchant provisioning', () => {
+  it('lists bounded assistant status without loading draft or conversation content', async () => {
+    const assistantId = Buffer.from('11'.repeat(16), 'hex');
+    const merchantId = Buffer.from('22'.repeat(16), 'hex');
+    const releaseId = Buffer.from('33'.repeat(16), 'hex');
+    const updatedAt = new Date('2026-09-25T08:00:00.000Z');
+    const execute = vi.fn(async (_sql: string, _values: readonly unknown[]) => [
+      [
+        {
+          id: assistantId,
+          merchant_id: merchantId,
+          merchant_name: '示例商家',
+          display_name: '商品客服',
+          status: 'active',
+          active_release_id: releaseId,
+          updated_at: updatedAt,
+        },
+      ],
+      [],
+    ]);
+    const end = vi.fn(async () => undefined);
+    const database = {
+      openConnection: async () => ({ execute, end }) as unknown as Connection,
+      summary: { host: 'test', database: 'test', tlsRequested: false },
+      toJSON: () => ({ host: 'test', database: 'test', tlsRequested: false }),
+    } satisfies DatabaseConnectionConfig;
+    const repository = new MySqlPlatformProvisioningRepository(database);
+
+    await expect(repository.listAssistantStates(5)).resolves.toEqual([
+      {
+        id: assistantId.toString('hex'),
+        merchantId: merchantId.toString('hex'),
+        merchantName: '示例商家',
+        displayName: '商品客服',
+        status: 'active',
+        activeReleaseId: releaseId.toString('hex'),
+        updatedAt,
+      },
+    ]);
+    expect(execute).toHaveBeenCalledWith(expect.stringContaining('FROM assistant a'), [5]);
+    expect(execute.mock.calls[0]?.[0]).not.toMatch(/draft|content|message|contact/iu);
+    expect(end).toHaveBeenCalledOnce();
+    await expect(repository.listAssistantStates(0)).rejects.toThrow(
+      'Assistant list limit is invalid',
+    );
+  });
+
   it('lists only bounded platform audit fields without metadata or conversation content', async () => {
     const auditId = Buffer.from('11'.repeat(16), 'hex');
     const merchantId = Buffer.from('22'.repeat(16), 'hex');

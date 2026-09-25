@@ -85,6 +85,11 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
     'download',
     /^ai-customer-service-[a-z0-9-]+\.png$/u,
   );
+  await operatorPage.reload();
+  const assistantState = operatorPage
+    .locator('.ops-assistant-list li')
+    .filter({ hasText: assistantName });
+  await expect(assistantState).toContainText('已发布');
 
   const consumerPage = await browser.newPage();
   await consumerPage.goto(publicUrl!);

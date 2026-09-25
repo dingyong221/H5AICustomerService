@@ -49,6 +49,16 @@ export type PlatformAuditSummary = Readonly<{
   occurredAt: Date;
 }>;
 
+export type PlatformAssistantSummary = Readonly<{
+  id: string;
+  merchantId: string;
+  merchantName: string;
+  displayName: string;
+  status: string;
+  activeReleaseId: string | null;
+  updatedAt: Date;
+}>;
+
 type MerchantRow = RowDataPacket & {
   id: Buffer;
   name: string;
@@ -69,6 +79,15 @@ type ProvisionIdempotencyRow = RowDataPacket & {
   request_hash: Buffer;
   state: string;
   resource_id: Buffer | null;
+};
+type PlatformAssistantRow = RowDataPacket & {
+  id: Buffer;
+  merchant_id: Buffer;
+  merchant_name: string;
+  display_name: string;
+  status: string;
+  active_release_id: Buffer | null;
+  updated_at: Date;
 };
 
 const isDuplicateKey = (error: unknown): boolean =>
@@ -141,6 +160,35 @@ export class MySqlPlatformProvisioningRepository {
         merchantId: row.merchant_id?.toString('hex') ?? null,
         result: row.result,
         occurredAt: row.occurred_at,
+      }));
+    } finally {
+      await connection.end();
+    }
+  }
+
+  public async listAssistantStates(limit = 50): Promise<readonly PlatformAssistantSummary[]> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      throw new Error('Assistant list limit is invalid');
+    }
+    const connection = await this.#database.openConnection();
+    try {
+      const [rows] = await connection.execute<PlatformAssistantRow[]>(
+        `SELECT a.id, a.merchant_id, m.name AS merchant_name, a.display_name,
+                a.status, a.active_release_id, a.updated_at
+           FROM assistant a
+           JOIN merchant m ON m.id = a.merchant_id
+          ORDER BY a.updated_at DESC, a.id DESC
+          LIMIT ?`,
+        [limit],
+      );
+      return rows.map((row) => ({
+        id: row.id.toString('hex'),
+        merchantId: row.merchant_id.toString('hex'),
+        merchantName: row.merchant_name,
+        displayName: row.display_name,
+        status: row.status,
+        activeReleaseId: row.active_release_id?.toString('hex') ?? null,
+        updatedAt: row.updated_at,
       }));
     } finally {
       await connection.end();
