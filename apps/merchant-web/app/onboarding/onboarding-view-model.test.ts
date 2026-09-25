@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildOnboardingViewModel,
   buildWorkBuddyEntryViewModel,
   buildWorkBuddyIdentityViewModel,
 } from './onboarding-view-model';
+
+afterEach(() => vi.unstubAllEnvs());
 
 describe('WorkBuddy view models', () => {
   it('keeps a disconnected, unbound onboarding session read-only', () => {
@@ -107,6 +109,38 @@ describe('WorkBuddy view models', () => {
       result,
     });
     expect(foreign.managementUrl).toBeUndefined();
+  });
+
+  it('gates a console-prefixed generated link without leaking the prefix into the return path', () => {
+    vi.stubEnv('NEXT_PUBLIC_MERCHANT_BASE_PATH', '/console');
+    const result = {
+      action: 'continue_onboarding' as const,
+      missing_items: [],
+      onboarding_session_id: '33333333333333333333333333333333',
+      state: 'manageable' as const,
+      management_url:
+        'https://h5cs.1rying.com/console/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444',
+    };
+    const model = buildOnboardingViewModel({
+      applicationOrigin: 'https://h5cs.1rying.com',
+      apiConnected: true,
+      authorization: 'authorized',
+      result,
+    });
+    expect(model.managementUrl).toBe(
+      '/account/login?merchant=22222222222222222222222222222222&next=%2Fworkspace%2F22222222222222222222222222222222%2Fassistants%2F44444444444444444444444444444444',
+    );
+    expect(
+      buildOnboardingViewModel({
+        applicationOrigin: 'https://h5cs.1rying.com',
+        apiConnected: true,
+        authorization: 'authorized',
+        result: {
+          ...result,
+          management_url: result.management_url.replace('/console/', '/'),
+        },
+      }).managementUrl,
+    ).toBeUndefined();
   });
 
   it('always gates management URLs behind login and rejects foreign origins', () => {

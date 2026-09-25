@@ -1,6 +1,8 @@
 import type { OnboardingMissingItemContract, SkillIntentResult } from '@h5cs/contracts';
 import type { ProgressStep, ProgressStepStatus, StatusBadgeProps } from '@h5cs/ui';
 
+import { relativeMerchantPath } from '../merchant-base-path';
+
 type ContinueOnboardingResult = Extract<SkillIntentResult, { action: 'continue_onboarding' }>;
 type OnboardingContractState = ContinueOnboardingResult['state'];
 type StepId = 'industry' | 'materials' | 'policy' | 'confirmation';
@@ -137,11 +139,13 @@ function toLoginGate(rawManagementUrl: string | undefined, applicationOrigin: st
     const target = new URL(rawManagementUrl);
     if (target.origin !== applicationOrigin || target.search || target.hash)
       return '/account/login';
-    const merchantId = /^\/workspace\/([0-9a-f]{32})(?:\/|$)/u.exec(target.pathname)?.[1];
+    const relativePath = relativeMerchantPath(target.pathname);
+    if (relativePath === null) return '/account/login';
+    const merchantId = /^\/workspace\/([0-9a-f]{32})(?:\/|$)/u.exec(relativePath)?.[1];
     if (!merchantId) return '/account/login';
     const allowedPath = new RegExp(`^/workspace/${merchantId}(?:/assistants/[0-9a-f]{32})?$`, 'u');
-    return allowedPath.test(target.pathname)
-      ? `/account/login?merchant=${merchantId}&next=${encodeURIComponent(target.pathname)}`
+    return allowedPath.test(relativePath)
+      ? `/account/login?merchant=${merchantId}&next=${encodeURIComponent(relativePath)}`
       : '/account/login';
   } catch {
     return '/account/login';

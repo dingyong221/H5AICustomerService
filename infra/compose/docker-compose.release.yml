@@ -124,7 +124,7 @@ services:
       MYSQL_TLS_CA_FILE: /etc/ssl/certs/h5cs-managed-mysql-ca.pem
       NODE_ENV: production
       PORT: 3000
-      HEALTHCHECK_PATH: /login
+      HEALTHCHECK_PATH: ${H5CS_OPS_HEALTHCHECK_PATH:-/login}
     volumes: *mysql-ca-volumes
     ports:
       - 127.0.0.1:${H5CS_OPS_WEB_LOOPBACK_PORT:-13002}:3000

@@ -80,6 +80,32 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Verify optional same-domain Web path builds
+        shell: bash
+        env:
+          NEXT_PUBLIC_MERCHANT_BASE_PATH: /console
+          NEXT_PUBLIC_OPS_BASE_PATH: /ops
+        run: |
+          set -euo pipefail
+          for spec in 'merchant-web /console 3133 /console/account/login /account/login' 'ops-web /ops 3134 /ops/login /login'; do
+            read -r app prefix port live_path absent_path <<< "$spec"
+            pnpm --filter "@h5cs/${app}" build
+            (
+              cd "apps/${app}"
+              pnpm exec next start -p "$port" >/dev/null 2>&1 &
+              server_pid=$!
+              trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+              for attempt in {1..40}; do
+                if curl --silent --output /dev/null "http://127.0.0.1:${port}${live_path}"; then break; fi
+                sleep 1
+              done
+              test "$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${port}${live_path}")" = 200
+              test "$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${port}${absent_path}")" = 404
+              html="$(curl --silent "http://127.0.0.1:${port}${live_path}")"
+              grep -Fq "src=\"${prefix}/_next/static/" <<< "$html"
+            )
+          done
+
       - name: Generate SBOM and repository release evidence
         run: node scripts/quality/release-gate.mjs evidence --version 0.1.0 --output "${{ runner.temp }}/release-evidence"
 

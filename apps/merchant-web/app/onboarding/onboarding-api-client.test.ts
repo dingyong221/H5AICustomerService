@@ -1,8 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createOnboardingApiClient, OnboardingClientError } from './onboarding-api-client';
 
 const sessionId = '33333333333333333333333333333333';
+
+afterEach(() => vi.unstubAllEnvs());
 
 const successResponse = () =>
   new Response(
@@ -142,6 +144,42 @@ describe('onboarding API client boundary', () => {
       },
       url: 'https://merchant.test/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444',
     });
+  });
+
+  it('accepts only the configured console-prefixed management link in a subpath build', async () => {
+    vi.stubEnv('NEXT_PUBLIC_MERCHANT_BASE_PATH', '/console');
+    const makeClient = (path: string) =>
+      createOnboardingApiClient({
+        apiBaseUrl: '/api/v1/skill',
+        fetchImpl: vi.fn<typeof fetch>(
+          async () =>
+            new Response(
+              JSON.stringify({
+                data: {
+                  action: 'open_management_console',
+                  assistant: {
+                    assistant_ref: '44444444444444444444444444444444',
+                    display_name: '售前客服',
+                    status: 'active',
+                  },
+                  url: `https://merchant.test${path}`,
+                },
+                request_id: 'request-prefixed',
+              }),
+              { status: 200 },
+            ),
+        ),
+        getAccessToken: () => 'token',
+        origin: 'https://merchant.test',
+      });
+    const path =
+      '/console/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444';
+    await expect(makeClient(path).startOrResume({ idempotencyKey: 'key' })).resolves.toMatchObject({
+      url: `https://merchant.test${path}`,
+    });
+    await expect(
+      makeClient(path.slice('/console'.length)).startOrResume({ idempotencyKey: 'key' }),
+    ).rejects.toMatchObject({ kind: 'invalid_response' });
   });
 
   it('rejects cross-origin or embellished management links', async () => {

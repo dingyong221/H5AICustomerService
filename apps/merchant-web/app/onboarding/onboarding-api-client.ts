@@ -7,6 +7,8 @@ import {
   type SkillIntentResult,
 } from '@h5cs/contracts';
 
+import { relativeMerchantPath } from '../merchant-base-path';
+
 type ContinueOnboardingResult = Extract<SkillIntentResult, { action: 'continue_onboarding' }>;
 export type ExistingAssistantResult = Extract<
   SkillIntentResult,
@@ -225,10 +227,12 @@ function safeManagementUrl(
       target.search === '' &&
       target.hash === '';
     if (!safeOrigin) return false;
+    const relativePath = relativeMerchantPath(target.pathname);
+    if (relativePath === null) return false;
     if (result.action === 'select_assistant') {
-      return /^\/workspace\/[0-9a-f]{32}$/u.test(target.pathname);
+      return /^\/workspace\/[0-9a-f]{32}$/u.test(relativePath);
     }
-    const match = /^\/workspace\/[0-9a-f]{32}\/assistants\/([0-9a-f]{32})$/u.exec(target.pathname);
+    const match = /^\/workspace\/[0-9a-f]{32}\/assistants\/([0-9a-f]{32})$/u.exec(relativePath);
     return match?.[1] === result.assistant.assistant_ref;
   } catch {
     return false;
