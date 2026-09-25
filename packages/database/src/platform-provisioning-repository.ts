@@ -19,6 +19,13 @@ export class MerchantInvitationNotReissuableError extends Error {
   }
 }
 
+export class MerchantStatusTransitionError extends Error {
+  public constructor() {
+    super('Merchant status changed or transition is unavailable');
+    this.name = 'MerchantStatusTransitionError';
+  }
+}
+
 export class MerchantProvisionAlreadyAppliedError extends Error {
   public constructor(public readonly merchantId: string) {
     super('Merchant provisioning request was already applied');
@@ -85,6 +92,7 @@ type MerchantRow = RowDataPacket & {
 };
 
 type PendingMerchantRow = RowDataPacket & { name: string; status: string };
+type MerchantStatusRow = RowDataPacket & { status: string };
 type PlatformAuditRow = RowDataPacket & {
   id: Buffer;
   actor_id: string;
@@ -142,6 +150,70 @@ export class MySqlPlatformProvisioningRepository {
 
   public constructor(database: DatabaseConnectionConfig) {
     this.#database = database;
+  }
+
+  public async setMerchantPaused(input: {
+    merchantId: string;
+    paused: boolean;
+    reason: string;
+    operatorId: string;
+  }): Promise<'active' | 'paused'> {
+    if (!/^[0-9a-f]{32}$/u.test(input.merchantId)) {
+      throw new Error('Merchant ID is invalid');
+    }
+    const operatorId = validOperator(input.operatorId);
+    const reason = input.reason.trim();
+    if (
+      reason.length < 5 ||
+      reason.length > 512 ||
+      /[\u0000-\u0009\u000b-\u001f\u007f]/u.test(reason)
+    ) {
+      throw new Error('Merchant status reason must contain 5–512 printable characters');
+    }
+    const expected = input.paused ? 'active' : 'paused';
+    const next = input.paused ? 'paused' : 'active';
+    const connection = await this.#database.openConnection();
+    try {
+      await connection.beginTransaction();
+      try {
+        const merchantId = Buffer.from(input.merchantId, 'hex');
+        const [rows] = await connection.execute<MerchantStatusRow[]>(
+          `SELECT status FROM merchant WHERE id = ? FOR UPDATE`,
+          [merchantId],
+        );
+        if (rows[0]?.status !== expected) throw new MerchantStatusTransitionError();
+        const [updated] = await connection.execute<ResultSetHeader>(
+          `UPDATE merchant SET status = ?, updated_at = UTC_TIMESTAMP(6)
+            WHERE id = ? AND status = ?`,
+          [next, merchantId, expected],
+        );
+        if (updated.affectedRows !== 1) throw new MerchantStatusTransitionError();
+        await connection.execute(
+          `INSERT INTO audit_log
+             (id, merchant_id, actor_type, actor_id, action, target_type, target_id,
+              result, request_id, reason, metadata, occurred_at, created_at)
+           VALUES (?, ?, 'platform_operator', ?, ?, 'merchant', ?,
+                   'success', ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
+          [
+            randomBytes(16),
+            merchantId,
+            operatorId,
+            input.paused ? 'merchant.pause' : 'merchant.resume',
+            input.merchantId,
+            randomUUID(),
+            reason,
+            JSON.stringify({ previousStatus: expected, nextStatus: next }),
+          ],
+        );
+        await connection.commit();
+        return next;
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      }
+    } finally {
+      await connection.end();
+    }
   }
 
   public async listMerchants(limit = 50): Promise<readonly PlatformMerchantSummary[]> {

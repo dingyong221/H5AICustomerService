@@ -208,6 +208,39 @@ a {
   font-family: ui-monospace, monospace;
 }
 
+.ops-merchant-status-control {
+  flex-basis: 100%;
+}
+
+.ops-merchant-status-form {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.7rem;
+  max-width: 38rem;
+}
+
+.ops-merchant-status-form label:not(.ops-merchant-status-confirm) {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.ops-merchant-status-form textarea {
+  border: 1px solid #cbd3df;
+  border-radius: 8px;
+  font: inherit;
+  padding: 0.65rem;
+}
+
+.ops-merchant-status-confirm {
+  align-items: center;
+  display: flex;
+  gap: 0.4rem;
+}
+
+.ops-merchant-status-form button {
+  justify-self: start;
+}
+
 .ops-management-link {
   align-items: center;
   display: flex;

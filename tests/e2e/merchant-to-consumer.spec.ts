@@ -201,4 +201,34 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
   };
   expect(secondSessionPayload.data.releaseRef).toBe(latestReleaseRef);
   await expect(answer).toBeVisible({ timeout: 60_000 });
+
+  await operatorPage.reload();
+  const merchantRow = operatorPage
+    .locator('.ops-merchant-list li')
+    .filter({ hasText: merchantName });
+  await merchantRow.getByText('暂停商家', { exact: true }).click();
+  await merchantRow.getByLabel('操作原因（写入审计）').fill('浏览器验收：暂停公开客服服务');
+  await merchantRow.getByLabel('我已核对商家编号和操作影响').check();
+  await merchantRow.getByRole('button', { name: '确认暂停商家' }).click();
+  await expect(merchantRow).toContainText('已暂停');
+  await operatorPage.reload();
+  await expect(merchantRow).toContainText('已暂停');
+  const pausedStatus = await consumerPage.evaluate(
+    async (slug) => (await fetch(`/api/v1/public/assistants/${slug}`)).status,
+    publicSlug,
+  );
+  expect(pausedStatus).toBe(404);
+
+  await merchantRow.getByText('恢复商家', { exact: true }).click();
+  await merchantRow.getByLabel('操作原因（写入审计）').fill('浏览器验收：原因已解除并恢复服务');
+  await merchantRow.getByLabel('我已核对商家编号和操作影响').check();
+  await merchantRow.getByRole('button', { name: '确认恢复商家' }).click();
+  await expect(merchantRow).toContainText('运行中');
+  await operatorPage.reload();
+  await expect(merchantRow).toContainText('运行中');
+  const resumedStatus = await consumerPage.evaluate(
+    async (slug) => (await fetch(`/api/v1/public/assistants/${slug}`)).status,
+    publicSlug,
+  );
+  expect(resumedStatus).toBe(200);
 });

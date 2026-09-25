@@ -15,6 +15,7 @@ import {
   MySqlPlatformProvisioningRepository,
   MerchantProvisionAlreadyAppliedError,
   MerchantProvisionIdempotencyConflictError,
+  MerchantStatusTransitionError,
 } from '@h5cs/database';
 import { toAssistantId, toMerchantId, toMerchantUserId } from '@h5cs/domain';
 
@@ -165,6 +166,14 @@ describe('real MySQL merchant-to-consumer flow', () => {
       name: `CI 测试商家 ${uniqueHex()}`,
       operatorId: 'integration_operator',
     });
+    await expect(
+      provisioner.setMerchantPaused({
+        merchantId: merchant.id,
+        paused: true,
+        reason: '尚未领取的商家不得按运行中商家暂停',
+        operatorId: 'integration_operator',
+      }),
+    ).rejects.toBeInstanceOf(MerchantStatusTransitionError);
     const access = new MySqlMerchantAccessRepository(
       database,
       randomBytes(32).toString('base64url'),
@@ -488,6 +497,66 @@ describe('real MySQL merchant-to-consumer flow', () => {
           })
         ).status,
       ).toBe(404);
+      await expect(
+        provisioner.setMerchantPaused({
+          merchantId: merchant.id,
+          paused: true,
+          reason: '集成测试：核对暂停后的公开与既有会话访问',
+          operatorId: 'integration_operator',
+        }),
+      ).resolves.toBe('paused');
+      expect(await assistants.findPublicSnapshot(created.publicSlug)).toBeNull();
+      expect((await fetch(`${publicBase}/assistants/${created.publicSlug}`)).status).toBe(404);
+      expect(
+        (
+          await fetch(`${publicBase}/sessions/${otherSession.sessionHandle}/history`, {
+            headers: { Cookie: otherCookie! },
+          })
+        ).status,
+      ).toBe(404);
+      await expect(
+        provisioner.setMerchantPaused({
+          merchantId: merchant.id,
+          paused: true,
+          reason: '集成测试：重复暂停应被拒绝',
+          operatorId: 'integration_operator',
+        }),
+      ).rejects.toBeInstanceOf(MerchantStatusTransitionError);
+      await expect(
+        provisioner.setMerchantPaused({
+          merchantId: merchant.id,
+          paused: false,
+          reason: '集成测试：确认恢复原有公开链接',
+          operatorId: 'integration_operator',
+        }),
+      ).resolves.toBe('active');
+      expect((await fetch(`${publicBase}/assistants/${created.publicSlug}`)).status).toBe(200);
+      expect(
+        (
+          await fetch(`${publicBase}/sessions/${otherSession.sessionHandle}/history`, {
+            headers: { Cookie: otherCookie! },
+          })
+        ).status,
+      ).toBe(200);
+      const auditConnection = await database.openConnection();
+      try {
+        const [statusAudits] = await auditConnection.execute(
+          `SELECT action, reason FROM audit_log
+            WHERE merchant_id = ? AND action IN ('merchant.pause', 'merchant.resume')
+            ORDER BY occurred_at`,
+          [Buffer.from(merchant.id, 'hex')],
+        );
+        expect(
+          (statusAudits as Array<{ action: string; reason: string }>).map((row) => row.action),
+        ).toEqual(['merchant.pause', 'merchant.resume']);
+        expect(
+          (statusAudits as Array<{ action: string; reason: string }>).every(
+            (row) => row.reason.length >= 5,
+          ),
+        ).toBe(true);
+      } finally {
+        await auditConnection.end();
+      }
     } finally {
       for (const [key, value] of Object.entries(priorEnvironment)) {
         if (value === undefined) delete process.env[key];

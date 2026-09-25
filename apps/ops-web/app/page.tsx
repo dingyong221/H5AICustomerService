@@ -13,6 +13,7 @@ import { redirect } from 'next/navigation';
 import { currentOperator, logoutOperator } from './operator-actions';
 import { DeactivateIndustryTemplateForm } from './deactivate-industry-template-form';
 import { ManagementLink } from './management-link';
+import { MerchantStatusForm } from './merchant-status-form';
 import { IndustryTemplateForm } from './industry-template-form';
 import { managementBaseUrl, merchantWorkspaceUrl } from './management-url';
 import { ProvisionForm } from './provision-form';
@@ -214,7 +215,13 @@ export default async function OperationsDashboardPage() {
                   <li key={merchant.id}>
                     <strong>{merchant.name}</strong>
                     <span>
-                      {merchant.status === 'pending_owner' ? '等待领取' : merchant.status}
+                      {merchant.status === 'pending_owner'
+                        ? '等待领取'
+                        : merchant.status === 'active'
+                          ? '运行中'
+                          : merchant.status === 'paused'
+                            ? '已暂停'
+                            : merchant.status}
                     </span>
                     <small>{merchant.id}</small>
                     {merchant.status === 'pending_owner' ? (
@@ -222,6 +229,15 @@ export default async function OperationsDashboardPage() {
                     ) : null}
                     {merchant.status === 'active' && managementBase ? (
                       <ManagementLink href={merchantWorkspaceUrl(managementBase, merchant.id)} />
+                    ) : null}
+                    {merchant.status === 'active' || merchant.status === 'paused' ? (
+                      <details className="ops-merchant-status-control">
+                        <summary>{merchant.status === 'active' ? '暂停商家' : '恢复商家'}</summary>
+                        <MerchantStatusForm
+                          merchantId={merchant.id}
+                          paused={merchant.status === 'active'}
+                        />
+                      </details>
                     ) : null}
                   </li>
                 ))}
