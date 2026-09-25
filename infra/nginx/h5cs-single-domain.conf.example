@@ -82,6 +82,19 @@ server {
     location = /console {
         return 308 /console/;
     }
+    # Legacy WorkBuddy pages remain unavailable during the Web-only stage.
+    location = /console/login {
+        return 404;
+    }
+    location = /console/onboarding {
+        return 404;
+    }
+    location ^~ /console/onboarding/ {
+        return 404;
+    }
+    location ^~ /console/auth/workbuddy {
+        return 404;
+    }
     location ^~ /console/ {
         proxy_pass http://127.0.0.1:13000;
     }

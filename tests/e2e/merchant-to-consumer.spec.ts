@@ -67,6 +67,11 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
   await merchantPage.getByLabel('平台登录密码（至少 12 位）').fill(merchantPassword);
   await merchantPage.getByRole('button', { name: '领取商家后台' }).click();
   await expect(merchantPage).toHaveURL(/\/workspace\/[0-9a-f]{32}$/u);
+  await expect(merchantPage.getByRole('link', { name: '登录管理后台' })).toHaveAttribute(
+    'href',
+    `${pathMode === 'subpaths' ? '/console' : ''}/account/login`,
+  );
+  await expect(merchantPage.getByRole('link', { name: 'HTTPS 安全绑定' })).toHaveCount(0);
   const managementUrl = merchantPage.url();
   await operatorPage.reload();
   await expect(operatorPage.getByRole('link', { name: managementUrl })).toHaveAttribute(

@@ -42,11 +42,11 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
             <MerchantNavigation />
             <div className="merchant-sidebar__footer">
               <span className="merchant-avatar" aria-hidden="true">
-                W
+                商
               </span>
               <span>
-                <strong>需要安全绑定</strong>
-                <Link href="/auth/workbuddy/bind">HTTPS 安全绑定</Link>
+                <strong>商家账号</strong>
+                <Link href="/account/login">登录管理后台</Link>
               </span>
             </div>
           </aside>
