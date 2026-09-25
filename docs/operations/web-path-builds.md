@@ -7,7 +7,7 @@
 | 独立主机根路径（当前默认）   | `NEXT_PUBLIC_MERCHANT_BASE_PATH=`         | `NEXT_PUBLIC_OPS_BASE_PATH=`     | `MANAGEMENT_CONSOLE_URL=https://<商家主机>/`；商家 `H5CS_MERCHANT_HEALTHCHECK_PATH=/account/login`；运营 `H5CS_OPS_HEALTHCHECK_PATH=/login`                         |
 | 同一域名分路径（待用户决定） | `NEXT_PUBLIC_MERCHANT_BASE_PATH=/console` | `NEXT_PUBLIC_OPS_BASE_PATH=/ops` | `MANAGEMENT_CONSOLE_URL=https://h5cs.1rying.com/console`；商家 `H5CS_MERCHANT_HEALTHCHECK_PATH=/console/account/login`；运营 `H5CS_OPS_HEALTHCHECK_PATH=/ops/login` |
 
-`infra/docker/workspace.Dockerfile` 接收上述两个 build arg；仅允许表中的空值、`/console` 与 `/ops`，无效值使对应 Next.js 构建失败。运营后台和 WorkBuddy 生成管理链接时按 `MANAGEMENT_CONSOLE_URL` 保留 `/console`；商家客户端也只接受与自身构建前缀一致的可信管理链接。API 始终独立使用 `/api`，消费者 H5 的公开入口仍是 `/a`；本文件不改变它们。
+`infra/docker/workspace.Dockerfile` 接收上述两个 build arg，并把相同路径保留在 Web 镜像的运行环境供 Next.js 读取；仅允许表中的空值、`/console` 与 `/ops`，无效值使对应 Next.js 构建失败。只在构建时传入 basePath 而在容器运行时丢失，会让已构建的分路径页面返回 404。运营后台和 WorkBuddy 生成管理链接时按 `MANAGEMENT_CONSOLE_URL` 保留 `/console`；商家客户端也只接受与自身构建前缀一致的可信管理链接。API 始终独立使用 `/api`，消费者 H5 的公开入口仍是 `/a`；本文件不改变它们。
 
 反向代理必须将原始 `/console/...`、`/ops/...` 路径完整转发给对应 Web 容器，不能剥掉前缀。仅将 `/console` 代理到根路径 Next.js 镜像，或把 `/console` 镜像部署到根路径，都会导致页面、静态资源、Server Actions 或重定向失败。发布前用正式构建镜像与代理一起验证登录、领取、创建、发布、消费者固定链接、静态资源和 Server Actions；不要把本机路由冒烟当成此项验收。
 
