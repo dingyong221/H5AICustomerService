@@ -112,7 +112,9 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
   await merchantPage.getByRole('button', { name: '保存跟进状态' }).click();
   await expect(merchantPage.getByText('已保存；咨询原始消息未修改。')).toBeVisible();
   await merchantPage.reload();
-  await expect(merchantPage.locator('.ui-status-badge').filter({ hasText: '处理中' })).toBeVisible();
+  await expect(
+    merchantPage.locator('.ui-status-badge').filter({ hasText: '处理中' }),
+  ).toBeVisible();
   await consumerPage.reload();
   await expect(answer).toBeVisible({ timeout: 30_000 });
   consumerPage.once('dialog', (dialog) => void dialog.accept());
