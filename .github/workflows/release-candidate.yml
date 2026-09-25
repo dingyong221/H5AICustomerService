@@ -85,6 +85,14 @@ jobs:
       - name: Run complete repository release gate
         run: node scripts/quality/release-gate.mjs repository --version "${{ steps.release.outputs.version }}"
 
+      - name: Verify Web-only candidate gateway routes
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq nginx
+          bash scripts/quality/verify-nginx-single-domain.sh
+          bash scripts/quality/verify-nginx-routing.sh
+
       - name: Generate immutable repository evidence
         run: node scripts/quality/release-gate.mjs evidence --version "${{ steps.release.outputs.version }}" --output "${{ runner.temp }}/release-evidence"
 
