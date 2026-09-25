@@ -60,6 +60,10 @@
     "privateAccessVerified": false,
     "tlsVerified": false,
     "backupRestoreDrillPassed": false,
+    "offHostBackupVerified": false,
+    "binlogArchiveVerified": false,
+    "pointInTimeRestoreDrillPassed": false,
+    "capacityAlertPassed": false,
     "evidenceReference": "REPLACE_WITH_NON_SECRET_REFERENCE"
   },
   "model": {
