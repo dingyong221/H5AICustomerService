@@ -1558,3 +1558,72 @@ a {
     grid-template-columns: 1fr;
   }
 }
+
+.merchant-conversation-panel {
+  margin-top: 1.25rem;
+}
+
+.merchant-conversation-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.merchant-conversation-filters a,
+.merchant-conversation-list a {
+  color: #315bbd;
+}
+
+.merchant-conversation-list,
+.merchant-conversation-messages {
+  display: grid;
+  gap: 0.8rem;
+  list-style: none;
+  padding: 0;
+}
+
+.merchant-conversation-list li,
+.merchant-conversation-messages li {
+  border: 1px solid #e2e7ef;
+  border-radius: 10px;
+  display: grid;
+  gap: 0.35rem;
+  overflow-wrap: anywhere;
+  padding: 0.85rem;
+}
+
+.merchant-conversation-list small,
+.merchant-conversation-messages small {
+  color: #687387;
+}
+
+.merchant-conversation-messages p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.merchant-follow-up-form {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.merchant-follow-up-form select,
+.merchant-follow-up-form button {
+  border: 1px solid #cbd3e0;
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+}
+
+.merchant-follow-up-form button {
+  background: #315bbd;
+  color: #fff;
+  cursor: pointer;
+}
+
+.merchant-follow-up-form p {
+  flex-basis: 100%;
+}

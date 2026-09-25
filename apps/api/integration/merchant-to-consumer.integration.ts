@@ -8,6 +8,7 @@ import {
   MySqlAssistantLifecycleRepository,
   MySqlConversationTurnJobRepository,
   MySqlMerchantAccessRepository,
+  MySqlMerchantConversationRepository,
   MySqlPlatformProvisioningRepository,
   MerchantProvisionAlreadyAppliedError,
   MerchantProvisionIdempotencyConflictError,
@@ -297,6 +298,60 @@ describe('real MySQL merchant-to-consumer flow', () => {
       });
       expect(claim?.facts.materialsSummary).toBe(draft.materialsSummary);
       await jobs.complete(claim!, '提供上门空调清洗服务，具体范围请向商家确认。', new Date());
+
+      const consultations = new MySqlMerchantConversationRepository(database);
+      const ownConsultations = await consultations.list({
+        merchantId: merchant.id,
+        merchantUserId: owner.merchantUserId,
+      });
+      expect(ownConsultations.items.some((item) => item.sessionId === claim!.sessionId)).toBe(true);
+      expect(
+        (
+          await consultations.list({
+            merchantId: merchant.id,
+            merchantUserId: otherOwner.merchantUserId,
+          })
+        ).items,
+      ).toEqual([]);
+      const consultationDetail = await consultations.detail({
+        merchantId: merchant.id,
+        merchantUserId: owner.merchantUserId,
+        sessionId: claim!.sessionId,
+      });
+      expect(consultationDetail?.messages.map((message) => message.role)).toEqual([
+        'visitor',
+        'assistant',
+      ]);
+      await expect(
+        consultations.detail({
+          merchantId: merchant.id,
+          merchantUserId: otherOwner.merchantUserId,
+          sessionId: claim!.sessionId,
+        }),
+      ).resolves.toBeNull();
+      await expect(
+        consultations.setFollowUpStatus({
+          merchantId: merchant.id,
+          merchantUserId: otherOwner.merchantUserId,
+          sessionId: claim!.sessionId,
+          status: 'resolved',
+        }),
+      ).rejects.toThrow();
+      await consultations.setFollowUpStatus({
+        merchantId: merchant.id,
+        merchantUserId: owner.merchantUserId,
+        sessionId: claim!.sessionId,
+        status: 'in_progress',
+      });
+      expect(
+        (
+          await consultations.detail({
+            merchantId: merchant.id,
+            merchantUserId: owner.merchantUserId,
+            sessionId: claim!.sessionId,
+          })
+        )?.conversation.followUpStatus,
+      ).toBe('in_progress');
 
       const turn = await dataFrom<{
         state: string;

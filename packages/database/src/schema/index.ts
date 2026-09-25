@@ -753,6 +753,7 @@ export const sessions = mysqlTable(
     releaseId: id('release_id').notNull(),
     visitorCredentialId: id('visitor_credential_id').notNull(),
     status: varchar('status', { length: 32 }).notNull().default('active'),
+    followUpStatus: varchar('follow_up_status', { length: 32 }).notNull().default('pending'),
     nextSequence: int('next_sequence', { unsigned: true }).notNull().default(1),
     activeTurnId: id('active_turn_id'),
     version: int('version', { unsigned: true }).notNull().default(1),
@@ -773,6 +774,7 @@ export const sessions = mysqlTable(
       table.status,
       table.expiresAt,
     ),
+    index('idx_session_merchant_activity').on(table.merchantId, table.lastActivityAt, table.id),
     foreignKey({
       columns: [table.merchantId, table.assistantId],
       foreignColumns: [assistants.merchantId, assistants.id],

@@ -78,6 +78,11 @@ export default async function MerchantWorkspacePage({
               </ul>
             )}
           </section>
+          <section className="merchant-account-card assistant-create-card">
+            <h2>客户咨询</h2>
+            <p>查看消费者咨询与人工跟进状态。客服发布后产生的咨询会出现在这里。</p>
+            <Link href={`/workspace/${merchantId}/conversations`}>进入咨询管理</Link>
+          </section>
         </>
       ) : (
         <p role="alert">数据库暂不可用，无法读取或创建客服。</p>

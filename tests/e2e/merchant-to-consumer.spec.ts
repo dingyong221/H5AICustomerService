@@ -100,6 +100,19 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
     '我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。',
   );
   await expect(answer).toBeVisible({ timeout: 60_000 });
+  const merchantId = new URL(managementUrl).pathname.split('/')[2];
+  await merchantPage.goto(`http://127.0.0.1:3000/workspace/${merchantId}/conversations`);
+  await expect(merchantPage.getByRole('heading', { name: '咨询管理' })).toBeVisible();
+  await merchantPage.locator('.merchant-conversation-list a').first().click();
+  await expect(merchantPage.getByText('你们提供什么服务？')).toBeVisible();
+  await expect(
+    merchantPage.getByText('我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。'),
+  ).toBeVisible();
+  await merchantPage.getByRole('combobox', { name: '人工跟进状态' }).selectOption('in_progress');
+  await merchantPage.getByRole('button', { name: '保存跟进状态' }).click();
+  await expect(merchantPage.getByText('已保存；咨询原始消息未修改。')).toBeVisible();
+  await merchantPage.reload();
+  await expect(merchantPage.getByText('处理中')).toBeVisible();
   await consumerPage.reload();
   await expect(answer).toBeVisible({ timeout: 30_000 });
   consumerPage.once('dialog', (dialog) => void dialog.accept());
