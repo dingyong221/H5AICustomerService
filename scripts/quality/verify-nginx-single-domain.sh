@@ -12,7 +12,7 @@ command -v openssl >/dev/null
 scratch=$(mktemp -d "${RUNNER_TEMP:-/tmp}/h5cs-nginx-check.XXXXXXXX")
 cleanup() {
   rm -f -- "$scratch/nginx.conf" "$scratch/site.conf" "$scratch/cert.pem" \
-    "$scratch/key.pem" "$scratch/access.log" "$scratch/error.log"
+    "$scratch/key.pem" "$scratch/access.log" "$scratch/error.log" "$scratch/nginx.pid"
   rmdir -- "$scratch/acme/.well-known/acme-challenge" \
     "$scratch/acme/.well-known" "$scratch/acme" "$scratch" 2>/dev/null || true
 }
@@ -31,6 +31,7 @@ sed \
   -e "s|/var/www/letsencrypt|$scratch/acme|g" \
   infra/nginx/h5cs-single-domain.conf.example > "$scratch/site.conf"
 
-printf 'events {}\nhttp { include %s/site.conf; }\n' "$scratch" > "$scratch/nginx.conf"
+printf 'pid %s/nginx.pid;\nevents {}\nhttp { include %s/site.conf; }\n' \
+  "$scratch" "$scratch" > "$scratch/nginx.conf"
 nginx -t -c "$scratch/nginx.conf" -p "$scratch/"
 echo 'Candidate single-domain Nginx syntax passed with a disposable CI-only certificate.'
