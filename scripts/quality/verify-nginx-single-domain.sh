@@ -31,7 +31,7 @@ sed \
   -e "s|/var/www/letsencrypt|$scratch/acme|g" \
   infra/nginx/h5cs-single-domain.conf.example > "$scratch/site.conf"
 
-printf 'pid %s/nginx.pid;\nevents {}\nhttp { include %s/site.conf; }\n' \
-  "$scratch" "$scratch" > "$scratch/nginx.conf"
+printf 'pid %s/nginx.pid;\nerror_log %s/error.log;\nevents {}\nhttp { access_log %s/access.log; include %s/site.conf; }\n' \
+  "$scratch" "$scratch" "$scratch" "$scratch" > "$scratch/nginx.conf"
 nginx -t -c "$scratch/nginx.conf" -p "$scratch/"
 echo 'Candidate single-domain Nginx syntax passed with a disposable CI-only certificate.'
