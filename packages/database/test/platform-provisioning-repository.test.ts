@@ -49,6 +49,47 @@ const repositoryWith = (failOn?: string, merchantStatus = 'pending_owner', failE
 };
 
 describe('platform merchant provisioning', () => {
+  it('finds older merchants by exact ID or escaped name without loading private records', async () => {
+    const merchantId = Buffer.from('ab'.repeat(16), 'hex');
+    const createdAt = new Date('2026-09-01T00:00:00.000Z');
+    const execute = vi.fn(async (_sql: string, _values: readonly unknown[]) => [
+      [{ id: merchantId, name: '示例_商家%', status: 'active', created_at: createdAt }],
+      [],
+    ]);
+    const end = vi.fn(async () => undefined);
+    const database = {
+      openConnection: async () => ({ execute, end }) as unknown as Connection,
+      summary: { host: 'test', database: 'test', tlsRequested: false },
+      toJSON: () => ({ host: 'test', database: 'test', tlsRequested: false }),
+    } satisfies DatabaseConnectionConfig;
+    const repository = new MySqlPlatformProvisioningRepository(database);
+
+    const byName = await repository.searchMerchants('  _商家%!  ', 10);
+    expect(byName).toEqual([
+      {
+        id: merchantId.toString('hex'),
+        name: '示例_商家%',
+        status: 'active',
+        createdAt,
+      },
+    ]);
+    expect(execute).toHaveBeenCalledWith(expect.stringContaining("name LIKE ? ESCAPE '!'"), [
+      '%!_商家!%!!%',
+      10,
+    ]);
+    expect(execute.mock.calls[0]?.[0]).not.toMatch(/message|contact|metadata/iu);
+
+    await repository.searchMerchants(merchantId.toString('hex').toUpperCase(), 1);
+    expect(execute).toHaveBeenLastCalledWith(expect.stringContaining('WHERE id = ?'), [
+      merchantId,
+      1,
+    ]);
+    expect(end).toHaveBeenCalledTimes(2);
+    await expect(repository.searchMerchants('%')).rejects.toThrow('Merchant search');
+    await expect(repository.searchMerchants('示例', 101)).rejects.toThrow('Merchant search limit');
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
   it('summarizes task states and exposes only bounded failed-task metadata', async () => {
     const jobId = Buffer.from('44'.repeat(16), 'hex');
     const merchantId = Buffer.from('22'.repeat(16), 'hex');

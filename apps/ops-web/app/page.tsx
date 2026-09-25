@@ -7,7 +7,9 @@ import {
   MySqlPlatformProvisioningRepository,
   type IndustryTemplateGuide,
   type PlatformJobOverview,
+  type PlatformMerchantSummary,
 } from '@h5cs/database';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { currentOperator, logoutOperator } from './operator-actions';
@@ -93,12 +95,30 @@ const assistantStateLabel = (status: string, activeReleaseId: string | null): st
   return '其他状态';
 };
 
-export default async function OperationsDashboardPage() {
+export default async function OperationsDashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ merchantSearch?: string | string[] }>;
+}) {
   const operator = await currentOperator();
   if (!operator) redirect('/login');
+  const rawSearch = (await searchParams).merchantSearch;
+  const searchTerm = typeof rawSearch === 'string' ? rawSearch.trim() : '';
+  const searchRequested =
+    rawSearch !== undefined && (typeof rawSearch !== 'string' || searchTerm !== '');
+  const searchError =
+    searchRequested &&
+    (typeof rawSearch !== 'string' ||
+      searchTerm.length < 2 ||
+      searchTerm.length > 100 ||
+      /[\u0000-\u001f\u007f]/u.test(searchTerm))
+      ? '请输入 2–100 个可显示字符的商家名称或完整商家 ID。'
+      : null;
   const database = loadDatabaseConfig();
   const managementBase = managementBaseUrl(process.env['MANAGEMENT_CONSOLE_URL']);
   let merchants: Awaited<ReturnType<MySqlPlatformProvisioningRepository['listMerchants']>> = [];
+  let matchingMerchants: readonly PlatformMerchantSummary[] = [];
+  let merchantSearchReady = !searchRequested;
   let audits: Awaited<ReturnType<MySqlPlatformProvisioningRepository['listPlatformAudits']>> = [];
   let assistants: Awaited<ReturnType<MySqlPlatformProvisioningRepository['listAssistantStates']>> =
     [];
@@ -115,6 +135,14 @@ export default async function OperationsDashboardPage() {
       databaseReady = true;
     } catch {
       databaseReady = false;
+    }
+    if (searchRequested && !searchError) {
+      try {
+        matchingMerchants = await repository.searchMerchants(searchTerm);
+        merchantSearchReady = true;
+      } catch {
+        merchantSearchReady = false;
+      }
     }
     try {
       audits = await repository.listPlatformAudits();
@@ -206,12 +234,37 @@ export default async function OperationsDashboardPage() {
         {databaseReady ? <ProvisionForm idempotencyKey={randomUUID()} /> : null}
         {databaseReady ? (
           <div className="ops-merchant-list" id="merchants">
-            <h3>最近商家</h3>
-            {merchants.length === 0 ? (
-              <p>尚无商家记录。</p>
-            ) : (
+            <h3>{searchRequested ? '查找商家' : '最近商家'}</h3>
+            <form className="ops-merchant-search" method="get" role="search">
+              <label htmlFor="merchant-search">按名称或完整商家 ID 查找</label>
+              <div>
+                <input
+                  defaultValue={searchTerm}
+                  id="merchant-search"
+                  maxLength={100}
+                  minLength={2}
+                  name="merchantSearch"
+                  required
+                  type="search"
+                />
+                <button type="submit">查找商家</button>
+                {searchRequested ? <Link href="/#merchants">查看最近商家</Link> : null}
+              </div>
+            </form>
+            {searchError ? <p role="alert">{searchError}</p> : null}
+            {!searchError && !merchantSearchReady ? (
+              <p role="alert">商家查询失败，请稍后重试；不能据此判断商家不存在。</p>
+            ) : null}
+            {!searchError &&
+            merchantSearchReady &&
+            (searchRequested ? matchingMerchants : merchants).length === 0 ? (
+              <p>{searchRequested ? '没有匹配的商家。' : '尚无商家记录。'}</p>
+            ) : null}
+            {!searchError &&
+            merchantSearchReady &&
+            (searchRequested ? matchingMerchants : merchants).length > 0 ? (
               <ul>
-                {merchants.map((merchant) => (
+                {(searchRequested ? matchingMerchants : merchants).map((merchant) => (
                   <li key={merchant.id}>
                     <strong>{merchant.name}</strong>
                     <span>
@@ -242,7 +295,10 @@ export default async function OperationsDashboardPage() {
                   </li>
                 ))}
               </ul>
-            )}
+            ) : null}
+            {searchRequested && matchingMerchants.length === 50 ? (
+              <p>最多显示前 50 条匹配记录；请输入更具体的名称或完整 ID。</p>
+            ) : null}
           </div>
         ) : null}
       </section>

@@ -189,6 +189,49 @@ a {
   padding-top: 1rem;
 }
 
+.ops-merchant-search {
+  display: grid;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.ops-merchant-search label {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.ops-merchant-search > div {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.ops-merchant-search input {
+  border: 1px solid #b7c2d4;
+  border-radius: 8px;
+  font: inherit;
+  max-width: 100%;
+  padding: 0.65rem 0.75rem;
+  width: min(24rem, 100%);
+}
+
+.ops-merchant-search button {
+  background: #315fe7;
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0.65rem 0.85rem;
+}
+
+.ops-merchant-search a {
+  color: #315bbd;
+  font-size: 0.85rem;
+}
+
 .ops-merchant-list ul {
   list-style: none;
   padding: 0;

@@ -73,6 +73,23 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
     'href',
     managementUrl,
   );
+  const merchantSearch = operatorPage.getByRole('search');
+  await merchantSearch.getByLabel('按名称或完整商家 ID 查找').fill(merchantName);
+  await merchantSearch.getByRole('button', { name: '查找商家' }).click();
+  await expect(operatorPage.getByRole('heading', { name: '查找商家' })).toBeVisible();
+  await expect(operatorPage.getByRole('link', { name: managementUrl })).toHaveAttribute(
+    'href',
+    managementUrl,
+  );
+  await merchantSearch
+    .getByLabel('按名称或完整商家 ID 查找')
+    .fill(managementUrl.split('/').at(-1)!);
+  await merchantSearch.getByRole('button', { name: '查找商家' }).click();
+  await expect(operatorPage.getByRole('link', { name: managementUrl })).toHaveAttribute(
+    'href',
+    managementUrl,
+  );
+  await operatorPage.getByRole('link', { name: '查看最近商家' }).click();
 
   await merchantPage.getByLabel('客服名称').fill(assistantName);
   await merchantPage.getByLabel('行业资料引导（可选）').selectOption({

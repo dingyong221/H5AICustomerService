@@ -127,6 +127,13 @@ type PlatformJobRow = RowDataPacket & {
   updated_at: Date;
 };
 
+const merchantSummary = (row: MerchantRow): PlatformMerchantSummary => ({
+  id: row.id.toString('hex'),
+  name: row.name,
+  status: row.status,
+  createdAt: row.created_at,
+});
+
 const isDuplicateKey = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && 'code' in error && error.code === 'ER_DUP_ENTRY';
 
@@ -229,12 +236,35 @@ export class MySqlPlatformProvisioningRepository {
           LIMIT ?`,
         [limit],
       );
-      return rows.map((row) => ({
-        id: row.id.toString('hex'),
-        name: row.name,
-        status: row.status,
-        createdAt: row.created_at,
-      }));
+      return rows.map(merchantSummary);
+    } finally {
+      await connection.end();
+    }
+  }
+
+  public async searchMerchants(
+    query: string,
+    limit = 50,
+  ): Promise<readonly PlatformMerchantSummary[]> {
+    const term = query.trim();
+    if (term.length < 2 || term.length > 100 || /[\u0000-\u001f\u007f]/u.test(term)) {
+      throw new Error('Merchant search must contain 2–100 printable characters');
+    }
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      throw new Error('Merchant search limit is invalid');
+    }
+    const byId = /^[0-9a-f]{32}$/iu.test(term);
+    const connection = await this.#database.openConnection();
+    try {
+      const [rows] = await connection.execute<MerchantRow[]>(
+        `SELECT id, name, status, created_at
+           FROM merchant
+          WHERE ${byId ? 'id = ?' : "name LIKE ? ESCAPE '!'"}
+          ORDER BY created_at DESC, id DESC
+          LIMIT ?`,
+        byId ? [Buffer.from(term, 'hex'), limit] : [`%${term.replace(/[!%_]/gu, '!$&')}%`, limit],
+      );
+      return rows.map(merchantSummary);
     } finally {
       await connection.end();
     }
