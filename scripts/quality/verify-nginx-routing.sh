@@ -36,6 +36,7 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
   -keyout "$scratch/key.pem" -out "$scratch/cert.pem" >/dev/null 2>&1
 
 sed \
+  -e 's/listen 80 default_server;/listen 18080 default_server;/' \
   -e 's/listen 80;/listen 18080;/g' \
   -e 's/listen 443 ssl default_server;/listen 18443 ssl default_server;/' \
   -e 's/127.0.0.1:13000/127.0.0.1:23000/g' \
@@ -48,6 +49,10 @@ sed \
   -e "s|/var/log/nginx/h5-ai-customer-service.error.log|$scratch/error.log|g" \
   -e "s|/var/www/letsencrypt|$scratch/acme|g" \
   infra/nginx/h5cs-single-domain.conf.example > "$scratch/site.conf"
+if grep -Eq 'listen (80|443)([ ;]|$)' "$scratch/site.conf"; then
+  echo 'The CI routing copy still contains a production listener.' >&2
+  exit 1
+fi
 
 printf 'pid %s/nginx.pid;\nerror_log %s/error.log;\nevents {}\nhttp { access_log %s/access.log; include %s/site.conf; }\n' \
   "$scratch" "$scratch" "$scratch" "$scratch" > "$scratch/nginx.conf"
