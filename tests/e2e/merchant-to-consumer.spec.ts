@@ -83,7 +83,10 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
   });
   await industryTemplate.getByText('停用此行业模板', { exact: true }).click();
   await industryTemplate.getByRole('button', { name: '确认停用此行业模板' }).click();
-  await expect(industryTemplate.getByText('模板已停用。刷新页面可查看状态。')).toBeVisible();
+  await expect(industryTemplate).toContainText('已停用');
+  await operatorPage.reload();
+  await expect(industryTemplate).toContainText('已停用');
+  await expect(industryTemplate.getByRole('button', { name: '确认停用此行业模板' })).toHaveCount(0);
   await merchantPage.reload();
   await expect(merchantPage.getByRole('option', { name: '本地生活服务 · v1' })).toHaveCount(0);
   await merchantPage.getByRole('link', { name: assistantName }).click();
