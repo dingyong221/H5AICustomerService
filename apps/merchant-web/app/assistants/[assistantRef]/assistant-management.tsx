@@ -1,10 +1,10 @@
 'use client';
 
-import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Button, StatusBadge } from '@h5cs/ui';
 
+import { ShareAssistantLink } from '../../share-assistant-link';
 import {
   AssistantManagementClientError,
   createAssistantManagementApiClient,
@@ -385,9 +385,10 @@ export function AssistantManagement({ apiBaseUrl, assistantRef }: AssistantManag
                 <small>追踪编号：{model.operationFailure.traceId}</small>
               ) : null}
               {model.publicHref ? (
-                <Link className="secure-auth-link" href={model.publicHref}>
-                  打开固定公开入口
-                </Link>
+                <ShareAssistantLink
+                  expectedOrigin={window.location.origin}
+                  href={model.publicHref}
+                />
               ) : null}
               {error !== undefined || retryCommand !== undefined ? (
                 <Button busy={busy} onClick={retry} variant="secondary">

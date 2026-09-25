@@ -65,12 +65,20 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
   await expect(merchantPage.getByText('当前草稿资料已确认')).toBeVisible();
   await merchantPage.reload();
   await expect(merchantPage.getByRole('button', { name: '确认发布 AI 客服' })).toBeEnabled();
+  await expect(merchantPage.getByRole('img', { name: '扫码打开消费者 AI 客服' })).toHaveCount(0);
   await merchantPage.getByLabel(/我确认发布当前修订/u).check();
   await merchantPage.getByRole('button', { name: '确认发布 AI 客服' }).click();
   const publicLink = merchantPage.locator('a[href^="http://127.0.0.1:3001/a/"]').first();
   await expect(publicLink).toBeVisible();
   const publicUrl = await publicLink.getAttribute('href');
   expect(publicUrl).toMatch(/^http:\/\/127\.0\.0\.1:3001\/a\/[a-z0-9-]+$/u);
+  const shareQr = merchantPage.getByRole('img', { name: '扫码打开消费者 AI 客服' }).first();
+  await expect(shareQr).toBeVisible();
+  await expect(shareQr).toHaveAttribute('src', /^data:image\/png;base64,/u);
+  await expect(merchantPage.getByRole('link', { name: '下载二维码' }).first()).toHaveAttribute(
+    'download',
+    /^ai-customer-service-[a-z0-9-]+\.png$/u,
+  );
 
   const consumerPage = await browser.newPage();
   await consumerPage.goto(publicUrl!);

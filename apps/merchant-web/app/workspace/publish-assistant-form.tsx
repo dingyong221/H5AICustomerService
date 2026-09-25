@@ -2,6 +2,7 @@
 
 import { useActionState } from 'react';
 
+import { ShareAssistantLink } from '../share-assistant-link';
 import { publishAssistantAction } from './publish-actions';
 
 export function PublishAssistantForm({
@@ -12,6 +13,7 @@ export function PublishAssistantForm({
   idempotencyKey,
   ready,
   reason,
+  consumerOrigin,
 }: {
   merchantId: string;
   assistantId: string;
@@ -20,6 +22,7 @@ export function PublishAssistantForm({
   idempotencyKey: string;
   ready: boolean;
   reason: string | null;
+  consumerOrigin: string | null;
 }) {
   const [state, action, pending] = useActionState(publishAssistantAction, {
     error: null,
@@ -49,11 +52,11 @@ export function PublishAssistantForm({
       {!ready && reason ? <p role="status">{reason}</p> : null}
       {ready && !csrfToken ? <p role="status">安全校验信息缺失，请重新登录。</p> : null}
       {state.error ? <p role="alert">{state.error}</p> : null}
-      {state.publicUrl ? (
-        <p role="status">
-          Release #{state.releaseNo} 已发布。消费者链接：
-          <a href={state.publicUrl}>{state.publicUrl}</a>
-        </p>
+      {state.publicUrl && consumerOrigin ? (
+        <div role="status">
+          <p>Release #{state.releaseNo} 已发布。</p>
+          <ShareAssistantLink expectedOrigin={consumerOrigin} href={state.publicUrl} />
+        </div>
       ) : null}
       <button disabled={!canPublish || state.published || pending} type="submit">
         {pending ? '正在发布…' : '确认发布 AI 客服'}

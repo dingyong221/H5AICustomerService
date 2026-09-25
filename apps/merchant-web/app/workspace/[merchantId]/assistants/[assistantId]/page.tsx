@@ -7,6 +7,7 @@ import { loadDatabaseConfig, MySqlAssistantLifecycleRepository } from '@h5cs/dat
 import { toAssistantId, toMerchantId } from '@h5cs/domain';
 import { PageShell, StatusBadge } from '@h5cs/ui';
 
+import { ShareAssistantLink } from '../../../../share-assistant-link';
 import { currentMerchant, currentMerchantCsrfToken } from '../../../../account/merchant-actions';
 import { publicApiReady } from '../../../api-readiness';
 import { ConfirmKnowledgeForm } from '../../../confirm-knowledge-form';
@@ -137,17 +138,18 @@ export default async function AssistantDraftPage({
       <section className="merchant-account-card assistant-detail-card">
         <h2>发布与消费者链接</h2>
         {assistant.activeReleaseId ? (
-          <p>
-            已有线上版本：{assistant.activeReleaseId}。
+          <div>
+            <p>
+              已有线上版本：{assistant.activeReleaseId}。
+              {!verifiedPublicUrl ? ' 当前公开服务未通过运行态校验，请勿分享链接。' : null}
+            </p>
             {verifiedPublicUrl ? (
-              <>
-                {' '}
-                消费者链接：<a href={verifiedPublicUrl}>{verifiedPublicUrl}</a>
-              </>
-            ) : (
-              ' 当前公开服务未通过运行态校验，请勿分享链接。'
-            )}
-          </p>
+              <ShareAssistantLink
+                expectedOrigin={policy.ready ? policy.consumerOrigin : ''}
+                href={verifiedPublicUrl}
+              />
+            ) : null}
+          </div>
         ) : (
           <p>尚未发布。确认资料不会自动开放消费者咨询。</p>
         )}
@@ -159,6 +161,7 @@ export default async function AssistantDraftPage({
           idempotencyKey={randomUUID()}
           ready={publishReady}
           reason={publishReason}
+          consumerOrigin={policy.ready ? policy.consumerOrigin : null}
         />
       </section>
     </PageShell>
