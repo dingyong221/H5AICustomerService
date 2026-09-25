@@ -70,6 +70,38 @@ describe('configured Chat Completions generator', () => {
     ).toBe(false);
   });
 
+  it('accepts a bounded secret file and rejects ambiguous or unsafe key sources', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'h5cs-model-key-'));
+    const keyFile = join(directory, 'model-api-key');
+    const key = 'test_file_key_not_a_secret';
+    writeFileSync(keyFile, `${key}\n`);
+    try {
+      const fileEnvironment = {
+        ...modelEnvironment,
+        MODEL_API_KEY: '',
+        MODEL_API_KEY_FILE: keyFile,
+      };
+      const result = loadChatCompletionsConfig(fileEnvironment);
+      expect(result.configured).toBe(true);
+      if (!result.configured) throw new Error(result.reason);
+      expect(result.config.apiKey).toBe(key);
+      expect(JSON.stringify(result.config)).not.toContain(key);
+      expect(
+        loadChatCompletionsConfig({ ...fileEnvironment, MODEL_API_KEY: 'another_real_secret_123' })
+          .configured,
+      ).toBe(false);
+      expect(
+        loadChatCompletionsConfig({ ...fileEnvironment, MODEL_API_KEY_FILE: 'relative/key' })
+          .configured,
+      ).toBe(false);
+      writeFileSync(keyFile, 'too-short\n');
+      expect(loadChatCompletionsConfig(fileEnvironment).configured).toBe(false);
+    } finally {
+      unlinkSync(keyFile);
+      rmdirSync(directory);
+    }
+  });
+
   it('sends only pinned facts and session context through a bounded, non-streaming request', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => response('根据资料，100 元/台。'));
     const configured = loadChatCompletionsConfig(modelEnvironment);

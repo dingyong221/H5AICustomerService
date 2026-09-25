@@ -1,3 +1,6 @@
+import { lstatSync, readFileSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
+
 import type { ConversationPrompt } from './conversation-prompt.js';
 import type { ConversationTurnGenerator } from './conversation-turn-processor.js';
 
@@ -11,8 +14,23 @@ export type ChatCompletionsConfigResult =
   | Readonly<{ configured: false; reason: string }>
   | Readonly<{ configured: true; config: ChatCompletionsConfig }>;
 
-const placeholder = (value: string | undefined): boolean =>
+const placeholder = (value: string | null | undefined): boolean =>
   !value || value.trim() !== value || value.startsWith('replace-');
+
+const readApiKey = (environment: NodeJS.ProcessEnv): string | null => {
+  const inline = environment['MODEL_API_KEY'];
+  const path = environment['MODEL_API_KEY_FILE'];
+  if (inline && path) return null;
+  if (!path) return inline ?? null;
+  if (!isAbsolute(path)) return null;
+  try {
+    const file = lstatSync(path);
+    if (!file.isFile() || file.size < 16 || file.size > 514) return null;
+    return readFileSync(path, 'utf8').replace(/\r?\n$/u, '');
+  } catch {
+    return null;
+  }
+};
 
 export function loadChatCompletionsConfig(
   environment: NodeJS.ProcessEnv = process.env,
@@ -24,7 +42,7 @@ export function loadChatCompletionsConfig(
     return { configured: false, reason: 'MODEL_PROVIDER is not chat_completions' };
   }
   const model = environment['MODEL_NAME'];
-  const apiKey = environment['MODEL_API_KEY'];
+  const apiKey = readApiKey(environment);
   const endpointValue = environment['MODEL_CHAT_COMPLETIONS_URL'];
   if (placeholder(model) || !/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/u.test(model!)) {
     return { configured: false, reason: 'MODEL_NAME is not configured' };
