@@ -96,6 +96,7 @@ services:
       MYSQL_TLS_CA_FILE: /etc/ssl/certs/h5cs-managed-mysql-ca.pem
       NODE_ENV: production
       PORT: 3000
+      HEALTHCHECK_PATH: ${H5CS_MERCHANT_HEALTHCHECK_PATH:-/account/login}
       WORKER_READINESS_URL: http://worker:3011/readyz
     volumes: *mysql-ca-volumes
     ports:

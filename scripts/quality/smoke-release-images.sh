@@ -19,6 +19,8 @@ probe() {
   local -a smoke_environment=()
   if [[ "$service" == 'api' ]]; then
     smoke_environment=(--env OAUTH_ISSUER=https://smoke.invalid)
+  elif [[ "$service" == 'merchant-web' || "$service" == 'consumer-h5' || "$service" == 'ops-web' ]]; then
+    smoke_environment=(--env "HEALTHCHECK_PATH=$path")
   fi
   active_container="h5cs-${service}-smoke"
 
@@ -59,6 +61,14 @@ if (($# > 1)); then
 fi
 
 services=(api worker merchant-web consumer-h5 ops-web)
+case "${H5CS_MERCHANT_BASE_PATH:-}" in
+  ''|/console) ;;
+  *) echo 'H5CS_MERCHANT_BASE_PATH must be empty or /console.' >&2; exit 64 ;;
+esac
+case "${H5CS_OPS_BASE_PATH:-}" in
+  ''|/ops) ;;
+  *) echo 'H5CS_OPS_BASE_PATH must be empty or /ops.' >&2; exit 64 ;;
+esac
 if (($# == 1)); then
   services=("$1")
 fi
@@ -67,9 +77,9 @@ for service in "${services[@]}"; do
   case "$service" in
     api) probe api 14100 4000 /livez 1280m ;;
     worker) probe worker 13111 3011 /livez 1536m ;;
-    merchant-web) probe merchant-web 13100 3000 /account/login 512m ;;
+    merchant-web) probe merchant-web 13100 3000 "${H5CS_MERCHANT_BASE_PATH:-}/account/login" 512m ;;
     consumer-h5) probe consumer-h5 13101 3000 / 512m ;;
-    ops-web) probe ops-web 13102 3000 /login 512m ;;
+    ops-web) probe ops-web 13102 3000 "${H5CS_OPS_BASE_PATH:-}/login" 512m ;;
     *)
       printf 'Unknown service: %s\n' "$service" >&2
       exit 64

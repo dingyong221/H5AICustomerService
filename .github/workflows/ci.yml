@@ -283,6 +283,29 @@ jobs:
       - name: Smoke packaged runtime under release restrictions
         run: bash scripts/quality/smoke-release-images.sh
 
+      - name: Build and smoke same-domain management image variants without publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build \
+            --file infra/docker/workspace.Dockerfile \
+            --target web \
+            --build-arg APP_KIND=web \
+            --build-arg APP_NAME=merchant-web \
+            --build-arg NEXT_PUBLIC_MERCHANT_BASE_PATH=/console \
+            --tag h5cs-merchant-web:ci \
+            .
+          H5CS_MERCHANT_BASE_PATH=/console bash scripts/quality/smoke-release-images.sh merchant-web
+          docker build \
+            --file infra/docker/workspace.Dockerfile \
+            --target web \
+            --build-arg APP_KIND=web \
+            --build-arg APP_NAME=ops-web \
+            --build-arg NEXT_PUBLIC_OPS_BASE_PATH=/ops \
+            --tag h5cs-ops-web:ci \
+            .
+          H5CS_OPS_BASE_PATH=/ops bash scripts/quality/smoke-release-images.sh ops-web
+
       - name: Start isolated loopback MySQL for packaged runtime probes
         run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml up -d --wait mysql
 
