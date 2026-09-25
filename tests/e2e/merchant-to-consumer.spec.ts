@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 
 import { expect, test } from '@playwright/test';
 
@@ -13,15 +13,19 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
   const industryCode = `local_${randomBytes(5).toString('hex')}`;
   const referenceNotes = '参考提示：请核实上门范围，不得把测试价格当成商家报价。';
   const merchantPassword = randomBytes(24).toString('base64url');
+  const pathMode = process.env['H5CS_E2E_PATH_MODE'];
+  const merchantBase = `http://127.0.0.1:3000${pathMode === 'subpaths' ? '/console' : ''}`;
+  const operatorBase = `http://127.0.0.1:3002${pathMode === 'subpaths' ? '/ops' : ''}`;
+  const merchantPhone = `137${String(randomInt(0, 100_000_000)).padStart(8, '0')}`;
 
   const operatorPage = await browser.newPage();
-  await operatorPage.goto('http://127.0.0.1:3002/');
-  await expect(operatorPage).toHaveURL('http://127.0.0.1:3002/login');
+  await operatorPage.goto(`${operatorBase}/`);
+  await expect(operatorPage).toHaveURL(`${operatorBase}/login`);
   await operatorPage.getByLabel('运营账号').fill('browser_test_operator');
   await operatorPage.getByLabel('密码').fill(operatorPassword);
   await operatorPage.getByRole('button', { name: '登录运营后台' }).click();
   try {
-    await expect(operatorPage).toHaveURL('http://127.0.0.1:3002/', { timeout: 10_000 });
+    await expect(operatorPage).toHaveURL(`${operatorBase}/`, { timeout: 10_000 });
   } catch {
     const error = await operatorPage
       .getByRole('alert')
@@ -43,15 +47,18 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
   await expect(setupLink).toBeVisible();
   const setupUrl = new URL((await setupLink.textContent())!);
   expect(setupUrl.origin).toBe('http://127.0.0.1:3000');
-  expect(setupUrl.pathname).toBe('/setup');
+  expect(setupUrl.pathname).toBe(`${pathMode === 'subpaths' ? '/console' : ''}/setup`);
   expect(/^#[A-Za-z0-9_-]{43}$/u.test(setupUrl.hash)).toBe(true);
 
   const merchantPage = await browser.newPage();
-  await merchantPage.evaluate((token) => {
-    window.location.replace(`http://127.0.0.1:3000/setup#${token}`);
-  }, setupUrl.hash.slice(1));
+  await merchantPage.evaluate(
+    ([base, token]) => {
+      window.location.replace(`${base}/setup#${token}`);
+    },
+    [merchantBase, setupUrl.hash.slice(1)] as const,
+  );
   await expect(merchantPage.getByRole('button', { name: '领取商家后台' })).toBeEnabled();
-  await merchantPage.getByLabel('负责人手机号').fill('13700137000');
+  await merchantPage.getByLabel('负责人手机号').fill(merchantPhone);
   await merchantPage.getByLabel('平台登录密码（至少 12 位）').fill(merchantPassword);
   await merchantPage.getByRole('button', { name: '领取商家后台' }).click();
   await expect(merchantPage).toHaveURL(/\/workspace\/[0-9a-f]{32}$/u);
@@ -137,8 +144,11 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
     '我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。',
   );
   await expect(answer).toBeVisible({ timeout: 60_000 });
-  const merchantId = new URL(managementUrl).pathname.split('/')[2];
-  await merchantPage.goto(`http://127.0.0.1:3000/workspace/${merchantId}/conversations`);
+  const merchantId = /\/workspace\/([0-9a-f]{32})(?:\/|$)/u.exec(
+    new URL(managementUrl).pathname,
+  )?.[1];
+  expect(merchantId).toMatch(/^[0-9a-f]{32}$/u);
+  await merchantPage.goto(`${merchantBase}/workspace/${merchantId}/conversations`);
   await expect(merchantPage.getByRole('heading', { name: '咨询管理' })).toBeVisible();
   await merchantPage.locator('.merchant-conversation-list a').first().click();
   await expect(merchantPage.getByText('你们提供什么服务？')).toBeVisible();

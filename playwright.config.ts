@@ -16,6 +16,13 @@ if (
   throw new Error('Browser tests only run against the dedicated loopback CI database');
 }
 
+const pathMode = process.env['H5CS_E2E_PATH_MODE'] ?? 'root';
+if (pathMode !== 'root' && pathMode !== 'subpaths') {
+  throw new Error('H5CS_E2E_PATH_MODE must be root or subpaths');
+}
+const merchantBasePath = pathMode === 'subpaths' ? '/console' : '';
+const opsBasePath = pathMode === 'subpaths' ? '/ops' : '';
+
 const operatorPassword = createHash('sha256')
   .update('h5cs-isolated-browser-operator:', 'utf8')
   .update(databaseUrl, 'utf8')
@@ -76,24 +83,26 @@ export default defineConfig({
     },
     {
       command: 'pnpm --filter @h5cs/ops-web start',
-      url: 'http://127.0.0.1:3002/login',
+      url: `http://127.0.0.1:3002${opsBasePath}/login`,
       env: {
         ...common,
+        NEXT_PUBLIC_OPS_BASE_PATH: opsBasePath,
         NODE_ENV: 'test',
         OPS_ADMIN_USERNAME: 'browser_test_operator',
         OPS_ADMIN_PASSWORD_HASH: `scrypt:${operatorSalt.toString('base64url')}:${scryptSync(operatorPassword, operatorSalt, 64).toString('base64url')}`,
         OPS_SESSION_SIGNING_KEY: randomBytes(32).toString('base64url'),
         OPS_PUBLIC_ORIGIN: 'http://127.0.0.1:3002',
-        MANAGEMENT_CONSOLE_URL: 'http://127.0.0.1:3000',
+        MANAGEMENT_CONSOLE_URL: `http://127.0.0.1:3000${merchantBasePath}`,
       },
       reuseExistingServer: false,
       timeout: 120_000,
     },
     {
       command: 'pnpm --filter @h5cs/merchant-web start',
-      url: 'http://127.0.0.1:3000/setup',
+      url: `http://127.0.0.1:3000${merchantBasePath}/setup`,
       env: {
         ...common,
+        NEXT_PUBLIC_MERCHANT_BASE_PATH: merchantBasePath,
         NODE_ENV: 'test',
         MERCHANT_PUBLIC_ORIGIN: 'http://127.0.0.1:3000',
         MERCHANT_PHONE_LOOKUP_KEY: randomBytes(32).toString('base64url'),

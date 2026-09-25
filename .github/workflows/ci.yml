@@ -216,6 +216,21 @@ jobs:
       - name: Verify production-build operator, merchant and consumer browser workflow
         run: pnpm test:e2e
 
+      - name: Build prefixed management Web variants
+        env:
+          NEXT_PUBLIC_MERCHANT_BASE_PATH: /console
+          NEXT_PUBLIC_OPS_BASE_PATH: /ops
+        run: |
+          pnpm --filter @h5cs/merchant-web build
+          pnpm --filter @h5cs/ops-web build
+
+      - name: Verify full browser workflow under prefixed management paths
+        env:
+          H5CS_E2E_PATH_MODE: subpaths
+          NEXT_PUBLIC_MERCHANT_BASE_PATH: /console
+          NEXT_PUBLIC_OPS_BASE_PATH: /ops
+        run: pnpm test:e2e
+
       - name: Stop disposable MySQL
         if: always()
         run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml down
