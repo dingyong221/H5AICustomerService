@@ -3,6 +3,8 @@ import { loadDatabaseConfig, MySqlPlatformProvisioningRepository } from '@h5cs/d
 import { redirect } from 'next/navigation';
 
 import { currentOperator, logoutOperator } from './operator-actions';
+import { ManagementLink } from './management-link';
+import { managementBaseUrl, merchantWorkspaceUrl } from './management-url';
 import { ProvisionForm } from './provision-form';
 import { ReissueInvitationForm } from './reissue-invitation-form';
 
@@ -77,6 +79,7 @@ export default async function OperationsDashboardPage() {
   const operator = await currentOperator();
   if (!operator) redirect('/login');
   const database = loadDatabaseConfig();
+  const managementBase = managementBaseUrl(process.env['MANAGEMENT_CONSOLE_URL']);
   let merchants: Awaited<ReturnType<MySqlPlatformProvisioningRepository['listMerchants']>> = [];
   let audits: Awaited<ReturnType<MySqlPlatformProvisioningRepository['listPlatformAudits']>> = [];
   let databaseReady = false;
@@ -176,6 +179,9 @@ export default async function OperationsDashboardPage() {
                     <small>{merchant.id}</small>
                     {merchant.status === 'pending_owner' ? (
                       <ReissueInvitationForm merchantId={merchant.id} />
+                    ) : null}
+                    {merchant.status === 'active' && managementBase ? (
+                      <ManagementLink href={merchantWorkspaceUrl(managementBase, merchant.id)} />
                     ) : null}
                   </li>
                 ))}

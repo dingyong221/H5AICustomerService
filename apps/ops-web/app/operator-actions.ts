@@ -1,6 +1,7 @@
 'use server';
 
 import { cookies, headers } from 'next/headers';
+import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
 import {
@@ -16,6 +17,7 @@ import {
   resolveOperatorSession,
   verifyOperatorPassword,
 } from './operator-auth';
+import { managementBaseUrl } from './management-url';
 
 export type LoginActionState = { error: string | null };
 export type ProvisionActionState = {
@@ -26,28 +28,6 @@ export type ProvisionActionState = {
 const requestOriginValid = async (expected: string): Promise<boolean> => {
   const origin = (await headers()).get('origin');
   return origin === expected;
-};
-
-const managementBaseUrl = (): URL | null => {
-  const value = process.env['MANAGEMENT_CONSOLE_URL'];
-  if (!value) return null;
-  try {
-    const url = new URL(value);
-    if (
-      url.pathname !== '/' ||
-      url.username ||
-      url.password ||
-      url.search ||
-      url.hash ||
-      (url.protocol !== 'https:' &&
-        !(url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname)))
-    ) {
-      return null;
-    }
-    return url;
-  } catch {
-    return null;
-  }
 };
 
 const setupUrl = (base: URL, token: string): string => `${base.origin}/setup#${token}`;
@@ -110,12 +90,13 @@ export async function provisionMerchant(
   }
   const database = loadDatabaseConfig();
   if (!database.configured) return { error: '数据库尚未配置，无法创建商家。', created: null };
-  const base = managementBaseUrl();
+  const base = managementBaseUrl(process.env['MANAGEMENT_CONSOLE_URL']);
   if (!base) return { error: '商家后台地址尚未正确配置。', created: null };
 
   try {
     const repository = new MySqlPlatformProvisioningRepository(database.config);
     const created = await repository.provisionMerchant({ name, operatorId: operator });
+    revalidatePath('/');
     return {
       error: null,
       created: {
@@ -154,11 +135,12 @@ export async function reissueMerchantInvitation(
   }
   const database = loadDatabaseConfig();
   if (!database.configured) return { error: '数据库暂不可用。', created: null };
-  const base = managementBaseUrl();
+  const base = managementBaseUrl(process.env['MANAGEMENT_CONSOLE_URL']);
   if (!base) return { error: '商家后台地址尚未正确配置。', created: null };
   try {
     const repository = new MySqlPlatformProvisioningRepository(database.config);
     const created = await repository.reissueInvitation({ merchantId, operatorId: operator });
+    revalidatePath('/');
     return {
       error: null,
       created: {

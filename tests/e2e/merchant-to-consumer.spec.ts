@@ -46,6 +46,12 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
   await merchantPage.getByLabel('平台登录密码（至少 12 位）').fill(merchantPassword);
   await merchantPage.getByRole('button', { name: '领取商家后台' }).click();
   await expect(merchantPage).toHaveURL(/\/workspace\/[0-9a-f]{32}$/u);
+  const managementUrl = merchantPage.url();
+  await operatorPage.reload();
+  await expect(operatorPage.getByRole('link', { name: managementUrl })).toHaveAttribute(
+    'href',
+    managementUrl,
+  );
 
   await merchantPage.getByLabel('客服名称').fill(assistantName);
   await merchantPage.getByLabel('细分行业').fill('家电清洗');

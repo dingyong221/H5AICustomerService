@@ -167,6 +167,29 @@ a {
   font-family: ui-monospace, monospace;
 }
 
+.ops-management-link {
+  align-items: center;
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.7rem;
+  min-width: 0;
+}
+
+.ops-management-link a {
+  color: #315bbd;
+  overflow-wrap: anywhere;
+}
+
+.ops-management-link button {
+  background: #edf2ff;
+  border: 1px solid #cbd8f5;
+  border-radius: 7px;
+  color: #244dad;
+  cursor: pointer;
+  padding: 0.35rem 0.65rem;
+}
+
 .ops-skip-link {
   background: #ffffff;
   border: 2px solid var(--ui-focus);
