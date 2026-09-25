@@ -8,12 +8,13 @@ if [[ ${CI:-} != true || ${GITHUB_ACTIONS:-} != true ]]; then
 fi
 command -v nginx >/dev/null
 command -v openssl >/dev/null
+command -v sudo >/dev/null
 
 scratch=$(mktemp -d "${RUNNER_TEMP:-/tmp}/h5cs-nginx-check.XXXXXXXX")
 cleanup() {
-  rm -f -- "$scratch/nginx.conf" "$scratch/site.conf" "$scratch/cert.pem" \
+  sudo -n rm -f -- "$scratch/nginx.conf" "$scratch/site.conf" "$scratch/cert.pem" \
     "$scratch/key.pem" "$scratch/access.log" "$scratch/error.log" "$scratch/nginx.pid"
-  rmdir -- "$scratch/acme/.well-known/acme-challenge" \
+  sudo -n rmdir -- "$scratch/acme/.well-known/acme-challenge" \
     "$scratch/acme/.well-known" "$scratch/acme" "$scratch" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -33,5 +34,5 @@ sed \
 
 printf 'pid %s/nginx.pid;\nerror_log %s/error.log;\nevents {}\nhttp { access_log %s/access.log; include %s/site.conf; }\n' \
   "$scratch" "$scratch" "$scratch" "$scratch" > "$scratch/nginx.conf"
-nginx -t -c "$scratch/nginx.conf" -p "$scratch/"
+sudo -n nginx -t -c "$scratch/nginx.conf" -p "$scratch/"
 echo 'Candidate single-domain Nginx syntax passed with a disposable CI-only certificate.'
