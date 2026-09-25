@@ -1,0 +1,55 @@
+name: h5cs-prod-data
+
+services:
+  mysql:
+    image: mirror.ccs.tencentyun.com/library/mysql@sha256:f015b98a954d6bb92c370d93f354b85f4bcea15642d9fb2975f841a00d400b65
+    pull_policy: never
+    container_name: h5cs-prod-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/root-password
+      MYSQL_DATABASE: h5_ai_customer_service_prod
+      TZ: UTC
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
+      - --skip-name-resolve
+      - --mysqlx=OFF
+      - --require-secure-transport=ON
+      - --ssl-ca=/etc/mysql/tls/ca.pem
+      - --ssl-cert=/etc/mysql/tls/server.pem
+      - --ssl-key=/etc/mysql/tls/server-key.pem
+      - --server-id=1
+      - --log-bin=mysql-bin
+      - --binlog-expire-logs-seconds=604800
+      - --innodb-buffer-pool-size=768M
+      - --max-connections=80
+    volumes:
+      - h5cs_mysql_prod_data:/var/lib/mysql
+      - /etc/h5-ai-customer-service/mysql/root-password:/run/secrets/root-password:ro
+      - /etc/h5-ai-customer-service/mysql/certs/ca.pem:/etc/mysql/tls/ca.pem:ro
+      - /etc/h5-ai-customer-service/mysql/certs/server.pem:/etc/mysql/tls/server.pem:ro
+      - /etc/h5-ai-customer-service/mysql/certs/server-key.pem:/etc/mysql/tls/server-key.pem:ro
+    networks:
+      data:
+        aliases:
+          - mysql.h5cs.internal
+    mem_limit: 2048m
+    cpus: 0.75
+    stop_grace_period: 90s
+    healthcheck:
+      test: [CMD-SHELL, 'mysqladmin ping --host=127.0.0.1 --silent']
+      interval: 10s
+      timeout: 5s
+      start_period: 90s
+      retries: 6
+
+networks:
+  data:
+    name: h5cs_prod_data_internal
+    internal: true
+
+volumes:
+  h5cs_mysql_prod_data:
+    name: h5cs_mysql_prod_data
