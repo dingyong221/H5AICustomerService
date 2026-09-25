@@ -11,6 +11,7 @@ import {
 import { redirect } from 'next/navigation';
 
 import { currentOperator, logoutOperator } from './operator-actions';
+import { DeactivateIndustryTemplateForm } from './deactivate-industry-template-form';
 import { ManagementLink } from './management-link';
 import { IndustryTemplateForm } from './industry-template-form';
 import { managementBaseUrl, merchantWorkspaceUrl } from './management-url';
@@ -132,7 +133,7 @@ export default async function OperationsDashboardPage() {
       jobs = null;
     }
     try {
-      industryTemplates = await new MySqlIndustryTemplateRepository(database.config).listActive();
+      industryTemplates = await new MySqlIndustryTemplateRepository(database.config).listLatest();
       industryTemplatesReady = true;
     } catch {
       industryTemplatesReady = false;
@@ -241,7 +242,9 @@ export default async function OperationsDashboardPage() {
             <h2 id="templates-heading">行业模板</h2>
           </div>
           <StatusBadge tone={industryTemplatesReady ? 'info' : 'warning'}>
-            {industryTemplatesReady ? `${industryTemplates.length} 个行业` : '暂不可用'}
+            {industryTemplatesReady
+              ? `${industryTemplates.filter((template) => template.status === 'active').length} 个启用行业`
+              : '暂不可用'}
           </StatusBadge>
         </div>
         <p>按行业列出商家应提供的资料和策略。模板是收集问题的参考，不是商家已核实的事实。</p>
@@ -254,7 +257,8 @@ export default async function OperationsDashboardPage() {
                 <li key={template.id}>
                   <strong>{template.displayName}</strong>
                   <small>
-                    {template.code} · v{template.version}
+                    {template.code} · v{template.version} ·{' '}
+                    {template.status === 'active' ? '已启用' : '已停用'}
                   </small>
                   <details>
                     <summary>查看资料引导</summary>
@@ -262,6 +266,12 @@ export default async function OperationsDashboardPage() {
                     <p>资料：{template.requiredMaterials.join('；')}</p>
                     <p>售卖策略：{template.requiredPolicies.join('；') || '按业务情况确认'}</p>
                   </details>
+                  {template.status === 'active' ? (
+                    <details>
+                      <summary>停用此行业模板</summary>
+                      <DeactivateIndustryTemplateForm id={template.id} />
+                    </details>
+                  ) : null}
                 </li>
               ))}
             </ul>

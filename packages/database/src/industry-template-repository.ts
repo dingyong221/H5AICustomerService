@@ -8,6 +8,7 @@ export type IndustryTemplateGuide = Readonly<{
   id: string;
   code: string;
   version: number;
+  status: 'active' | 'inactive';
   displayName: string;
   referenceNotes: string;
   requiredMaterials: readonly string[];
@@ -25,6 +26,7 @@ type IndustryTemplateRow = RowDataPacket & {
   id: Buffer;
   code: string;
   version: number;
+  status: string;
   display_name: string;
   required_materials: unknown;
   required_policies: unknown;
@@ -66,6 +68,9 @@ const decodeItems = (value: unknown): readonly string[] => {
 };
 
 const decodeGuide = (row: IndustryTemplateRow): IndustryTemplateGuide => {
+  if (row.status !== 'active' && row.status !== 'inactive') {
+    throw new Error('Industry template status is malformed');
+  }
   const parsed = decodeJson(row.template);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('Industry template reference is malformed');
@@ -78,6 +83,7 @@ const decodeGuide = (row: IndustryTemplateRow): IndustryTemplateGuide => {
     id: row.id.toString('hex'),
     code: row.code,
     version: row.version,
+    status: row.status,
     displayName: row.display_name,
     referenceNotes: text(referenceNotes, 4_000),
     requiredMaterials: decodeItems(row.required_materials),
@@ -89,23 +95,94 @@ export class MySqlIndustryTemplateRepository {
   public constructor(private readonly database: DatabaseConnectionConfig) {}
 
   public async listActive(limit = 100): Promise<readonly IndustryTemplateGuide[]> {
+    return this.listLatestByStatus(limit, true);
+  }
+
+  public async listLatest(limit = 100): Promise<readonly IndustryTemplateGuide[]> {
+    return this.listLatestByStatus(limit, false);
+  }
+
+  private async listLatestByStatus(
+    limit: number,
+    activeOnly: boolean,
+  ): Promise<readonly IndustryTemplateGuide[]> {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
       throw new Error('Industry template list limit is invalid');
     }
     const connection = await this.database.openConnection();
     try {
       const [rows] = await connection.execute<IndustryTemplateRow[]>(
-        `SELECT t.id, t.code, t.version, t.display_name,
+        `SELECT t.id, t.code, t.version, t.status, t.display_name,
                 t.required_materials, t.required_policies, t.template
            FROM industry_template t
            JOIN (SELECT code, MAX(version) AS version
-                   FROM industry_template WHERE status = 'active' GROUP BY code) latest
+                   FROM industry_template GROUP BY code) latest
              ON latest.code = t.code AND latest.version = t.version
-          WHERE t.status = 'active'
+          ${activeOnly ? "WHERE t.status = 'active'" : ''}
           ORDER BY t.display_name, t.code LIMIT ?`,
         [limit],
       );
       return rows.map(decodeGuide);
+    } finally {
+      await connection.end();
+    }
+  }
+
+  public async deactivateLatest(input: { id: string; operatorId: string }): Promise<boolean> {
+    if (!/^[0-9a-f]{32}$/u.test(input.id)) {
+      throw new Error('Industry template ID is invalid');
+    }
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(input.operatorId)) {
+      throw new Error('Platform operator ID is invalid');
+    }
+    const connection = await this.database.openConnection();
+    try {
+      await connection.beginTransaction();
+      try {
+        const [selected] = await connection.execute<IndustryTemplateRow[]>(
+          `SELECT id, code, version, status FROM industry_template WHERE id = ? FOR UPDATE`,
+          [Buffer.from(input.id, 'hex')],
+        );
+        const target = selected[0];
+        if (!target || target.status !== 'active') {
+          await connection.rollback();
+          return false;
+        }
+        const [latest] = await connection.execute<IndustryTemplateRow[]>(
+          `SELECT id, code, version, status
+             FROM industry_template WHERE code = ? ORDER BY version DESC LIMIT 1 FOR UPDATE`,
+          [target.code],
+        );
+        if (latest[0]?.id.toString('hex') !== input.id) {
+          await connection.rollback();
+          return false;
+        }
+        await connection.execute(
+          `UPDATE industry_template SET status = 'inactive', updated_at = UTC_TIMESTAMP(6)
+            WHERE id = ? AND status = 'active'`,
+          [Buffer.from(input.id, 'hex')],
+        );
+        await connection.execute(
+          `INSERT INTO audit_log
+             (id, merchant_id, actor_type, actor_id, action, target_type, target_id,
+              result, request_id, metadata, occurred_at, created_at)
+           VALUES (?, NULL, 'platform_operator', ?, 'industry_template.deactivate',
+                   'industry_template', ?, 'success', ?, ?,
+                   UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
+          [
+            randomBytes(16),
+            input.operatorId,
+            input.id,
+            randomUUID(),
+            JSON.stringify({ code: target.code, version: target.version }),
+          ],
+        );
+        await connection.commit();
+        return true;
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      }
     } finally {
       await connection.end();
     }
@@ -138,6 +215,7 @@ export class MySqlIndustryTemplateRepository {
       id: templateId.toString('hex'),
       code: input.code,
       version: input.version,
+      status: 'active',
       displayName,
       referenceNotes,
       requiredMaterials,

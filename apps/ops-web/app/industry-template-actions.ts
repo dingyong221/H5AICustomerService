@@ -77,3 +77,38 @@ export async function createIndustryTemplate(
     };
   }
 }
+
+export type DeactivateIndustryTemplateActionState = Readonly<{
+  error: string | null;
+  done: boolean;
+}>;
+
+export async function deactivateIndustryTemplate(
+  _previous: DeactivateIndustryTemplateActionState,
+  formData: FormData,
+): Promise<DeactivateIndustryTemplateActionState> {
+  const config = loadOperatorAuthConfig();
+  const operator = await currentOperator();
+  if (!config || !operator || (await headers()).get('origin') !== config.publicOrigin) {
+    return { error: '运营登录或请求来源无效。', done: false };
+  }
+  const id = formData.get('id');
+  if (typeof id !== 'string' || !/^[0-9a-f]{32}$/u.test(id)) {
+    return { error: '模板 ID 无效。', done: false };
+  }
+  const database = loadDatabaseConfig();
+  if (!database.configured) return { error: '数据库暂不可用。', done: false };
+  try {
+    const deactivated = await new MySqlIndustryTemplateRepository(database.config).deactivateLatest(
+      {
+        id,
+        operatorId: operator,
+      },
+    );
+    if (!deactivated) return { error: '模板已变更，请刷新页面确认后再操作。', done: false };
+    revalidatePath('/');
+    return { error: null, done: true };
+  } catch {
+    return { error: '停用失败，请刷新页面核对状态后再操作。', done: false };
+  }
+}

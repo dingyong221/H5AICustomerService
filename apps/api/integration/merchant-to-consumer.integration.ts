@@ -94,9 +94,38 @@ describe('real MySQL merchant-to-consumer flow', () => {
         requiredMaterials: ['服务项目', '服务区域', '售后条件'],
       }),
     ]);
+    await expect(
+      repository.deactivateLatest({ id: first.id, operatorId: 'integration_operator' }),
+    ).resolves.toBe(false);
+    await expect(
+      repository.deactivateLatest({ id: second.id, operatorId: 'integration_operator' }),
+    ).resolves.toBe(true);
+    expect((await repository.listActive()).some((guide) => guide.code === code)).toBe(false);
+    expect((await repository.listLatest()).find((guide) => guide.code === code)).toMatchObject({
+      id: second.id,
+      status: 'inactive',
+    });
+    await expect(
+      repository.deactivateLatest({ id: second.id, operatorId: 'integration_operator' }),
+    ).resolves.toBe(false);
     await expect(repository.create({ ...input, version: 2 })).rejects.toBeInstanceOf(
       IndustryTemplateAlreadyExistsError,
     );
+    const connection = await database.openConnection();
+    try {
+      const [audit] = await connection.execute(
+        `SELECT action, target_id FROM audit_log
+          WHERE target_type = 'industry_template' AND target_id = ?
+          ORDER BY occurred_at`,
+        [second.id],
+      );
+      expect((audit as Array<{ action: string }>).map((row) => row.action)).toEqual([
+        'industry_template.create',
+        'industry_template.deactivate',
+      ]);
+    } finally {
+      await connection.end();
+    }
   });
 
   it('keeps a retried operator request to one merchant without replaying its one-time token', async () => {
