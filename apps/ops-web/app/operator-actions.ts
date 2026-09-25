@@ -7,6 +7,8 @@ import { redirect } from 'next/navigation';
 import {
   loadDatabaseConfig,
   MerchantInvitationNotReissuableError,
+  MerchantProvisionAlreadyAppliedError,
+  MerchantProvisionIdempotencyConflictError,
   MySqlPlatformProvisioningRepository,
 } from '@h5cs/database';
 
@@ -85,8 +87,15 @@ export async function provisionMerchant(
     return { error: '请求来源校验失败。', created: null };
   }
   const name = formData.get('name');
+  const idempotencyKey = formData.get('idempotencyKey');
   if (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 200) {
     return { error: '商家名称须为 2–200 个字符。', created: null };
+  }
+  if (
+    typeof idempotencyKey !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(idempotencyKey)
+  ) {
+    return { error: '本次开通标识无效，请刷新页面重试。', created: null };
   }
   const database = loadDatabaseConfig();
   if (!database.configured) return { error: '数据库尚未配置，无法创建商家。', created: null };
@@ -95,7 +104,11 @@ export async function provisionMerchant(
 
   try {
     const repository = new MySqlPlatformProvisioningRepository(database.config);
-    const created = await repository.provisionMerchant({ name, operatorId: operator });
+    const created = await repository.provisionMerchant({
+      name,
+      operatorId: operator,
+      idempotencyKey,
+    });
     revalidatePath('/');
     return {
       error: null,
@@ -105,7 +118,17 @@ export async function provisionMerchant(
         expiresAt: created.setupExpiresAt.toISOString(),
       },
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof MerchantProvisionAlreadyAppliedError) {
+      revalidatePath('/');
+      return {
+        error: `这次开通已创建商家 ${error.merchantId}；原领取链接不可恢复，请从列表重新签发。`,
+        created: null,
+      };
+    }
+    if (error instanceof MerchantProvisionIdempotencyConflictError) {
+      return { error: '本次开通标识已用于不同商家，请刷新页面重新填写。', created: null };
+    }
     return {
       error:
         '创建结果暂无法确认。请先刷新商家列表；若已出现等待领取的商家，请重新签发链接，不要重复创建。',

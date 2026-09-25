@@ -5,7 +5,7 @@ import { useActionState } from 'react';
 import { provisionMerchant } from './operator-actions';
 import { SetupLinkResult } from './setup-link-result';
 
-export function ProvisionForm() {
+export function ProvisionForm({ idempotencyKey }: { idempotencyKey: string }) {
   const [state, action, pending] = useActionState(provisionMerchant, {
     error: null,
     created: null,
@@ -13,6 +13,7 @@ export function ProvisionForm() {
   return (
     <div className="ops-provision">
       <form action={action} className="ops-form">
+        <input name="idempotencyKey" type="hidden" value={idempotencyKey} />
         <label>
           商家名称
           <input

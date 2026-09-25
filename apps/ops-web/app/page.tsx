@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { Button, EmptyState, PageShell, StatusBadge } from '@h5cs/ui';
 import { loadDatabaseConfig, MySqlPlatformProvisioningRepository } from '@h5cs/database';
 import { redirect } from 'next/navigation';
@@ -162,7 +164,7 @@ export default async function OperationsDashboardPage() {
           </StatusBadge>
         </div>
         <p>创建后商家处于“等待负责人领取”状态；一次性链接不赋予运营以外的管理权限。</p>
-        {databaseReady ? <ProvisionForm /> : null}
+        {databaseReady ? <ProvisionForm idempotencyKey={randomUUID()} /> : null}
         {databaseReady ? (
           <div className="ops-merchant-list" id="merchants">
             <h3>最近商家</h3>

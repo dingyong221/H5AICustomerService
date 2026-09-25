@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 
 import { NestFactory } from '@nestjs/core';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -9,6 +9,8 @@ import {
   MySqlConversationTurnJobRepository,
   MySqlMerchantAccessRepository,
   MySqlPlatformProvisioningRepository,
+  MerchantProvisionAlreadyAppliedError,
+  MerchantProvisionIdempotencyConflictError,
 } from '@h5cs/database';
 import { toAssistantId, toMerchantId, toMerchantUserId } from '@h5cs/domain';
 
@@ -56,6 +58,24 @@ describe('real MySQL merchant-to-consumer flow', () => {
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('keeps a retried operator request to one merchant without replaying its one-time token', async () => {
+    const repository = new MySqlPlatformProvisioningRepository(database);
+    const name = `CI 幂等商家 ${uniqueHex()}`;
+    const idempotencyKey = randomUUID();
+    const input = { name, operatorId: 'integration_operator', idempotencyKey };
+    const created = await repository.provisionMerchant(input);
+    await expect(repository.provisionMerchant(input)).rejects.toMatchObject({
+      name: MerchantProvisionAlreadyAppliedError.name,
+      merchantId: created.id,
+    });
+    await expect(
+      repository.provisionMerchant({ ...input, name: `${name} 修改` }),
+    ).rejects.toBeInstanceOf(MerchantProvisionIdempotencyConflictError);
+    expect(
+      (await repository.listMerchants()).filter((merchant) => merchant.name === name),
+    ).toHaveLength(1);
   });
 
   it('provisions, claims, publishes and serves one isolated completed consultation', async () => {

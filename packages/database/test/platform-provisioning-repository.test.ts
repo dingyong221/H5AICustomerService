@@ -6,6 +6,8 @@ import type { Connection, ResultSetHeader } from 'mysql2/promise';
 import type { DatabaseConnectionConfig } from '../src/config.js';
 import {
   MerchantInvitationNotReissuableError,
+  MerchantProvisionAlreadyAppliedError,
+  MerchantProvisionIdempotencyConflictError,
   MySqlPlatformProvisioningRepository,
 } from '../src/platform-provisioning-repository.js';
 
@@ -110,8 +112,95 @@ describe('platform merchant provisioning', () => {
       false,
     );
     expect(calls.some((call) => call.sql.includes('INSERT INTO audit_log'))).toBe(true);
+    expect(calls[0]?.sql).toContain('INSERT INTO idempotency_record');
+    expect(calls.some((call) => call.sql.includes("state = 'succeeded'"))).toBe(true);
     expect(commit).toHaveBeenCalledOnce();
     expect(rollback).not.toHaveBeenCalled();
+  });
+
+  it('does not create a second merchant when the same provisioning key already committed', async () => {
+    const merchantId = Buffer.from('aa'.repeat(16), 'hex');
+    const requestHash = createHash('sha256').update('示例商家', 'utf8').digest();
+    const firstExecute = vi.fn(async () => {
+      throw Object.assign(new Error('duplicate'), { code: 'ER_DUP_ENTRY' });
+    });
+    const secondExecute = vi.fn(async () => [
+      [{ request_hash: requestHash, state: 'succeeded', resource_id: merchantId }],
+      [],
+    ]);
+    const rollback = vi.fn(async () => undefined);
+    const commit = vi.fn(async () => undefined);
+    const connections = [
+      {
+        execute: firstExecute,
+        beginTransaction: async () => undefined,
+        rollback,
+        commit,
+        end: async () => undefined,
+      },
+      { execute: secondExecute, end: async () => undefined },
+    ];
+    const database = {
+      openConnection: async () => connections.shift() as unknown as Connection,
+      summary: { host: 'test', database: 'test', tlsRequested: false },
+      toJSON: () => ({ host: 'test', database: 'test', tlsRequested: false }),
+    } satisfies DatabaseConnectionConfig;
+    const repository = new MySqlPlatformProvisioningRepository(database);
+    await expect(
+      repository.provisionMerchant({
+        name: '示例商家',
+        operatorId: 'ops-1',
+        idempotencyKey: '11111111-1111-4111-8111-111111111111',
+      }),
+    ).rejects.toMatchObject({
+      name: MerchantProvisionAlreadyAppliedError.name,
+      merchantId: merchantId.toString('hex'),
+    });
+    expect(firstExecute).toHaveBeenCalledOnce();
+    expect(rollback).toHaveBeenCalledOnce();
+    expect(commit).not.toHaveBeenCalled();
+    expect(secondExecute).toHaveBeenCalledWith(
+      expect.stringContaining("operation = 'merchant.provision'"),
+      expect.any(Array),
+    );
+  });
+
+  it('rejects a provisioning key reused with a different merchant name', async () => {
+    const first = {
+      execute: async () => {
+        throw Object.assign(new Error('duplicate'), { code: 'ER_DUP_ENTRY' });
+      },
+      beginTransaction: async () => undefined,
+      rollback: async () => undefined,
+      end: async () => undefined,
+    };
+    const second = {
+      execute: async () => [
+        [
+          {
+            request_hash: createHash('sha256').update('其他商家', 'utf8').digest(),
+            state: 'succeeded',
+            resource_id: Buffer.from('aa'.repeat(16), 'hex'),
+          },
+        ],
+        [],
+      ],
+      end: async () => undefined,
+    };
+    const connections = [first, second];
+    const database = {
+      openConnection: async () => connections.shift() as unknown as Connection,
+      summary: { host: 'test', database: 'test', tlsRequested: false },
+      toJSON: () => ({ host: 'test', database: 'test', tlsRequested: false }),
+    } satisfies DatabaseConnectionConfig;
+    const repository = new MySqlPlatformProvisioningRepository(database);
+    await expect(
+      repository.provisionMerchant({
+        name: '示例商家',
+        operatorId: 'ops-1',
+        idempotencyKey: '11111111-1111-4111-8111-111111111111',
+      }),
+    ).rejects.toBeInstanceOf(MerchantProvisionIdempotencyConflictError);
   });
 
   it('rolls back if the invitation cannot be inserted', async () => {
