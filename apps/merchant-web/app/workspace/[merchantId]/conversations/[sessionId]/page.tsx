@@ -50,6 +50,13 @@ export default async function MerchantConversationDetailPage({
         </div>
         <p>关联正式版本：{detail.conversation.releaseId}</p>
         <p>会话状态：{detail.conversation.sessionStatus}</p>
+        <p>
+          如果回答依据需要修正，请
+          <Link href={`/workspace/${merchantId}/assistants/${detail.conversation.assistantId}`}>
+            编辑对应客服的资料
+          </Link>
+          ，确认后发布新版本。已有咨询仍保留原版本记录。
+        </p>
         <FollowUpForm
           merchantId={merchantId}
           sessionId={sessionId}

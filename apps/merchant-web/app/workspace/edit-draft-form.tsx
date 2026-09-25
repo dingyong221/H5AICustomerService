@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState } from 'react';
+import Link from 'next/link';
 
 import type { AssistantDraftConfig } from '@h5cs/domain';
 
@@ -87,7 +88,10 @@ export function EditDraftForm({
       {state.saved ? (
         <p role="status">
           草稿已保存，原有资料确认已失效。请
-          <a href={`/workspace/${merchantId}/assistants/${assistantId}`}>重新打开并核对新修订</a>。
+          <Link href={`/workspace/${merchantId}/assistants/${assistantId}`}>
+            重新打开并核对新修订
+          </Link>
+          。
         </p>
       ) : null}
       <button disabled={pending || state.saved} type="submit">

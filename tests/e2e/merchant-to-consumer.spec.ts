@@ -95,7 +95,18 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
   await consumerPage.goto(publicUrl!);
   await expect(consumerPage.getByRole('heading', { name: assistantName })).toBeVisible();
   await consumerPage.getByRole('textbox', { name: '输入想咨询的问题' }).fill('你们提供什么服务？');
+  const firstSessionResponse = consumerPage.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      /\/api\/v1\/public\/assistants\/[a-z0-9-]+\/sessions$/u.test(
+        new URL(response.url()).pathname,
+      ),
+  );
   await consumerPage.getByRole('button', { name: '发送消息' }).click();
+  const firstSessionPayload = (await (await firstSessionResponse).json()) as {
+    data: { releaseRef: string };
+  };
+  const firstReleaseRef = firstSessionPayload.data.releaseRef;
   const answer = consumerPage.getByText(
     '我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。',
   );
@@ -115,9 +126,53 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
   await expect(
     merchantPage.locator('.ui-status-badge').filter({ hasText: '处理中' }),
   ).toBeVisible();
+  await merchantPage.getByRole('link', { name: '编辑对应客服的资料' }).click();
+  await expect(merchantPage.getByRole('heading', { name: assistantName })).toBeVisible();
+  await merchantPage
+    .getByLabel('商品或服务资料')
+    .fill('提供上门空调清洗服务，也提供洗衣机清洁咨询');
+  await merchantPage.getByRole('button', { name: '保存草稿修订' }).click();
+  await expect(merchantPage.getByText(/草稿已保存，原有资料确认已失效/u)).toBeVisible();
+  await merchantPage.reload();
+  await expect(merchantPage.getByText('资料待确认')).toBeVisible();
+  await merchantPage.getByLabel(/我已逐项核对以上资料/u).check();
+  await merchantPage.getByRole('button', { name: '确认当前草稿资料' }).click();
+  await expect(merchantPage.getByText('当前草稿资料已确认')).toBeVisible();
+  await merchantPage.reload();
+  await merchantPage.getByLabel(/我确认发布当前修订/u).check();
+  await merchantPage.getByRole('button', { name: '确认发布 AI 客服' }).click();
+  await expect(merchantPage.getByText('Release #2 已发布。')).toBeVisible();
+  await expect(merchantPage.locator('a[href^="http://127.0.0.1:3001/a/"]').first()).toHaveAttribute(
+    'href',
+    publicUrl!,
+  );
+
   await consumerPage.reload();
   await expect(answer).toBeVisible({ timeout: 30_000 });
+  const publicSlug = new URL(publicUrl!).pathname.split('/')[2]!;
+  const latestReleaseRef = await consumerPage.evaluate(async (slug) => {
+    const response = await fetch(`/api/v1/public/assistants/${slug}`);
+    const envelope = (await response.json()) as { data: { releaseRef: string } };
+    return envelope.data.releaseRef;
+  }, publicSlug);
+  expect(latestReleaseRef).not.toBe(firstReleaseRef);
   consumerPage.once('dialog', (dialog) => void dialog.accept());
   await consumerPage.getByRole('button', { name: '新建咨询' }).click();
   await expect(answer).toHaveCount(0);
+  await consumerPage
+    .getByRole('textbox', { name: '输入想咨询的问题' })
+    .fill('洗衣机清洁可以咨询吗？');
+  const secondSessionResponse = consumerPage.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      /\/api\/v1\/public\/assistants\/[a-z0-9-]+\/sessions$/u.test(
+        new URL(response.url()).pathname,
+      ),
+  );
+  await consumerPage.getByRole('button', { name: '发送消息' }).click();
+  const secondSessionPayload = (await (await secondSessionResponse).json()) as {
+    data: { releaseRef: string };
+  };
+  expect(secondSessionPayload.data.releaseRef).toBe(latestReleaseRef);
+  await expect(answer).toBeVisible({ timeout: 60_000 });
 });
