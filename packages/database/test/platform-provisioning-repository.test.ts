@@ -52,14 +52,16 @@ describe('platform merchant provisioning', () => {
     const merchantId = Buffer.from('22'.repeat(16), 'hex');
     const occurredAt = new Date('2026-09-25T04:00:00.000Z');
     const execute = vi.fn(async (_sql: string, _values: readonly unknown[]) => [
-      [{
-        id: auditId,
-        actor_id: 'ops-1',
-        action: 'merchant.provision',
-        merchant_id: merchantId,
-        result: 'success',
-        occurred_at: occurredAt,
-      }],
+      [
+        {
+          id: auditId,
+          actor_id: 'ops-1',
+          action: 'merchant.provision',
+          merchant_id: merchantId,
+          result: 'success',
+          occurred_at: occurredAt,
+        },
+      ],
       [],
     ]);
     const end = vi.fn(async () => undefined);
@@ -70,14 +72,16 @@ describe('platform merchant provisioning', () => {
     } satisfies DatabaseConnectionConfig;
     const repository = new MySqlPlatformProvisioningRepository(database);
 
-    await expect(repository.listPlatformAudits(5)).resolves.toEqual([{
-      id: auditId.toString('hex'),
-      operatorId: 'ops-1',
-      action: 'merchant.provision',
-      merchantId: merchantId.toString('hex'),
-      result: 'success',
-      occurredAt,
-    }]);
+    await expect(repository.listPlatformAudits(5)).resolves.toEqual([
+      {
+        id: auditId.toString('hex'),
+        operatorId: 'ops-1',
+        action: 'merchant.provision',
+        merchantId: merchantId.toString('hex'),
+        result: 'success',
+        occurredAt,
+      },
+    ]);
     expect(execute).toHaveBeenCalledWith(
       expect.stringContaining("WHERE actor_type = 'platform_operator'"),
       [5],
