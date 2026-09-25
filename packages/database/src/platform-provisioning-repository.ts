@@ -26,6 +26,15 @@ export type PlatformMerchantSummary = Readonly<{
   createdAt: Date;
 }>;
 
+export type PlatformAuditSummary = Readonly<{
+  id: string;
+  operatorId: string;
+  action: string;
+  merchantId: string | null;
+  result: string;
+  occurredAt: Date;
+}>;
+
 type MerchantRow = RowDataPacket & {
   id: Buffer;
   name: string;
@@ -34,6 +43,14 @@ type MerchantRow = RowDataPacket & {
 };
 
 type PendingMerchantRow = RowDataPacket & { name: string; status: string };
+type PlatformAuditRow = RowDataPacket & {
+  id: Buffer;
+  actor_id: string;
+  action: string;
+  merchant_id: Buffer | null;
+  result: string;
+  occurred_at: Date;
+};
 
 const validName = (name: string): string => {
   const value = name.trim();
@@ -75,6 +92,33 @@ export class MySqlPlatformProvisioningRepository {
         name: row.name,
         status: row.status,
         createdAt: row.created_at,
+      }));
+    } finally {
+      await connection.end();
+    }
+  }
+
+  public async listPlatformAudits(limit = 20): Promise<readonly PlatformAuditSummary[]> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      throw new Error('Audit list limit is invalid');
+    }
+    const connection = await this.#database.openConnection();
+    try {
+      const [rows] = await connection.execute<PlatformAuditRow[]>(
+        `SELECT id, actor_id, action, merchant_id, result, occurred_at
+           FROM audit_log
+          WHERE actor_type = 'platform_operator'
+          ORDER BY occurred_at DESC, id DESC
+          LIMIT ?`,
+        [limit],
+      );
+      return rows.map((row) => ({
+        id: row.id.toString('hex'),
+        operatorId: row.actor_id,
+        action: row.action,
+        merchantId: row.merchant_id?.toString('hex') ?? null,
+        result: row.result,
+        occurredAt: row.occurred_at,
       }));
     } finally {
       await connection.end();

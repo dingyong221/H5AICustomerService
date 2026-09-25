@@ -65,8 +65,8 @@ const operationAreas = [
     label: '任务与异常',
   },
   {
-    description: '追溯敏感访问、暂停、额度调整等运营动作。',
-    href: '#audit',
+    description: '追溯商家开通、领取链接重签等平台运营动作。',
+    href: '#audit-log',
     icon: <ShieldIcon />,
     id: 'audit',
     label: '访问与审计',
@@ -78,13 +78,22 @@ export default async function OperationsDashboardPage() {
   if (!operator) redirect('/login');
   const database = loadDatabaseConfig();
   let merchants: Awaited<ReturnType<MySqlPlatformProvisioningRepository['listMerchants']>> = [];
+  let audits: Awaited<ReturnType<MySqlPlatformProvisioningRepository['listPlatformAudits']>> = [];
   let databaseReady = false;
+  let auditReady = false;
   if (database.configured) {
+    const repository = new MySqlPlatformProvisioningRepository(database.config);
     try {
-      merchants = await new MySqlPlatformProvisioningRepository(database.config).listMerchants();
+      merchants = await repository.listMerchants();
       databaseReady = true;
     } catch {
       databaseReady = false;
+    }
+    try {
+      audits = await repository.listPlatformAudits();
+      auditReady = true;
+    } catch {
+      auditReady = false;
     }
   }
   return (
@@ -103,7 +112,7 @@ export default async function OperationsDashboardPage() {
           <strong>{databaseReady ? `运营账号：${operator}` : '数据库暂不可用'}</strong>
           <span>
             {databaseReady
-              ? '商家开通与列表已连接真实数据库；任务和审计面板将在后续接入。'
+              ? '商家开通与列表已连接真实数据库；平台操作审计单独显示连接状态，任务面板尚未接入。'
               : '商家开通不可用，请核对 MySQL 连接和迁移状态。'}
           </span>
         </div>
@@ -194,12 +203,50 @@ export default async function OperationsDashboardPage() {
                 <h3>{area.label}</h3>
                 <p>{area.description}</p>
               </div>
-              <Button disabled size="small" variant="secondary">
-                等待 API
-              </Button>
+              {area.id === 'audit' && auditReady ? (
+                <a className="ops-area-link" href={area.href}>
+                  查看记录
+                </a>
+              ) : (
+                <Button disabled size="small" variant="secondary">
+                  等待 API
+                </Button>
+              )}
             </article>
           ))}
         </div>
+      </section>
+
+      <section aria-labelledby="audit-heading" className="attention-panel" id="audit-log">
+        <div className="section-heading">
+          <div>
+            <p>平台操作</p>
+            <h2 id="audit-heading">最近审计记录</h2>
+          </div>
+          <StatusBadge tone={auditReady ? 'info' : 'warning'}>
+            {auditReady ? '已连接' : '暂不可用'}
+          </StatusBadge>
+        </div>
+        <p>仅展示平台运营操作的时间、操作人、动作、商家标识和结果；不展示咨询正文或密钥。</p>
+        {!auditReady ? (
+          <p role="alert">审计记录查询失败，不能据此判断最近没有操作。</p>
+        ) : audits.length === 0 ? (
+          <p>目前没有平台运营操作记录。</p>
+        ) : (
+          <ol className="ops-audit-list">
+            {audits.map((audit) => (
+              <li key={audit.id}>
+                <strong>{audit.action}</strong>
+                <span>{audit.result}</span>
+                <small>操作人：{audit.operatorId}</small>
+                {audit.merchantId ? <small>商家：{audit.merchantId}</small> : null}
+                <time dateTime={audit.occurredAt.toISOString()}>
+                  {audit.occurredAt.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
+                </time>
+              </li>
+            ))}
+          </ol>
+        )}
       </section>
 
       <section aria-labelledby="attention-heading" className="attention-panel">

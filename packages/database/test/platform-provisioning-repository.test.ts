@@ -47,6 +47,47 @@ const repositoryWith = (failOn?: string, merchantStatus = 'pending_owner', failE
 };
 
 describe('platform merchant provisioning', () => {
+  it('lists only bounded platform audit fields without metadata or conversation content', async () => {
+    const auditId = Buffer.from('11'.repeat(16), 'hex');
+    const merchantId = Buffer.from('22'.repeat(16), 'hex');
+    const occurredAt = new Date('2026-09-25T04:00:00.000Z');
+    const execute = vi.fn(async (_sql: string, _values: readonly unknown[]) => [
+      [{
+        id: auditId,
+        actor_id: 'ops-1',
+        action: 'merchant.provision',
+        merchant_id: merchantId,
+        result: 'success',
+        occurred_at: occurredAt,
+      }],
+      [],
+    ]);
+    const end = vi.fn(async () => undefined);
+    const database = {
+      openConnection: async () => ({ execute, end }) as unknown as Connection,
+      summary: { host: 'test', database: 'test', tlsRequested: false },
+      toJSON: () => ({ host: 'test', database: 'test', tlsRequested: false }),
+    } satisfies DatabaseConnectionConfig;
+    const repository = new MySqlPlatformProvisioningRepository(database);
+
+    await expect(repository.listPlatformAudits(5)).resolves.toEqual([{
+      id: auditId.toString('hex'),
+      operatorId: 'ops-1',
+      action: 'merchant.provision',
+      merchantId: merchantId.toString('hex'),
+      result: 'success',
+      occurredAt,
+    }]);
+    expect(execute).toHaveBeenCalledWith(
+      expect.stringContaining("WHERE actor_type = 'platform_operator'"),
+      [5],
+    );
+    expect(execute.mock.calls[0]?.[0]).not.toMatch(/metadata|reason|message|contact/iu);
+    expect(end).toHaveBeenCalledOnce();
+    await expect(repository.listPlatformAudits(101)).rejects.toThrow('Audit list limit is invalid');
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it('commits a pending merchant, one-time digest, and audit record together', async () => {
     const { repository, calls, commit, rollback } = repositoryWith();
     const created = await repository.provisionMerchant({

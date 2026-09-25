@@ -436,6 +436,38 @@ a {
   justify-self: start;
 }
 
+.ops-area-link {
+  color: #315bbd;
+  font-size: 0.85rem;
+  font-weight: 600;
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.ops-audit-list {
+  display: grid;
+  gap: 0.7rem;
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+}
+
+.ops-audit-list li {
+  align-items: baseline;
+  border: 1px solid #e2e7ef;
+  border-radius: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.9rem;
+  padding: 0.7rem 0.9rem;
+}
+
+.ops-audit-list small,
+.ops-audit-list time {
+  color: #687387;
+  font-size: 0.78rem;
+}
+
 .attention-panel {
   background: #ffffff;
   border: 1px solid #dce1ea;
