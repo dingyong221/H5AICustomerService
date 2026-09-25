@@ -820,6 +820,8 @@ const assertProductionEvidence = (path, expectedVersion) => {
   const version = expectedVersion ?? readJson('package.json').version;
   if (evidence.releaseVersion !== version)
     fail('Production evidence releaseVersion does not match.');
+  if (evidence.workBuddy?.status !== 'deferred')
+    fail('Web-only production release requires WorkBuddy status to be deferred.');
   if (!/^[0-9a-f]{40}$/u.test(evidence.gitCommit ?? '') || evidence.gitCommit === '0'.repeat(40))
     fail('Production evidence gitCommit is invalid.');
   const requiredTruePaths = [
@@ -832,14 +834,11 @@ const assertProductionEvidence = (path, expectedVersion) => {
     'staging.sameArtifactDigests',
     'staging.coreE2ePassed',
     'staging.tenantIsolationPassed',
-    'workBuddy.thirdPartyAppApproved',
-    'workBuddy.connectorApproved',
-    'workBuddy.realClientOauthPassed',
-    'workBuddy.tokenBoundaryPassed',
-    'managedMySql.provisioned',
-    'managedMySql.privateNetworkVerified',
-    'managedMySql.tlsVerified',
-    'managedMySql.backupRestoreDrillPassed',
+    'workBuddy.publicGatewayDisabled',
+    'mySql.approvedDeployment',
+    'mySql.privateAccessVerified',
+    'mySql.tlsVerified',
+    'mySql.backupRestoreDrillPassed',
     'model.formalProviderConfigured',
     'model.realGenerationSmokePassed',
     'model.mockFallbackDisabled',
@@ -901,7 +900,7 @@ const assertProductionEvidence = (path, expectedVersion) => {
   for (const referencePath of [
     'staging.evidenceReference',
     'workBuddy.evidenceReference',
-    'managedMySql.evidenceReference',
+    'mySql.evidenceReference',
     'model.evidenceReference',
     'tls.evidenceReference',
     'rollback.exerciseId',

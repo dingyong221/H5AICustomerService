@@ -4,9 +4,9 @@
 
 仓库已形成运营 Web 开通商家与生成领取/管理链接、商家 Web 领取并创建/确认/发布客服、MySQL 事实仓储、异步 Worker 回答和消费者 H5 咨询的本地闭环。commit `04cf09c` 的 CI 使用一次性 MySQL、受控测试模型与生产构建，在独立主机根路径及 `/ops`、`/console` 子路径变体下分别跑通完整浏览器场景；这证明本地流程，不证明正式模型、WorkBuddy 或生产可用。当前提交的 [CI](https://github.com/dingyong221/H5AICustomerService/actions/runs/36139658661)和[仓库候选证据](https://github.com/dingyong221/H5AICustomerService/actions/runs/36140271875)均通过，候选镜像尚未推送。
 
-WorkBuddy/OAuth 协议、页面与部分 MySQL 适配器已有代码，但 `createRuntimeOAuth()` 仍装配不可用的访问令牌签名与资源所有者授权适配器，`createRuntimeWorkBuddyLocalAuthorization()` 仍返回不可用服务；真实 WorkBuddy 身份桥、consent 与 MCP 调用不可宣称接通。这里不能用本地运营→商家→消费者测试替代 WorkBuddy 实机验收。
+WorkBuddy 接入已按用户决定暂停，不属于当前 Web 发布范围。OAuth/MCP 代码尚不可宣称接通；候选公网网关对相关路径返回 404，商家 Web 导航也不再展示 WorkBuddy 入口。日后启用需单独完成真实客户端验收。
 
-腾讯云实例、安全组、SSH、主机基线和域名 HTTP 维护入口已完成。按用户批准的单机例外，服务器已装 MySQL 8.4.11、项目库与最小权限账号，未开放公网 3306；生产 Schema、离机备份/PITR、正式 TLS、五个业务容器、真实模型和 WorkBuddy 仍未部署或验收。服务器状态须在发布前重新检查，不能把此处或[只读预检](../operations/2026-09-25-production-preflight.md)当作实时状态。仓库标准版本与生产可用状态的权威口径见[发布清单](../release/v0.1.0-standard-release-checklist.md)。
+腾讯云实例、安全组、SSH、主机基线和域名 HTTP 维护入口已完成。按用户批准的单机例外，服务器已装 MySQL 8.4.11、项目库与最小权限账号，未开放公网 3306；生产 Schema、离机备份/PITR、正式 TLS、五个业务容器和真实模型仍未部署或验收。服务器状态须在发布前重新检查，不能把此处或[只读预检](../operations/2026-09-25-production-preflight.md)当作实时状态。仓库标准版本与生产可用状态的权威口径见[发布清单](../release/v0.1.0-standard-release-checklist.md)。
 
 ## 建议阅读顺序
 
@@ -45,9 +45,9 @@ WorkBuddy/OAuth 协议、页面与部分 MySQL 适配器已有代码，但 `crea
 
 当前本地运营→商家→消费者闭环之后仍需完成：
 
-1. 接通真实 WorkBuddy 的平台登录、持久化身份桥与授权事务、单商家 consent、访问令牌签名/验证和在线撤销，并在目标客户端实机验证两段式 Skill/MCP 流程；缺少外部凭据时继续失败关闭。
+1. 优先完成运营 Web 开通商家、商家 Web 配置与发布、消费者 H5 咨询的正式闭环；WorkBuddy 暂停，不作为本阶段发布前提，其公网入口须保持关闭。
 2. 确定正式域名是同域名 `/ops`、`/console`、`/a`、`/api`，还是独立子域名；镜像构建路径、管理链接、Nginx 与 Cookie/回调必须一致。[路径构建变体](../operations/web-path-builds.md)只有本地/CI 验证。
 3. 经授权取得正式 TLS、推送/验签五个不可变镜像、配置正式模型与受限 Secret、完成生产 Schema 迁移前的离机备份/PITR、隔离恢复、容量与告警验收。
 4. 完成 Staging 同 digest 验收、发布审批、生产切流与回滚演练后，逐项验证平台后台、商家管理链接、消费者固定链接和真实回答；未完成前保持生产 No-Go。
 
-当前需要产品负责人答复的事项包括正式路由、证书申请与通知邮箱、候选镜像推送、离机备份目标、正式模型/WorkBuddy 凭据及试点发布审批；这些选择不由 CI 测试代替。
+当前需要产品负责人答复的事项包括正式路由、证书申请与通知邮箱、候选镜像推送、离机备份目标、正式模型凭据及试点发布审批；这些选择不由 CI 测试代替。WorkBuddy 凭据暂不需要。

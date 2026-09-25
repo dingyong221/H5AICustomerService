@@ -41,16 +41,6 @@ export default function MerchantDashboardPage() {
           </div>
           <p>领取链接只在平台创建商家时生成，请向运营人员获取。</p>
         </article>
-        <article>
-          <div>
-            <StatusBadge>WorkBuddy</StatusBadge>
-            <h2>按步骤整理业务资料</h2>
-            <p>在完成安全身份连接后，按行业、商品服务和售卖策略整理客服草稿。</p>
-          </div>
-          <Link className="workbuddy-action" href="/onboarding">
-            查看生成引导
-          </Link>
-        </article>
       </div>
     </PageShell>
   );
