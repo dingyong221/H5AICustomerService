@@ -10,6 +10,11 @@ on:
         description: SemVer without the v prefix
         required: true
         default: 0.1.0
+      publish_images:
+        description: Push five candidate images to private GHCR after repository evidence succeeds
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -90,3 +95,14 @@ jobs:
         run: |
           echo "Repository evidence generated."
           echo "No deployment was performed. Production business readiness requires separate approved evidence."
+
+  candidate-images:
+    name: Publish five candidate images when explicitly requested
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_images == true }}
+    needs: evidence
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    uses: ./.github/workflows/candidate-images.yml

@@ -1,6 +1,7 @@
 name: Candidate container images (no production deployment)
 
 on:
+  workflow_call:
   push:
     tags:
       - 'v*'
