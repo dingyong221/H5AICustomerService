@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { managementBaseUrl, merchantWorkspaceUrl } from './management-url';
+import { managementBaseUrl, merchantSetupUrl, merchantWorkspaceUrl } from './management-url';
 
 describe('merchant management URL', () => {
   it('uses only the configured trusted origin and a validated merchant ID', () => {
@@ -10,9 +10,23 @@ describe('merchant management URL', () => {
       `https://h5cs.1rying.com/workspace/${'a'.repeat(32)}`,
     );
     expect(() => merchantWorkspaceUrl(base!, '../login')).toThrow('Merchant ID is invalid');
+    expect(merchantSetupUrl(base!, 'opaque-token')).toBe(
+      'https://h5cs.1rying.com/setup#opaque-token',
+    );
   });
 
-  it('rejects userinfo, a subpath, query, fragment and non-local cleartext', () => {
+  it('keeps generated setup and workspace links under the dedicated console prefix', () => {
+    const base = managementBaseUrl('https://h5cs.1rying.com/console');
+    expect(base).not.toBeNull();
+    expect(merchantSetupUrl(base!, 'opaque-token')).toBe(
+      'https://h5cs.1rying.com/console/setup#opaque-token',
+    );
+    expect(merchantWorkspaceUrl(base!, 'a'.repeat(32))).toBe(
+      `https://h5cs.1rying.com/console/workspace/${'a'.repeat(32)}`,
+    );
+  });
+
+  it('rejects userinfo, an unapproved subpath, query, fragment and non-local cleartext', () => {
     for (const value of [
       'https://user:pass@h5cs.1rying.com/',
       'https://h5cs.1rying.com/admin',

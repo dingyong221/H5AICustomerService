@@ -23,6 +23,7 @@ import {
 } from '@h5cs/domain';
 
 import {
+  ManagementConsoleUnavailableError,
   MerchantBindingRequiredError,
   OnboardingSessionNotFoundError,
   SkillOnboardingApplicationService,
@@ -349,7 +350,7 @@ describe('Skill onboarding application service', () => {
       new TestAuthenticator(),
       repository,
       new UnavailableGenerationCoordinator('generation dispatcher is not configured'),
-      'https://console.example.test/manage',
+      'https://console.example.test/',
     );
 
     await expect(
@@ -416,7 +417,7 @@ describe('Skill onboarding application service', () => {
       new TestAuthenticator(),
       repository,
       { assertReady: async () => undefined, generate },
-      'https://console.example.test/manage',
+      'https://console.example.test/',
     );
 
     await expect(
@@ -462,7 +463,7 @@ describe('Skill onboarding application service', () => {
       new TestAuthenticator(),
       repository,
       { assertReady: async () => undefined, generate },
-      'https://console.example.test/manage',
+      'https://console.example.test/console',
     );
 
     await expect(
@@ -474,7 +475,7 @@ describe('Skill onboarding application service', () => {
       action: 'continue_onboarding',
       state: 'manageable',
       management_url:
-        'https://console.example.test/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444',
+        'https://console.example.test/console/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444',
     });
     expect(generate).toHaveBeenCalledTimes(2);
     expect(generate.mock.calls[0]?.[0].id).toBe(generate.mock.calls[1]?.[0].id);
@@ -512,7 +513,7 @@ describe('Skill onboarding application service', () => {
       new TestAuthenticator(),
       repository,
       readyGenerationCoordinator,
-      'https://console.example.test/manage',
+      'https://console.example.test/',
     );
 
     await expect(
@@ -591,7 +592,7 @@ describe('Skill onboarding application service', () => {
       new TestAuthenticator(),
       repository,
       readyGenerationCoordinator,
-      'https://console.example.test/manage',
+      'https://console.example.test/',
     );
     repository.assistants = [
       {
@@ -627,6 +628,26 @@ describe('Skill onboarding application service', () => {
     expect(multiple.action).toBe('select_assistant');
     expect(createSession).not.toHaveBeenCalled();
     expect(findSession).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unapproved management path rather than returning a misleading link', async () => {
+    const repository = new TestRepository();
+    repository.assistants = [
+      {
+        id: toAssistantId('44444444444444444444444444444444'),
+        displayName: '售前客服',
+        status: 'active',
+      },
+    ];
+    const service = new SkillOnboardingApplicationService(
+      new TestAuthenticator(),
+      repository,
+      readyGenerationCoordinator,
+      'https://console.example.test/unrelated',
+    );
+    await expect(
+      service.execute('Bearer token', { intent: 'open_management_console' }),
+    ).rejects.toBeInstanceOf(ManagementConsoleUnavailableError);
   });
 
   it('does not create onboarding without an active merchant binding', async () => {

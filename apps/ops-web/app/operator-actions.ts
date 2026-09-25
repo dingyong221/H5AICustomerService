@@ -21,7 +21,7 @@ import {
   resolveOperatorSession,
   verifyOperatorPassword,
 } from './operator-auth';
-import { managementBaseUrl } from './management-url';
+import { managementBaseUrl, merchantSetupUrl } from './management-url';
 
 export type LoginActionState = { error: string | null };
 export type ProvisionActionState = {
@@ -33,8 +33,6 @@ const requestOriginValid = async (expected: string): Promise<boolean> => {
   const origin = (await headers()).get('origin');
   return origin === expected;
 };
-
-const setupUrl = (base: URL, token: string): string => `${base.origin}/setup#${token}`;
 
 export async function currentOperator(): Promise<string | null> {
   const config = loadOperatorAuthConfig();
@@ -133,7 +131,7 @@ export async function provisionMerchant(
       error: null,
       created: {
         name: created.name,
-        setupUrl: setupUrl(base, created.setupToken),
+        setupUrl: merchantSetupUrl(base, created.setupToken),
         expiresAt: created.setupExpiresAt.toISOString(),
       },
     };
@@ -187,7 +185,7 @@ export async function reissueMerchantInvitation(
       error: null,
       created: {
         name: created.name,
-        setupUrl: setupUrl(base, created.setupToken),
+        setupUrl: merchantSetupUrl(base, created.setupToken),
         expiresAt: created.setupExpiresAt.toISOString(),
       },
     };

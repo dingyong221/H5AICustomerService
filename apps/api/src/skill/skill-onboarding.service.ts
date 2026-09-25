@@ -317,11 +317,13 @@ export class SkillOnboardingApplicationService {
         url.password ||
         url.search ||
         url.hash ||
+        !['/', '/console', '/console/'].includes(url.pathname) ||
         (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback))
       ) {
         throw new ManagementConsoleUnavailableError();
       }
-      return new URL(path, url.origin).toString();
+      const prefix = url.pathname === '/' ? '' : '/console';
+      return new URL(`${prefix}${path}`, url.origin).toString();
     } catch {
       throw new ManagementConsoleUnavailableError();
     }
