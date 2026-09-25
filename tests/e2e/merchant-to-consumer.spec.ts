@@ -14,11 +14,16 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
   const referenceNotes = '参考提示：请核实上门范围，不得把测试价格当成商家报价。';
   const merchantPassword = randomBytes(24).toString('base64url');
   const pathMode = process.env['H5CS_E2E_PATH_MODE'];
-  const merchantBase = `http://127.0.0.1:3000${pathMode === 'subpaths' ? '/console' : ''}`;
-  const operatorBase = `http://127.0.0.1:3002${pathMode === 'subpaths' ? '/ops' : ''}`;
+  const prefixed = pathMode !== undefined && pathMode !== 'root';
+  const sameOrigin = pathMode === 'single_domain';
+  const merchantOrigin = `http://127.0.0.1:${sameOrigin ? '3001' : '3000'}`;
+  const operatorOrigin = `http://127.0.0.1:${sameOrigin ? '3001' : '3002'}`;
+  const merchantBase = `${merchantOrigin}${prefixed ? '/console' : ''}`;
+  const operatorBase = `${operatorOrigin}${prefixed ? '/ops' : ''}`;
   const merchantPhone = `137${String(randomInt(0, 100_000_000)).padStart(8, '0')}`;
+  const sharedContext = sameOrigin ? await browser.newContext() : null;
 
-  const operatorPage = await browser.newPage();
+  const operatorPage = sharedContext ? await sharedContext.newPage() : await browser.newPage();
   await operatorPage.goto(`${operatorBase}/`);
   await expect(operatorPage).toHaveURL(`${operatorBase}/login`);
   await operatorPage.getByLabel('运营账号').fill('browser_test_operator');
@@ -26,7 +31,11 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
   await operatorPage.getByRole('button', { name: '登录运营后台' }).click();
   try {
     await expect(operatorPage).toHaveURL(
-      pathMode === 'subpaths' ? /^http:\/\/127\.0\.0\.1:3002\/ops\/?$/u : 'http://127.0.0.1:3002/',
+      sameOrigin
+        ? /^http:\/\/127\.0\.0\.1:3001\/ops\/?$/u
+        : prefixed
+          ? /^http:\/\/127\.0\.0\.1:3002\/ops\/?$/u
+          : 'http://127.0.0.1:3002/',
       { timeout: 10_000 },
     );
   } catch {
@@ -51,11 +60,11 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
   const setupLink = operatorPage.locator('.ops-created output');
   await expect(setupLink).toBeVisible();
   const setupUrl = new URL((await setupLink.textContent())!);
-  expect(setupUrl.origin).toBe('http://127.0.0.1:3000');
-  expect(setupUrl.pathname).toBe(`${pathMode === 'subpaths' ? '/console' : ''}/setup`);
+  expect(setupUrl.origin).toBe(merchantOrigin);
+  expect(setupUrl.pathname).toBe(`${prefixed ? '/console' : ''}/setup`);
   expect(/^#[A-Za-z0-9_-]{43}$/u.test(setupUrl.hash)).toBe(true);
 
-  const merchantPage = await browser.newPage();
+  const merchantPage = sharedContext ? await sharedContext.newPage() : await browser.newPage();
   await merchantPage.evaluate(
     ([base, token]) => {
       window.location.replace(`${base}/setup#${token}`);
@@ -69,7 +78,7 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
   await expect(merchantPage).toHaveURL(/\/workspace\/[0-9a-f]{32}$/u);
   await expect(merchantPage.getByRole('link', { name: '登录管理后台' })).toHaveAttribute(
     'href',
-    `${pathMode === 'subpaths' ? '/console' : ''}/account/login`,
+    `${prefixed ? '/console' : ''}/account/login`,
   );
   await expect(merchantPage.getByRole('link', { name: 'HTTPS 安全绑定' })).toHaveCount(0);
   const managementUrl = merchantPage.url();
@@ -151,7 +160,7 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
     .filter({ hasText: assistantName });
   await expect(assistantState).toContainText('已发布');
 
-  const consumerPage = await browser.newPage();
+  const consumerPage = sharedContext ? await sharedContext.newPage() : await browser.newPage();
   await consumerPage.goto(publicUrl!);
   await expect(consumerPage.getByRole('heading', { name: assistantName })).toBeVisible();
   await consumerPage.getByRole('textbox', { name: '输入想咨询的问题' }).fill('你们提供什么服务？');

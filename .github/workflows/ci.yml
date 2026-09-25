@@ -239,6 +239,13 @@ jobs:
           NEXT_PUBLIC_OPS_BASE_PATH: /ops
         run: pnpm test:e2e
 
+      - name: Verify full browser workflow on one origin
+        env:
+          H5CS_E2E_PATH_MODE: single_domain
+          NEXT_PUBLIC_MERCHANT_BASE_PATH: /console
+          NEXT_PUBLIC_OPS_BASE_PATH: /ops
+        run: pnpm test:e2e
+
       - name: Stop disposable MySQL
         if: always()
         run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml down

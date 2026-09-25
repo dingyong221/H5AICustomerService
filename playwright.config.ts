@@ -17,11 +17,14 @@ if (
 }
 
 const pathMode = process.env['H5CS_E2E_PATH_MODE'] ?? 'root';
-if (pathMode !== 'root' && pathMode !== 'subpaths') {
-  throw new Error('H5CS_E2E_PATH_MODE must be root or subpaths');
+if (pathMode !== 'root' && pathMode !== 'subpaths' && pathMode !== 'single_domain') {
+  throw new Error('H5CS_E2E_PATH_MODE must be root, subpaths or single_domain');
 }
-const merchantBasePath = pathMode === 'subpaths' ? '/console' : '';
-const opsBasePath = pathMode === 'subpaths' ? '/ops' : '';
+const merchantBasePath = pathMode === 'root' ? '' : '/console';
+const opsBasePath = pathMode === 'root' ? '' : '/ops';
+const publicOrigin = 'http://127.0.0.1:3001';
+const merchantOrigin = pathMode === 'single_domain' ? publicOrigin : 'http://127.0.0.1:3000';
+const opsOrigin = pathMode === 'single_domain' ? publicOrigin : 'http://127.0.0.1:3002';
 
 const operatorPassword = createHash('sha256')
   .update('h5cs-isolated-browser-operator:', 'utf8')
@@ -60,7 +63,7 @@ export default defineConfig({
         HOST: '127.0.0.1',
         PORT: '4000',
         PUBLIC_CONVERSATION_ENABLED: 'true',
-        CONSUMER_H5_ORIGIN: 'http://127.0.0.1:3001',
+        CONSUMER_H5_ORIGIN: publicOrigin,
         VISITOR_CREDENTIAL_HMAC_KEY: randomBytes(32).toString('base64url'),
       },
       reuseExistingServer: false,
@@ -91,8 +94,8 @@ export default defineConfig({
         OPS_ADMIN_USERNAME: 'browser_test_operator',
         OPS_ADMIN_PASSWORD_HASH: `scrypt:${operatorSalt.toString('base64url')}:${scryptSync(operatorPassword, operatorSalt, 64).toString('base64url')}`,
         OPS_SESSION_SIGNING_KEY: randomBytes(32).toString('base64url'),
-        OPS_PUBLIC_ORIGIN: 'http://127.0.0.1:3002',
-        MANAGEMENT_CONSOLE_URL: `http://127.0.0.1:3000${merchantBasePath}`,
+        OPS_PUBLIC_ORIGIN: opsOrigin,
+        MANAGEMENT_CONSOLE_URL: `${merchantOrigin}${merchantBasePath}`,
       },
       reuseExistingServer: false,
       timeout: 120_000,
@@ -104,9 +107,9 @@ export default defineConfig({
         ...common,
         NEXT_PUBLIC_MERCHANT_BASE_PATH: merchantBasePath,
         NODE_ENV: 'test',
-        MERCHANT_PUBLIC_ORIGIN: 'http://127.0.0.1:3000',
+        MERCHANT_PUBLIC_ORIGIN: merchantOrigin,
         MERCHANT_PHONE_LOOKUP_KEY: randomBytes(32).toString('base64url'),
-        CONSUMER_H5_ORIGIN: 'http://127.0.0.1:3001',
+        CONSUMER_H5_ORIGIN: publicOrigin,
         PUBLIC_CONVERSATION_ENABLED: 'true',
         CONVERSATION_WORKER_ENABLED: 'true',
         MODEL_PROVIDER: 'chat_completions',
@@ -125,7 +128,7 @@ export default defineConfig({
       url: 'http://127.0.0.1:3003/',
       env: {
         NODE_ENV: 'production',
-        CONSUMER_H5_ORIGIN: 'http://127.0.0.1:3001',
+        CONSUMER_H5_ORIGIN: publicOrigin,
         NEXT_PUBLIC_PUBLIC_API_BASE_URL: '/api/v1/public',
       },
       reuseExistingServer: false,
@@ -134,6 +137,7 @@ export default defineConfig({
     {
       command: 'node tests/e2e/public-gateway.mjs',
       url: 'http://127.0.0.1:3001/_gateway-health',
+      env: { H5CS_E2E_PATH_MODE: pathMode },
       reuseExistingServer: false,
     },
   ],

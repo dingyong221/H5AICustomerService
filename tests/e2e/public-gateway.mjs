@@ -11,8 +11,17 @@ http
       return;
     }
 
+    const singleDomain = process.env['H5CS_E2E_PATH_MODE'] === 'single_domain';
     const targetPort =
-      pathname === '/api/v1/public' || pathname.startsWith('/api/v1/public/') ? 4000 : 3003;
+      pathname === '/api/v1/public' ||
+      pathname.startsWith('/api/v1/public/') ||
+      (singleDomain && pathname.startsWith('/api/'))
+        ? 4000
+        : singleDomain && (pathname === '/ops' || pathname.startsWith('/ops/'))
+          ? 3002
+          : singleDomain && (pathname === '/console' || pathname.startsWith('/console/'))
+            ? 3000
+            : 3003;
     const upstream = http.request(
       {
         hostname: host,
