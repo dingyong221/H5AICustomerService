@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
 import { Button, EmptyState, PageShell, StatusBadge } from '@h5cs/ui';
-import { loadDatabaseConfig, MySqlPlatformProvisioningRepository } from '@h5cs/database';
+import {
+  loadDatabaseConfig,
+  MySqlPlatformProvisioningRepository,
+  type PlatformJobOverview,
+} from '@h5cs/database';
 import { redirect } from 'next/navigation';
 
 import { currentOperator, logoutOperator } from './operator-actions';
@@ -93,6 +97,7 @@ export default async function OperationsDashboardPage() {
   let audits: Awaited<ReturnType<MySqlPlatformProvisioningRepository['listPlatformAudits']>> = [];
   let assistants: Awaited<ReturnType<MySqlPlatformProvisioningRepository['listAssistantStates']>> =
     [];
+  let jobs: PlatformJobOverview | null = null;
   let databaseReady = false;
   let auditReady = false;
   let assistantsReady = false;
@@ -116,6 +121,11 @@ export default async function OperationsDashboardPage() {
     } catch {
       assistantsReady = false;
     }
+    try {
+      jobs = await repository.jobOverview();
+    } catch {
+      jobs = null;
+    }
   }
   return (
     <PageShell
@@ -133,7 +143,7 @@ export default async function OperationsDashboardPage() {
           <strong>{databaseReady ? `运营账号：${operator}` : '数据库暂不可用'}</strong>
           <span>
             {databaseReady
-              ? '商家开通与列表已连接真实数据库；平台操作审计单独显示连接状态，任务面板尚未接入。'
+              ? '商家开通与列表已连接真实数据库；审计和任务状态分别显示连接情况。'
               : '商家开通不可用，请核对 MySQL 连接和迁移状态。'}
           </span>
         </div>
@@ -158,13 +168,13 @@ export default async function OperationsDashboardPage() {
           </article>
           <article>
             <span>运行中任务</span>
-            <strong aria-label="尚未获取">—</strong>
-            <small>尚未查询</small>
+            <strong>{jobs ? jobs.processing : '—'}</strong>
+            <small>{jobs ? `另有 ${jobs.pending} 项待处理` : '暂不可用'}</small>
           </article>
           <article>
-            <span>待处置异常</span>
-            <strong aria-label="尚未获取">—</strong>
-            <small>尚未查询</small>
+            <span>失败任务</span>
+            <strong>{jobs ? jobs.failed : '—'}</strong>
+            <small>{jobs ? '需人工核对原因' : '暂不可用'}</small>
           </article>
         </div>
       </section>
@@ -263,9 +273,14 @@ export default async function OperationsDashboardPage() {
                 <p>{area.description}</p>
               </div>
               {(area.id === 'audit' && auditReady) ||
-              (area.id === 'merchants' && databaseReady && assistantsReady) ? (
+              (area.id === 'merchants' && databaseReady && assistantsReady) ||
+              (area.id === 'tasks' && jobs) ? (
                 <a className="ops-area-link" href={area.href}>
-                  {area.id === 'merchants' ? '查看状态' : '查看记录'}
+                  {area.id === 'merchants'
+                    ? '查看状态'
+                    : area.id === 'tasks'
+                      ? '查看任务'
+                      : '查看记录'}
                 </a>
               ) : (
                 <Button disabled size="small" variant="secondary">
@@ -309,19 +324,44 @@ export default async function OperationsDashboardPage() {
         )}
       </section>
 
-      <section aria-labelledby="attention-heading" className="attention-panel">
+      <section aria-labelledby="attention-heading" className="attention-panel" id="tasks">
         <div className="section-heading">
           <div>
             <p>待处理</p>
             <h2 id="attention-heading">异常与人工处置</h2>
           </div>
-          <StatusBadge>未载入</StatusBadge>
+          <StatusBadge tone={jobs ? (jobs.failed > 0 ? 'warning' : 'info') : 'warning'}>
+            {jobs ? `${jobs.failed} 项失败` : '暂不可用'}
+          </StatusBadge>
         </div>
-        <EmptyState
-          description={<p>尚未连接任务与告警 API，不能据此判断当前是否存在异常或待审核事项。</p>}
-          icon={<QueueIcon />}
-          title="暂无可展示的运行数据"
-        />
+        {!jobs ? (
+          <p role="alert">任务状态查询失败，不能据此判断没有异常。</p>
+        ) : jobs.recentFailed.length === 0 ? (
+          <EmptyState
+            description={<p>数据库当前没有失败任务；告警送达仍需独立验证。</p>}
+            icon={<QueueIcon />}
+            title="暂无失败任务"
+          />
+        ) : (
+          <>
+            <p>只展示最近 20 项失败任务的运行元数据；不展示任务载荷或消费者消息。</p>
+            <ol className="ops-job-list">
+              {jobs.recentFailed.map((job) => (
+                <li key={job.id}>
+                  <strong>{job.type}</strong>
+                  <span>错误码：{job.lastErrorCode ?? '未记录'}</span>
+                  <small>商家：{job.merchantId ?? '平台级任务'}</small>
+                  <small>
+                    尝试：{job.attempt}/{job.maxAttempts}
+                  </small>
+                  <time dateTime={job.updatedAt.toISOString()}>
+                    {job.updatedAt.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
+                  </time>
+                </li>
+              ))}
+            </ol>
+          </>
+        )}
       </section>
     </PageShell>
   );

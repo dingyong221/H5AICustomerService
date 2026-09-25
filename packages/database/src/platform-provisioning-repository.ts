@@ -59,6 +59,24 @@ export type PlatformAssistantSummary = Readonly<{
   updatedAt: Date;
 }>;
 
+export type PlatformJobSummary = Readonly<{
+  id: string;
+  merchantId: string | null;
+  type: string;
+  state: string;
+  attempt: number;
+  maxAttempts: number;
+  lastErrorCode: string | null;
+  updatedAt: Date;
+}>;
+
+export type PlatformJobOverview = Readonly<{
+  pending: number;
+  processing: number;
+  failed: number;
+  recentFailed: readonly PlatformJobSummary[];
+}>;
+
 type MerchantRow = RowDataPacket & {
   id: Buffer;
   name: string;
@@ -87,6 +105,17 @@ type PlatformAssistantRow = RowDataPacket & {
   display_name: string;
   status: string;
   active_release_id: Buffer | null;
+  updated_at: Date;
+};
+type JobCountRow = RowDataPacket & { state: string; total: number | string };
+type PlatformJobRow = RowDataPacket & {
+  id: Buffer;
+  merchant_id: Buffer | null;
+  type: string;
+  state: string;
+  attempt: number;
+  max_attempts: number;
+  last_error_code: string | null;
   updated_at: Date;
 };
 
@@ -190,6 +219,54 @@ export class MySqlPlatformProvisioningRepository {
         activeReleaseId: row.active_release_id?.toString('hex') ?? null,
         updatedAt: row.updated_at,
       }));
+    } finally {
+      await connection.end();
+    }
+  }
+
+  public async jobOverview(limit = 20): Promise<PlatformJobOverview> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
+      throw new Error('Job list limit is invalid');
+    }
+    const connection = await this.#database.openConnection();
+    try {
+      const [counts] = await connection.execute<JobCountRow[]>(
+        `SELECT state, COUNT(*) AS total
+           FROM job
+          WHERE state IN ('pending', 'processing', 'failed')
+          GROUP BY state`,
+      );
+      const totals = { pending: 0, processing: 0, failed: 0 };
+      for (const row of counts) {
+        if (row.state !== 'pending' && row.state !== 'processing' && row.state !== 'failed') {
+          throw new Error('Unexpected job state');
+        }
+        const total = Number(row.total);
+        if (!Number.isSafeInteger(total) || total < 0) throw new Error('Invalid job count');
+        totals[row.state] = total;
+      }
+      const [rows] = await connection.execute<PlatformJobRow[]>(
+        `SELECT id, merchant_id, type, state, attempt, max_attempts,
+                last_error_code, updated_at
+           FROM job
+          WHERE state = 'failed'
+          ORDER BY updated_at DESC, id DESC
+          LIMIT ?`,
+        [limit],
+      );
+      return {
+        ...totals,
+        recentFailed: rows.map((row) => ({
+          id: row.id.toString('hex'),
+          merchantId: row.merchant_id?.toString('hex') ?? null,
+          type: row.type,
+          state: row.state,
+          attempt: row.attempt,
+          maxAttempts: row.max_attempts,
+          lastErrorCode: row.last_error_code,
+          updatedAt: row.updated_at,
+        })),
+      };
     } finally {
       await connection.end();
     }

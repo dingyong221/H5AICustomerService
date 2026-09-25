@@ -468,7 +468,8 @@ a {
 }
 
 .ops-audit-list,
-.ops-assistant-list {
+.ops-assistant-list,
+.ops-job-list {
   display: grid;
   gap: 0.7rem;
   list-style: none;
@@ -477,7 +478,8 @@ a {
 }
 
 .ops-audit-list li,
-.ops-assistant-list li {
+.ops-assistant-list li,
+.ops-job-list li {
   align-items: baseline;
   border: 1px solid #e2e7ef;
   border-radius: 10px;
@@ -490,7 +492,9 @@ a {
 .ops-audit-list small,
 .ops-audit-list time,
 .ops-assistant-list small,
-.ops-assistant-list time {
+.ops-assistant-list time,
+.ops-job-list small,
+.ops-job-list time {
   color: #687387;
   font-size: 0.78rem;
 }

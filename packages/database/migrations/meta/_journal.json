@@ -71,6 +71,13 @@
       "when": 1790324397843,
       "tag": "0009_romantic_havok",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1790326377968,
+      "tag": "0010_slippery_fenris",
+      "breakpoints": true
     }
   ]
 }

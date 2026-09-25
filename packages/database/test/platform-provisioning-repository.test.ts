@@ -49,6 +49,68 @@ const repositoryWith = (failOn?: string, merchantStatus = 'pending_owner', failE
 };
 
 describe('platform merchant provisioning', () => {
+  it('summarizes task states and exposes only bounded failed-task metadata', async () => {
+    const jobId = Buffer.from('44'.repeat(16), 'hex');
+    const merchantId = Buffer.from('22'.repeat(16), 'hex');
+    const updatedAt = new Date('2026-09-25T09:00:00.000Z');
+    const execute = vi.fn(async (sql: string, _values?: readonly unknown[]) => {
+      if (sql.includes('COUNT(*) AS total')) {
+        return [
+          [
+            { state: 'pending', total: '3' },
+            { state: 'failed', total: '1' },
+          ],
+          [],
+        ];
+      }
+      return [
+        [
+          {
+            id: jobId,
+            merchant_id: merchantId,
+            type: 'conversation.turn',
+            state: 'failed',
+            attempt: 5,
+            max_attempts: 5,
+            last_error_code: 'MODEL_TIMEOUT',
+            updated_at: updatedAt,
+          },
+        ],
+        [],
+      ];
+    });
+    const end = vi.fn(async () => undefined);
+    const database = {
+      openConnection: async () => ({ execute, end }) as unknown as Connection,
+      summary: { host: 'test', database: 'test', tlsRequested: false },
+      toJSON: () => ({ host: 'test', database: 'test', tlsRequested: false }),
+    } satisfies DatabaseConnectionConfig;
+    const repository = new MySqlPlatformProvisioningRepository(database);
+
+    await expect(repository.jobOverview(5)).resolves.toEqual({
+      pending: 3,
+      processing: 0,
+      failed: 1,
+      recentFailed: [
+        {
+          id: jobId.toString('hex'),
+          merchantId: merchantId.toString('hex'),
+          type: 'conversation.turn',
+          state: 'failed',
+          attempt: 5,
+          maxAttempts: 5,
+          lastErrorCode: 'MODEL_TIMEOUT',
+          updatedAt,
+        },
+      ],
+    });
+    expect(execute.mock.calls[1]?.[0]).not.toMatch(/payload|message|content|lease_owner/iu);
+    expect(execute.mock.calls[1]?.[1]).toEqual([5]);
+    expect(end).toHaveBeenCalledOnce();
+    await expect(repository.jobOverview(51)).rejects.toThrow('Job list limit is invalid');
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
   it('lists bounded assistant status without loading draft or conversation content', async () => {
     const assistantId = Buffer.from('11'.repeat(16), 'hex');
     const merchantId = Buffer.from('22'.repeat(16), 'hex');

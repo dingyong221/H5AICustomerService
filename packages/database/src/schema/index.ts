@@ -901,6 +901,7 @@ export const jobs = mysqlTable(
     uniqueIndex('uq_job_type_dedup').on(table.type, table.dedupKey),
     index('idx_job_claim').on(table.state, table.runAfter, table.priority, table.id),
     index('idx_job_lease_recovery').on(table.state, table.leaseUntil, table.id),
+    index('idx_job_state_updated').on(table.state, table.updatedAt, table.id),
     index('idx_job_merchant').on(table.merchantId, table.createdAt, table.id),
   ],
 );

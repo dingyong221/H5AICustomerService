@@ -365,6 +365,10 @@ describe('real MySQL merchant-to-consumer flow', () => {
       expect(turn.state).toBe('completed');
       expect(turn.messages.map((message) => message.role)).toEqual(['visitor', 'assistant']);
       expect(turn.messages[1]?.content).toContain('空调清洗');
+      const jobOverview = await provisioner.jobOverview();
+      expect(jobOverview.pending).toBeGreaterThanOrEqual(0);
+      expect(jobOverview.processing).toBeGreaterThanOrEqual(0);
+      expect(jobOverview.failed).toBeGreaterThanOrEqual(0);
       expect(
         (
           await fetch(`${publicBase}/sessions/${session.sessionHandle}/turns/${accepted.turnId}`, {
