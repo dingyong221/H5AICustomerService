@@ -10,6 +10,8 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
 
   const merchantName = `浏览器测试商家 ${randomBytes(5).toString('hex')}`;
   const assistantName = `空调清洗客服 ${randomBytes(4).toString('hex')}`;
+  const industryCode = `local_${randomBytes(5).toString('hex')}`;
+  const referenceNotes = '参考提示：请核实上门范围，不得把测试价格当成商家报价。';
   const merchantPassword = randomBytes(24).toString('base64url');
 
   const operatorPage = await browser.newPage();
@@ -28,6 +30,13 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
     throw new Error(`Operator login did not complete: ${error ?? 'no page error was shown'}`);
   }
   await expect(operatorPage.getByRole('heading', { name: '生成商家后台领取链接' })).toBeVisible();
+  await operatorPage.getByLabel('行业代码').fill(industryCode);
+  await operatorPage.getByLabel('行业名称').fill('本地生活服务');
+  await operatorPage.getByLabel('行业参考说明').fill(referenceNotes);
+  await operatorPage.getByLabel('应收集的产品/服务资料（每行一项）').fill('服务项目\n上门范围');
+  await operatorPage.getByLabel('应确认的售卖策略（每行一项，可留空）').fill('价格条件\n优惠期限');
+  await operatorPage.getByRole('button', { name: '创建行业模板' }).click();
+  await expect(operatorPage.getByText('已创建行业模板 本地生活服务 v1')).toBeVisible();
   await operatorPage.getByLabel('商家名称').fill(merchantName);
   await operatorPage.getByRole('button', { name: '创建商家并生成领取链接' }).click();
   const setupLink = operatorPage.locator('.ops-created output');
@@ -54,6 +63,11 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
   );
 
   await merchantPage.getByLabel('客服名称').fill(assistantName);
+  await merchantPage.getByLabel('行业资料引导（可选）').selectOption({
+    label: '本地生活服务 · v1',
+  });
+  await expect(merchantPage.getByText(referenceNotes)).toBeVisible();
+  await expect(merchantPage.getByLabel('细分行业')).toHaveValue('本地生活服务');
   await merchantPage.getByLabel('细分行业').fill('家电清洗');
   await merchantPage.getByLabel('业务范围').fill('提供家用空调清洗咨询');
   await merchantPage.getByLabel('商品或服务资料').fill('提供上门空调清洗服务');
@@ -66,6 +80,7 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
   await merchantPage.reload();
   await merchantPage.getByRole('link', { name: assistantName }).click();
   await expect(merchantPage.getByRole('heading', { name: assistantName })).toBeVisible();
+  await expect(merchantPage.getByText(referenceNotes)).toHaveCount(0);
   await merchantPage.getByLabel(/我已逐项核对以上资料/u).check();
   await merchantPage.getByRole('button', { name: '确认当前草稿资料' }).click();
   await expect(merchantPage.getByText('当前草稿资料已确认')).toBeVisible();

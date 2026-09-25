@@ -3,7 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 
-import { loadDatabaseConfig, MySqlAssistantLifecycleRepository } from '@h5cs/database';
+import {
+  loadDatabaseConfig,
+  MySqlAssistantLifecycleRepository,
+  MySqlIndustryTemplateRepository,
+  type IndustryTemplateGuide,
+} from '@h5cs/database';
 import { toMerchantId, toMerchantUserId } from '@h5cs/domain';
 import { PageShell, StatusBadge } from '@h5cs/ui';
 
@@ -28,6 +33,8 @@ export default async function MerchantWorkspacePage({
   let assistants: Awaited<ReturnType<MySqlAssistantLifecycleRepository['listMerchantAssistants']>> =
     [];
   let ready = false;
+  let templates: readonly IndustryTemplateGuide[] = [];
+  let templatesReady = false;
   if (database.configured) {
     try {
       assistants = await new MySqlAssistantLifecycleRepository(
@@ -36,6 +43,12 @@ export default async function MerchantWorkspacePage({
       ready = true;
     } catch {
       ready = false;
+    }
+    try {
+      templates = await new MySqlIndustryTemplateRepository(database.config).listActive();
+      templatesReady = true;
+    } catch {
+      templatesReady = false;
     }
   }
   return (
@@ -58,7 +71,12 @@ export default async function MerchantWorkspacePage({
         <>
           <section className="merchant-account-card assistant-create-card">
             <h2>客服基础资料</h2>
-            <CreateAssistantForm merchantId={merchantId} idempotencyKey={randomUUID()} />
+            <CreateAssistantForm
+              merchantId={merchantId}
+              idempotencyKey={randomUUID()}
+              templates={templates}
+              templatesReady={templatesReady}
+            />
           </section>
           <section className="merchant-account-card assistant-create-card">
             <h2>已创建的客服</h2>

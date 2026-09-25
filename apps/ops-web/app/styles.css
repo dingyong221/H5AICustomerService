@@ -60,6 +60,47 @@ a {
   padding: 0.75rem 0.85rem;
 }
 
+.ops-form textarea {
+  border: 1px solid #b7c2d4;
+  border-radius: 9px;
+  font: inherit;
+  padding: 0.75rem 0.85rem;
+  resize: vertical;
+}
+
+.ops-template-form {
+  max-width: 43rem;
+}
+
+.ops-template-list {
+  display: grid;
+  gap: 0.7rem;
+  list-style: none;
+  padding: 0;
+}
+
+.ops-template-list li {
+  border: 1px solid #e2e7ef;
+  border-radius: 10px;
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.8rem;
+}
+
+.ops-template-list small {
+  color: #687387;
+}
+
+.ops-template-list p {
+  white-space: pre-wrap;
+}
+
+.ops-template-create {
+  border-top: 1px solid #e6e9ef;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+}
+
 .ops-form button,
 .ops-logout {
   background: #315fe7;

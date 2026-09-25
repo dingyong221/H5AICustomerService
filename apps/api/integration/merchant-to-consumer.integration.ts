@@ -5,10 +5,12 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import {
   loadDatabaseConfig,
+  IndustryTemplateAlreadyExistsError,
   MySqlAssistantLifecycleRepository,
   MySqlConversationTurnJobRepository,
   MySqlMerchantAccessRepository,
   MySqlMerchantConversationRepository,
+  MySqlIndustryTemplateRepository,
   MySqlOperatorLoginThrottleRepository,
   MySqlPlatformProvisioningRepository,
   MerchantProvisionAlreadyAppliedError,
@@ -60,6 +62,41 @@ describe('real MySQL merchant-to-consumer flow', () => {
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('versions industry intake guidance without silently changing merchant facts', async () => {
+    const repository = new MySqlIndustryTemplateRepository(database);
+    const code = `ci_${uniqueHex()}`;
+    const input = {
+      code,
+      displayName: '家电服务参考',
+      referenceNotes: '需由商家核实服务范围，不是已确认商品事实。',
+      requiredMaterials: ['服务项目', '上门范围'],
+      requiredPolicies: ['价格条件', '优惠有效期'],
+      operatorId: 'integration_operator',
+    };
+    const first = await repository.create({ ...input, version: 1 });
+    expect(first.code).toBe(code);
+    expect(first.requiredMaterials).toEqual(['服务项目', '上门范围']);
+    expect((await repository.listActive()).find((guide) => guide.code === code)).toMatchObject({
+      id: first.id,
+      version: 1,
+    });
+    const second = await repository.create({
+      ...input,
+      version: 2,
+      requiredMaterials: ['服务项目', '服务区域', '售后条件'],
+    });
+    expect((await repository.listActive()).filter((guide) => guide.code === code)).toEqual([
+      expect.objectContaining({
+        id: second.id,
+        version: 2,
+        requiredMaterials: ['服务项目', '服务区域', '售后条件'],
+      }),
+    ]);
+    await expect(repository.create({ ...input, version: 2 })).rejects.toBeInstanceOf(
+      IndustryTemplateAlreadyExistsError,
+    );
   });
 
   it('keeps a retried operator request to one merchant without replaying its one-time token', async () => {

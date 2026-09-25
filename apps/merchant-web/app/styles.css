@@ -99,6 +99,7 @@ a {
 }
 
 .assistant-create-form input,
+.assistant-create-form select,
 .assistant-create-form textarea,
 .assistant-edit-form input,
 .assistant-edit-form textarea {
@@ -106,6 +107,25 @@ a {
   border-radius: 9px;
   font: inherit;
   padding: 0.75rem;
+}
+
+.assistant-industry-guide {
+  background: #f0f7f2;
+  border: 1px solid #b9d9c6;
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.assistant-industry-guide h3 {
+  margin-top: 0;
+}
+
+.assistant-industry-guide p {
+  white-space: pre-wrap;
+}
+
+.assistant-industry-guide ul {
+  margin: 0.4rem 0 1rem;
 }
 
 .assistant-create-form button,

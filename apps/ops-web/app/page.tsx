@@ -3,13 +3,16 @@ import { randomUUID } from 'node:crypto';
 import { Button, EmptyState, PageShell, StatusBadge } from '@h5cs/ui';
 import {
   loadDatabaseConfig,
+  MySqlIndustryTemplateRepository,
   MySqlPlatformProvisioningRepository,
+  type IndustryTemplateGuide,
   type PlatformJobOverview,
 } from '@h5cs/database';
 import { redirect } from 'next/navigation';
 
 import { currentOperator, logoutOperator } from './operator-actions';
 import { ManagementLink } from './management-link';
+import { IndustryTemplateForm } from './industry-template-form';
 import { managementBaseUrl, merchantWorkspaceUrl } from './management-url';
 import { ProvisionForm } from './provision-form';
 import { ReissueInvitationForm } from './reissue-invitation-form';
@@ -98,9 +101,11 @@ export default async function OperationsDashboardPage() {
   let assistants: Awaited<ReturnType<MySqlPlatformProvisioningRepository['listAssistantStates']>> =
     [];
   let jobs: PlatformJobOverview | null = null;
+  let industryTemplates: readonly IndustryTemplateGuide[] = [];
   let databaseReady = false;
   let auditReady = false;
   let assistantsReady = false;
+  let industryTemplatesReady = false;
   if (database.configured) {
     const repository = new MySqlPlatformProvisioningRepository(database.config);
     try {
@@ -125,6 +130,12 @@ export default async function OperationsDashboardPage() {
       jobs = await repository.jobOverview();
     } catch {
       jobs = null;
+    }
+    try {
+      industryTemplates = await new MySqlIndustryTemplateRepository(database.config).listActive();
+      industryTemplatesReady = true;
+    } catch {
+      industryTemplatesReady = false;
     }
   }
   return (
@@ -215,6 +226,53 @@ export default async function OperationsDashboardPage() {
                 ))}
               </ul>
             )}
+          </div>
+        ) : null}
+      </section>
+
+      <section
+        aria-labelledby="templates-heading"
+        className="ops-provision-panel"
+        id="industry-templates"
+      >
+        <div className="section-heading">
+          <div>
+            <p>资料引导</p>
+            <h2 id="templates-heading">行业模板</h2>
+          </div>
+          <StatusBadge tone={industryTemplatesReady ? 'info' : 'warning'}>
+            {industryTemplatesReady ? `${industryTemplates.length} 个行业` : '暂不可用'}
+          </StatusBadge>
+        </div>
+        <p>按行业列出商家应提供的资料和策略。模板是收集问题的参考，不是商家已核实的事实。</p>
+        {industryTemplatesReady ? (
+          industryTemplates.length === 0 ? (
+            <p>尚无行业模板；商家仍可手动填写细分行业与资料。</p>
+          ) : (
+            <ul className="ops-template-list">
+              {industryTemplates.map((template) => (
+                <li key={template.id}>
+                  <strong>{template.displayName}</strong>
+                  <small>
+                    {template.code} · v{template.version}
+                  </small>
+                  <details>
+                    <summary>查看资料引导</summary>
+                    <p>{template.referenceNotes}</p>
+                    <p>资料：{template.requiredMaterials.join('；')}</p>
+                    <p>售卖策略：{template.requiredPolicies.join('；') || '按业务情况确认'}</p>
+                  </details>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : (
+          <p role="alert">行业模板查询失败，不能据此判断没有模板。</p>
+        )}
+        {databaseReady ? (
+          <div className="ops-template-create">
+            <h3>新增不可变模板版本</h3>
+            <IndustryTemplateForm />
           </div>
         ) : null}
       </section>
