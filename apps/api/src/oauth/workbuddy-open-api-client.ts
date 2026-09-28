@@ -12,14 +12,18 @@ const redirectUriSchema = z
   .url()
   .max(2_048)
   .refine((value) => {
-    const url = new URL(value);
-    return (
-      url.protocol === 'https:' &&
-      url.username.length === 0 &&
-      url.password.length === 0 &&
-      url.search.length === 0 &&
-      url.hash.length === 0
-    );
+    try {
+      const url = new URL(value);
+      return (
+        url.protocol === 'https:' &&
+        url.username.length === 0 &&
+        url.password.length === 0 &&
+        url.search.length === 0 &&
+        url.hash.length === 0
+      );
+    } catch {
+      return false;
+    }
   }, 'WorkBuddy callback must be a clean HTTPS URL');
 const scopeSchema = z.string().regex(/^[a-z][a-z0-9._:-]{0,127}$/u);
 const authorizationCodeSchema = z.string().regex(/^\S{8,2048}$/u);
@@ -220,10 +224,12 @@ export const loadWorkBuddyOpenApiClient = (
   const redirectUri = environment['WORKBUDDY_OPEN_API_REDIRECT_URI'];
   const rawScopes = environment['WORKBUDDY_OPEN_API_SCOPES'];
   const values = [clientId, clientSecret, redirectUri, rawScopes];
-  if (values.every((value) => value === undefined)) {
+  const isUnset = (value: string | undefined): boolean =>
+    value === undefined || value.trim() === '';
+  if (values.every(isUnset)) {
     return { configured: false, reason: 'WorkBuddy Open API credentials are not set' };
   }
-  if (values.some((value) => value === undefined)) {
+  if (values.some(isUnset)) {
     throw new WorkBuddyOpenApiConfigurationError(
       'WorkBuddy Open API configuration must be supplied as one complete set',
     );

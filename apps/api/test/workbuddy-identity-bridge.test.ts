@@ -82,8 +82,27 @@ describe('WorkBuddy third-party OAuth identity bridge', () => {
       configured: false,
       reason: 'WorkBuddy Open API credentials are not set',
     });
+    expect(
+      loadWorkBuddyOpenApiClient({
+        WORKBUDDY_OPEN_API_CLIENT_ID: '',
+        WORKBUDDY_OPEN_API_CLIENT_SECRET: '',
+        WORKBUDDY_OPEN_API_REDIRECT_URI: '',
+        WORKBUDDY_OPEN_API_SCOPES: ' ',
+      }),
+    ).toEqual({
+      configured: false,
+      reason: 'WorkBuddy Open API credentials are not set',
+    });
     expect(() =>
       loadWorkBuddyOpenApiClient({ WORKBUDDY_OPEN_API_CLIENT_ID: clientConfig.clientId }),
+    ).toThrow(WorkBuddyOpenApiConfigurationError);
+    expect(() =>
+      loadWorkBuddyOpenApiClient({
+        WORKBUDDY_OPEN_API_CLIENT_ID: clientConfig.clientId,
+        WORKBUDDY_OPEN_API_CLIENT_SECRET: clientConfig.clientSecret,
+        WORKBUDDY_OPEN_API_REDIRECT_URI: '',
+        WORKBUDDY_OPEN_API_SCOPES: clientConfig.requestedScopes.join(' '),
+      }),
     ).toThrow(WorkBuddyOpenApiConfigurationError);
 
     const loaded = loadWorkBuddyOpenApiClient({
