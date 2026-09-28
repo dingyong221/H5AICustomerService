@@ -42,7 +42,8 @@ RUN pnpm exec turbo run build --filter="./apps/${APP_NAME}" \
   && pnpm --config.inject-workspace-packages=true --filter "./apps/${APP_NAME}" --prod deploy /opt/deployed-app \
   && if [ "${APP_KIND}" = api ]; then \
        test -f /opt/deployed-app/node_modules/@h5cs/database/dist/config.js \
-       && node /opt/deployed-app/node_modules/@h5cs/database/scripts/migrate-managed.mjs --inventory >/dev/null; \
+       && inventory="$(node /opt/deployed-app/node_modules/@h5cs/database/scripts/migrate-managed.mjs --inventory)" \
+       && printf '%s' "$inventory" | node -e 'const value = JSON.parse(require("node:fs").readFileSync(0, "utf8")); if (value.dialect !== "mysql" || !Array.isArray(value.entries) || value.entries.length === 0 || !/^[0-9a-f]{64}$/.test(value.planSha256)) process.exit(1);'; \
      fi
 
 FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS runtime-base
