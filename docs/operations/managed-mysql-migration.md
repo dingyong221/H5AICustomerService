@@ -22,6 +22,8 @@ pnpm --filter @h5cs/database db:migrate:managed --inventory
 
 核对文件顺序及输出的 `planSha256`。这只是文件清单，不代表数据库待应用项或数据库连接成功。
 
+若从发布镜像执行，必须用**该镜像实际的迁移入口**先运行 `--inventory`，确认进程输出完整 JSON 和预期 `planSha256`；仅有退出码 0 不足以通过。2026-09-29 已导入服务器的 `e3f57188ab906c80b4c812e3b43c7f165215a863` API 候选镜像存在经包符号链接调用时静默退出的问题，不得作为 Staging 或 Production migrator。须换用包含迁移入口修复的新签名候选镜像并重新核对摘要。
+
 由受控运行环境设置 `APP_ENV=staging` 或 `production`，以及上述迁移连接变量。生产额外设置不含秘密的 `H5CS_MIGRATION_BACKUP_REF` 和 `H5CS_MIGRATION_CHANGE_ID`。确认目标主机、库名和清单哈希后执行：
 
 ```text
@@ -30,4 +32,4 @@ pnpm --filter @h5cs/database db:migrate:managed --apply --target=staging --expec
 
 生产时将 `--target` 改为 `production`，其余确认项必须来自生产变更单。脚本会再次比对清单哈希、配置环境、目标主机/库名、实际选中数据库和 TLS 协商结果，取得数据库迁移锁后由 Drizzle 在单一连接上应用尚未记录的迁移。
 
-执行后以同一受控账号只读核对 `__drizzle_migrations`、实际 Schema 和应用健康，再进行业务冒烟。失败时先核对迁移记录与实际 Schema；若出现部分 DDL，按恢复预案处理，不把再次执行命令当成回滚。
+执行时还须确认迁移程序明确输出目标环境、目标主机/库及 `MySQL migration completed`；退出码 0 但没有该结果视为失败。执行后以同一受控账号只读核对 `__drizzle_migrations`、实际 Schema 和应用健康，再进行业务冒烟。失败时先核对迁移记录与实际 Schema；若出现部分 DDL，按恢复预案处理，不把再次执行命令当成回滚。

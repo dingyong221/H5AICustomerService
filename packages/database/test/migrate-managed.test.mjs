@@ -1,6 +1,16 @@
-import { existsSync, mkdtempSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  realpathSync,
+  rmdirSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
@@ -51,6 +61,29 @@ describe('managed MySQL migration preflight', () => {
     expect(new Set(first.entries.map((entry) => entry.tag)).size).toBe(first.entries.length);
     expect(first.planSha256).toMatch(/^[0-9a-f]{64}$/u);
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'runs the inventory through the symlinked package path used by the API image',
+    () => {
+      const directory = mkdtempSync(join(tmpdir(), 'h5cs-migration-entry-'));
+      const entry = join(directory, 'migrate-managed.mjs');
+      const script = realpathSync(
+        fileURLToPath(new URL('../scripts/migrate-managed.mjs', import.meta.url)),
+      );
+      try {
+        symlinkSync(script, entry);
+        const result = spawnSync(process.execPath, [entry, '--inventory'], {
+          cwd: directory,
+          encoding: 'utf8',
+        });
+        expect(result.status).toBe(0);
+        expect(JSON.parse(result.stdout).planSha256).toBe(migrationInventory().planSha256);
+      } finally {
+        if (existsSync(entry)) unlinkSync(entry);
+        rmdirSync(directory);
+      }
+    },
+  );
 
   it('rejects a journal and SQL directory that do not match exactly', () => {
     const directory = mkdtempSync(join(tmpdir(), 'h5cs-migration-inventory-'));
