@@ -74,6 +74,25 @@ textarea:focus-visible {
   padding: 1rem 1.1rem;
 }
 
+.new-consultation-button {
+  background: #ffffff;
+  border: 1px solid var(--ui-line);
+  border-radius: 8px;
+  color: #174f3c;
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  font-weight: 650;
+  margin-left: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  white-space: nowrap;
+}
+
+.new-consultation-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .assistant-identity {
   align-items: center;
   display: flex;

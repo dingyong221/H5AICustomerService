@@ -1,0 +1,1 @@
+CREATE INDEX `idx_job_state_updated` ON `job` (`state`,`updated_at`,`id`);

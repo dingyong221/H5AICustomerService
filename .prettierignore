@@ -4,5 +4,6 @@ coverage
 dist
 node_modules
 pnpm-lock.yaml
+packages/database/migrations/meta/*.json
 docs/design
 **/next-env.d.ts

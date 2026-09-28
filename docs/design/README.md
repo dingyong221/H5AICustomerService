@@ -1,10 +1,12 @@
 # H5 AI客服生成与管理平台：设计索引
 
-## 本轮结果
+## 当前实现与发布边界（2026-09-25）
 
-项目已从设计进入 `v0.1.0` 仓库标准版本收口：完成了 WorkBuddy/OAuth 安全边界、MySQL 授权与客服草稿/Release 事实仓储、商家端授权与管理客户端、消费者公开 H5 客户端，以及可生成 SBOM/源码哈希证据的发布门禁。管理/Public API、真实生成与回答运行时仍未贯通，因此客户端在缺少可信后端时保持不可用状态，不展示模拟成功。
+仓库已形成运营 Web 开通商家与生成领取/管理链接、商家 Web 领取并创建/确认/发布客服、MySQL 事实仓储、异步 Worker 回答和消费者 H5 咨询的本地闭环。CI 使用一次性 MySQL、受控测试模型与生产构建，在独立主机根路径及 `/ops`、`/console` 子路径变体下分别跑通浏览器场景；候选同域名网关也在隔离端口验收。这证明仓库中的流程，不证明正式模型或生产可用。最新提交的 CI 和仓库证据应以[草稿 PR](https://github.com/dingyong221/H5AICustomerService/pull/1)的精确 SHA 验证记录为准；候选镜像尚未推送。
 
-腾讯云实例、安全组、SSH、主机基线和域名 HTTP 维护入口已按 `05-server-deployment-release.md` 完成；业务容器、托管数据库、真实 WorkBuddy、正式模型和 TLS 尚未部署。仓库标准版本与生产可用状态的权威口径见 `docs/release/v0.1.0-standard-release-checklist.md`。
+WorkBuddy 接入已按用户决定暂停，不属于当前 Web 发布范围。OAuth/MCP 代码尚不可宣称接通；候选公网网关对相关路径返回 404，商家 Web 导航也不再展示 WorkBuddy 入口。日后启用需单独完成真实客户端验收。
+
+腾讯云实例、安全组、SSH、主机基线和域名 HTTP 维护入口已完成。按用户批准的单机例外，服务器已装 MySQL 8.4.11、项目库与最小权限账号，未开放公网 3306；生产 Schema、离机备份/PITR、正式 TLS、五个业务容器和真实模型仍未部署或验收。服务器状态须在发布前重新检查，不能把此处或[只读预检](../operations/2026-09-25-production-preflight.md)当作实时状态。仓库标准版本与生产可用状态的权威口径见[发布清单](../release/v0.1.0-standard-release-checklist.md)。
 
 ## 建议阅读顺序
 
@@ -30,7 +32,7 @@
 | Session | `merchant + assistant + visitor credential + release`共同确定归属；公开slug不是会话凭据 |
 | 对话 | 同一Session一次只处理一个生成Turn；幂等键和数据库序号防重复与乱序 |
 | WorkBuddy | 核心契约是HTTPS REST管理API + 受控商家凭据；MCP/OAuth/分发均须目标环境实机验证 |
-| 生产部署 | 托管数据服务优先；至少两个API故障单元与独立Worker；P0不自建Kubernetes；Ubuntu便携方案使用Docker Compose + systemd + Nginx |
+| 生产部署 | 原设计托管数据服务优先；本项目经用户批准采用服务器本机 MySQL 单机例外，须补齐离机备份、恢复和故障域风险验收；P0不自建Kubernetes，Ubuntu方案使用Docker Compose + Nginx |
 
 ## 设计使用规则
 
@@ -41,11 +43,11 @@
 
 ## 下一阶段输入
 
-仓库基线之后仍需完成以下产品闭环：
+当前本地运营→商家→消费者闭环之后仍需完成：
 
-1. 将平台登录、授权事务、管理/Public API 接到现有可信客户端与 MySQL 仓储。
-2. 实现可重复验收的生成协调器、匿名访客 Session/Turn/Message 与确定性本地回答适配器。
-3. 建立可销毁 MySQL 的单入口浏览器/API/MCP 验收和同 commit 证据包。
-4. 在另行授权后接入真实 WorkBuddy、托管私网 MySQL、正式模型、TLS 与镜像发布链。
+1. 优先完成运营 Web 开通商家、商家 Web 配置与发布、消费者 H5 咨询的正式闭环；WorkBuddy 暂停，不作为本阶段发布前提，其公网入口须保持关闭。
+2. 确定正式域名是同域名 `/ops`、`/console`、`/a`、`/api`，还是独立子域名；镜像构建路径、管理链接、Nginx 与 Cookie/回调必须一致。[路径构建变体](../operations/web-path-builds.md)只有本地/CI 验证。
+3. 经授权取得正式 TLS、推送/验签五个不可变镜像、配置正式模型与受限 Secret、完成生产 Schema 迁移前的离机备份/PITR、隔离恢复、容量与告警验收。
+4. 完成 Staging 同 digest 验收、发布审批、生产切流与回滚演练后，逐项验证平台后台、商家管理链接、消费者固定链接和真实回答；未完成前保持生产 No-Go。
 
-在上述产物中，最先需要产品负责人确认的是：首批行业、登录方式、会话超时与留存、联系渠道、模型/部署、试点额度，以及目标WorkBuddy版本与可用接入能力。
+当前需要产品负责人答复的事项包括正式路由、证书申请与通知邮箱、候选镜像推送、离机备份目标、正式模型凭据及试点发布审批；这些选择不由 CI 测试代替。WorkBuddy 凭据暂不需要。

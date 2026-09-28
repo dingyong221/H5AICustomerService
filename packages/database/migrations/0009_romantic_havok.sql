@@ -1,0 +1,2 @@
+ALTER TABLE `conversation_session` ADD `follow_up_status` varchar(32) DEFAULT 'pending' NOT NULL;--> statement-breakpoint
+CREATE INDEX `idx_session_merchant_activity` ON `conversation_session` (`merchant_id`,`last_activity_at`,`id`);

@@ -31,6 +31,7 @@ export type AssistantManagementSnapshot = Readonly<{
   status: 'draft_only' | 'active' | 'paused';
   draftRevision: number;
   draft: AssistantDraftConfig;
+  knowledgeConfirmed: boolean;
   activeReleaseId: ReleaseId | null;
   createdAt: Date;
   updatedAt: Date;

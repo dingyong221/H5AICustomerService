@@ -1,6 +1,8 @@
 import type { OnboardingMissingItemContract, SkillIntentResult } from '@h5cs/contracts';
 import type { ProgressStep, ProgressStepStatus, StatusBadgeProps } from '@h5cs/ui';
 
+import { relativeMerchantPath } from '../merchant-base-path';
+
 type ContinueOnboardingResult = Extract<SkillIntentResult, { action: 'continue_onboarding' }>;
 type OnboardingContractState = ContinueOnboardingResult['state'];
 type StepId = 'industry' | 'materials' | 'policy' | 'confirmation';
@@ -45,6 +47,7 @@ export interface OnboardingViewModel {
   helpHref: string;
   identity: WorkBuddyIdentityViewModel;
   isReadOnly: boolean;
+  managementUrl: string | undefined;
   missingItems: readonly MissingItemViewModel[];
   missingItemsLabel: string;
   primaryActionLabel: string;
@@ -131,18 +134,22 @@ export function buildWorkBuddyIdentityViewModel(
 }
 
 function toLoginGate(rawManagementUrl: string | undefined, applicationOrigin: string): string {
-  let nextPath = '/';
-
-  if (rawManagementUrl !== undefined) {
-    try {
-      const target = new URL(rawManagementUrl);
-      if (target.origin === applicationOrigin) nextPath = `${target.pathname}${target.search}`;
-    } catch {
-      nextPath = '/';
-    }
+  if (rawManagementUrl === undefined) return '/account/login';
+  try {
+    const target = new URL(rawManagementUrl);
+    if (target.origin !== applicationOrigin || target.search || target.hash)
+      return '/account/login';
+    const relativePath = relativeMerchantPath(target.pathname);
+    if (relativePath === null) return '/account/login';
+    const merchantId = /^\/workspace\/([0-9a-f]{32})(?:\/|$)/u.exec(relativePath)?.[1];
+    if (!merchantId) return '/account/login';
+    const allowedPath = new RegExp(`^/workspace/${merchantId}(?:/assistants/[0-9a-f]{32})?$`, 'u');
+    return allowedPath.test(relativePath)
+      ? `/account/login?merchant=${merchantId}&next=${encodeURIComponent(relativePath)}`
+      : '/account/login';
+  } catch {
+    return '/account/login';
   }
-
-  return `/login?next=${encodeURIComponent(nextPath)}`;
 }
 
 export function buildWorkBuddyEntryViewModel(input: {
@@ -186,12 +193,18 @@ function getStepStatus(
 }
 
 export function buildOnboardingViewModel(input: {
+  applicationOrigin?: string;
   apiConnected: boolean;
   authorization: WorkBuddyAuthorization;
   result?: SkillIntentResult;
 }): OnboardingViewModel {
   const continuation = input.result?.action === 'continue_onboarding' ? input.result : undefined;
   const state = continuation?.state;
+  const rawManagementUrl = state === 'manageable' ? continuation?.management_url : undefined;
+  const loginGate = toLoginGate(
+    rawManagementUrl,
+    input.applicationOrigin ?? 'https://h5cs.1rying.com',
+  );
   const authorized = input.authorization === 'authorized';
   const actionable = input.apiConnected && authorized;
   const missingItems = (continuation?.missing_items ?? []).map((item) => {
@@ -212,6 +225,7 @@ export function buildOnboardingViewModel(input: {
     helpHref: '/onboarding#help',
     identity: buildWorkBuddyIdentityViewModel(input.authorization),
     isReadOnly: !actionable,
+    managementUrl: rawManagementUrl && loginGate !== '/account/login' ? loginGate : undefined,
     missingItems,
     missingItemsLabel:
       continuation === undefined

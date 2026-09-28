@@ -17,6 +17,7 @@ import {
 import type { OnboardingEvent } from '@h5cs/domain';
 
 import {
+  AssistantSelectionNotFoundError,
   ManagementConsoleUnavailableError,
   MerchantBindingRequiredError,
   OnboardingSessionNotFoundError,
@@ -60,7 +61,14 @@ const createOrResumeInputSchema = z
   })
   .strict();
 
-const managementOpenInputSchema = z.object({}).strict();
+const managementOpenInputSchema = z
+  .object({
+    assistant_ref: z
+      .string()
+      .regex(/^[0-9a-f]{32}$/u)
+      .optional(),
+  })
+  .strict();
 
 const advanceInputSchema = z
   .object({
@@ -110,6 +118,13 @@ export const toWorkBuddyMcpToolError = (error: unknown): WorkBuddyMcpToolError =
     return {
       code: 'NOT_FOUND',
       message: '未找到可访问的入驻会话，请检查会话ID或新建入驻。',
+      retryable: false,
+    };
+  }
+  if (error instanceof AssistantSelectionNotFoundError) {
+    return {
+      code: 'NOT_FOUND',
+      message: '当前商家无权访问该客服，请重新查看可选客服。',
       retryable: false,
     };
   }
@@ -266,12 +281,15 @@ export class WorkBuddyMcpAdapter {
       {
         title: '打开 AI 客服管理后台',
         description:
-          '返回当前已鉴权 WorkBuddy 用户可访问的客服管理入口；Bearer 只能来自 HTTP transport。',
+          '返回当前已鉴权用户可访问的客服管理入口；有多个客服时先列出名称，再传入 assistant_ref 明确选择。Bearer 只能来自 HTTP transport。',
         inputSchema: managementOpenInputSchema,
       },
-      async () =>
+      async ({ assistant_ref }) =>
         this.invokeTool(requestId, () =>
-          this.onboarding.execute(authorizationHeader, { intent: 'open_management_console' }),
+          this.onboarding.execute(authorizationHeader, {
+            intent: 'open_management_console',
+            ...(assistant_ref === undefined ? {} : { assistant_ref }),
+          }),
         ),
     );
 

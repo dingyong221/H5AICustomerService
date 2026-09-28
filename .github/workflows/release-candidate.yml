@@ -10,6 +10,20 @@ on:
         description: SemVer without the v prefix
         required: true
         default: 0.1.0
+      publish_images:
+        description: Push five candidate images to private GHCR after repository evidence succeeds
+        required: false
+        type: boolean
+        default: false
+      web_path_mode:
+        description: Required when publishing images; choose the approved Web route mode
+        required: true
+        type: choice
+        options:
+          - undecided
+          - root
+          - same_domain
+        default: undecided
 
 permissions:
   contents: read
@@ -25,6 +39,10 @@ jobs:
     timeout-minutes: 45
     env:
       CI: 'true'
+      H5CS_API_ENV_FILE: ${{ github.workspace }}/infra/compose/api.env.example
+      H5CS_WORKER_ENV_FILE: ${{ github.workspace }}/infra/compose/worker.env.example
+      H5CS_MERCHANT_ENV_FILE: ${{ github.workspace }}/infra/compose/merchant-web.env.example
+      H5CS_OPS_ENV_FILE: ${{ github.workspace }}/infra/compose/ops-web.env.example
 
     steps:
       - name: Check out exact ref
@@ -67,6 +85,14 @@ jobs:
       - name: Run complete repository release gate
         run: node scripts/quality/release-gate.mjs repository --version "${{ steps.release.outputs.version }}"
 
+      - name: Verify Web-only candidate gateway routes
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq nginx
+          bash scripts/quality/verify-nginx-single-domain.sh
+          bash scripts/quality/verify-nginx-routing.sh
+
       - name: Generate immutable repository evidence
         run: node scripts/quality/release-gate.mjs evidence --version "${{ steps.release.outputs.version }}" --output "${{ runner.temp }}/release-evidence"
 
@@ -86,3 +112,16 @@ jobs:
         run: |
           echo "Repository evidence generated."
           echo "No deployment was performed. Production business readiness requires separate approved evidence."
+
+  candidate-images:
+    name: Publish five candidate images when explicitly requested
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_images == true }}
+    needs: evidence
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    uses: ./.github/workflows/candidate-images.yml
+    with:
+      web_path_mode: ${{ inputs.web_path_mode }}

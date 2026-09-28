@@ -1,0 +1,16 @@
+# Add this override only for the explicitly approved on-host MySQL deployment.
+# The database Compose project owns this internal network; no host 3306 port exists.
+services:
+  api:
+    networks: [app, mysql_data]
+  worker:
+    networks: [app, mysql_data]
+  merchant-web:
+    networks: [app, mysql_data]
+  ops-web:
+    networks: [app, mysql_data]
+
+networks:
+  mysql_data:
+    external: true
+    name: h5cs_prod_data_internal

@@ -23,6 +23,18 @@ export type PublicSession = Readonly<{
   state: 'active';
 }>;
 
+export type PublicSessionHistory = Readonly<{
+  session: PublicSession;
+  snapshot: OnlinePublicAssistantSnapshot;
+  messages: readonly PublicMessage[];
+  activeTurn: Readonly<{
+    turnId: string;
+    clientMessageId: string;
+    content: string;
+  }> | null;
+  hasEarlierMessages: boolean;
+}>;
+
 export type PublicMessage = Readonly<{
   clientMessageId?: string | undefined;
   content: string;
@@ -101,10 +113,20 @@ export interface PublicAssistantApiClient {
     snapshot: OnlinePublicAssistantSnapshot;
     signal?: AbortSignal | undefined;
   }): Promise<PublicSession>;
+  endSession(input: { sessionHandle: string; signal?: AbortSignal | undefined }): Promise<boolean>;
   loadAssistant(
     publicSlug: string,
     signal?: AbortSignal | undefined,
   ): Promise<PublicAssistantLoadResult>;
+  resumeSession(input: {
+    publicSlug: string;
+    sessionRequestId: string;
+    signal?: AbortSignal | undefined;
+  }): Promise<PublicSession | null>;
+  loadHistory(input: {
+    sessionHandle: string;
+    signal?: AbortSignal | undefined;
+  }): Promise<PublicSessionHistory | null>;
   readTurn(input: {
     clientMessageId: string;
     resultUrl: string;
@@ -112,6 +134,13 @@ export interface PublicAssistantApiClient {
     signal?: AbortSignal | undefined;
     turnId: string;
   }): Promise<TurnResult>;
+  streamTurn(input: {
+    clientMessageId: string;
+    eventsUrl: string;
+    sessionHandle: string;
+    signal?: AbortSignal | undefined;
+    turnId: string;
+  }): AsyncGenerator<TurnResult>;
   sendMessage(input: {
     clientMessageId: string;
     content: string;
@@ -123,6 +152,8 @@ export interface PublicAssistantApiClient {
 const publicSlugPattern = /^[a-z0-9](?:[a-z0-9-]{0,62})$/u;
 const opaqueRefPattern = /^[A-Za-z0-9](?:[A-Za-z0-9:_-]{0,190})$/u;
 const clientIdPattern = /^[A-Za-z0-9](?:[A-Za-z0-9_-]{15,127})$/u;
+const sessionRequestPattern = /^session_request_[0-9a-f]{32}$/u;
+const sessionHandlePattern = /^s_[0-9a-f]{32}$/u;
 const requestIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u;
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
@@ -153,9 +184,23 @@ function boundedText(value: unknown, maximumLength: number): string | undefined 
   return normalized;
 }
 
+function boundedParagraph(value: unknown, maximumLength: number): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.replace(/\r\n?/gu, '\n').trim();
+  return normalized.length > 0 &&
+    normalized.length <= maximumLength &&
+    !/[\u0000-\u0009\u000b-\u001f\u007f]/u.test(normalized)
+    ? normalized
+    : undefined;
+}
+
 function opaqueRef(value: unknown): string | undefined {
   const normalized = boundedText(value, 191);
   return normalized !== undefined && opaqueRefPattern.test(normalized) ? normalized : undefined;
+}
+
+function sessionHandleRef(value: unknown): string | undefined {
+  return typeof value === 'string' && sessionHandlePattern.test(value) ? value : undefined;
 }
 
 function clientGeneratedId(value: unknown): string | undefined {
@@ -207,7 +252,7 @@ export function decodePublicApiErrorEnvelope(
   };
 }
 
-export function decodePublicAssistantSnapshot(value: unknown):
+function decodePublicAssistantSnapshotData(data: unknown):
   | Readonly<{
       aiDisclosure: true;
       assistantDisplayName: string;
@@ -219,9 +264,8 @@ export function decodePublicAssistantSnapshot(value: unknown):
       welcomeMessage: string;
     }>
   | undefined {
-  const data = decodeEnvelope(value);
   if (
-    data === undefined ||
+    !isRecord(data) ||
     !hasExactKeys(data, [
       'publicAssistantId',
       'merchantDisplayName',
@@ -239,9 +283,9 @@ export function decodePublicAssistantSnapshot(value: unknown):
   }
   const publicAssistantId = opaqueRef(data['publicAssistantId']);
   const merchantDisplayName = boundedText(data['merchantDisplayName'], 200);
-  const assistantDisplayName = boundedText(data['assistantDisplayName'], 120);
-  const businessScope = boundedText(data['businessScope'], 2_000);
-  const welcomeMessage = boundedText(data['welcomeMessage'], 2_000);
+  const assistantDisplayName = boundedText(data['assistantDisplayName'], 200);
+  const businessScope = boundedParagraph(data['businessScope'], 2_000);
+  const welcomeMessage = boundedParagraph(data['welcomeMessage'], 2_000);
   const releaseRef = opaqueRef(data['releaseRef']);
   if (
     publicAssistantId === undefined ||
@@ -265,6 +309,12 @@ export function decodePublicAssistantSnapshot(value: unknown):
   };
 }
 
+export function decodePublicAssistantSnapshot(
+  value: unknown,
+): ReturnType<typeof decodePublicAssistantSnapshotData> {
+  return decodePublicAssistantSnapshotData(decodeEnvelope(value));
+}
+
 export function decodePublicSession(value: unknown): PublicSession | undefined {
   const data = decodeEnvelope(value);
   if (
@@ -274,7 +324,7 @@ export function decodePublicSession(value: unknown): PublicSession | undefined {
   ) {
     return undefined;
   }
-  const sessionHandle = opaqueRef(data['sessionHandle']);
+  const sessionHandle = sessionHandleRef(data['sessionHandle']);
   const releaseRef = opaqueRef(data['releaseRef']);
   const createdAt = isoTimestamp(data['createdAt']);
   return sessionHandle === undefined || releaseRef === undefined || createdAt === undefined
@@ -326,7 +376,7 @@ function decodeTurnEndpoint(
     ) {
       return undefined;
     }
-    const sessionHandle = opaqueRef(decodeURIComponent(segments[5] ?? ''));
+    const sessionHandle = sessionHandleRef(decodeURIComponent(segments[5] ?? ''));
     const turnId = opaqueRef(decodeURIComponent(segments[7] ?? ''));
     return sessionHandle === undefined || turnId === undefined
       ? undefined
@@ -387,7 +437,7 @@ function decodePublicMessage(value: unknown): PublicMessage | undefined {
     return undefined;
   }
   const messageId = opaqueRef(value['messageId']);
-  const content = boundedText(value['content'], 8_000);
+  const content = boundedParagraph(value['content'], 8_000);
   const createdAt = isoTimestamp(value['createdAt']);
   const clientMessageId =
     value['clientMessageId'] === undefined
@@ -430,10 +480,80 @@ function decodeMessages(value: unknown): readonly PublicMessage[] | undefined {
     : undefined;
 }
 
-export function decodeTurnResult(value: unknown): TurnResult | undefined {
+export function decodePublicSessionHistory(value: unknown): PublicSessionHistory | undefined {
   const data = decodeEnvelope(value);
   if (
     data === undefined ||
+    !hasExactKeys(data, [
+      'sessionHandle',
+      'releaseRef',
+      'createdAt',
+      'snapshot',
+      'messages',
+      'activeTurn',
+      'hasEarlierMessages',
+    ]) ||
+    typeof data['hasEarlierMessages'] !== 'boolean'
+  )
+    return undefined;
+  const session = decodePublicSession({
+    data: {
+      sessionHandle: data['sessionHandle'],
+      releaseRef: data['releaseRef'],
+      createdAt: data['createdAt'],
+      state: 'active',
+    },
+    request_id: 'history.decode',
+  });
+  const snapshot = decodePublicAssistantSnapshotData(data['snapshot']);
+  const messages = decodeMessages(data['messages']);
+  if (
+    !session ||
+    !snapshot ||
+    snapshot.availability !== 'online' ||
+    !messages ||
+    session.releaseRef !== snapshot.releaseRef
+  )
+    return undefined;
+  const active = data['activeTurn'];
+  if (active === null)
+    return {
+      session,
+      snapshot: { ...snapshot, availability: 'online' },
+      messages,
+      activeTurn: null,
+      hasEarlierMessages: data['hasEarlierMessages'],
+    };
+  if (!isRecord(active) || !hasExactKeys(active, ['turnId', 'clientMessageId', 'content'])) {
+    return undefined;
+  }
+  const turnId = opaqueRef(active['turnId']);
+  const clientMessageId = clientGeneratedId(active['clientMessageId']);
+  const content = boundedParagraph(active['content'], 2_000);
+  if (
+    !turnId ||
+    !clientMessageId ||
+    !content ||
+    !messages.some(
+      (message) =>
+        message.role === 'visitor' &&
+        message.clientMessageId === clientMessageId &&
+        message.content === content,
+    )
+  )
+    return undefined;
+  return {
+    session,
+    snapshot: { ...snapshot, availability: 'online' },
+    messages,
+    activeTurn: { turnId, clientMessageId, content },
+    hasEarlierMessages: data['hasEarlierMessages'],
+  };
+}
+
+function decodeTurnResultData(data: unknown): TurnResult | undefined {
+  if (
+    !isRecord(data) ||
     !hasExactKeys(data, ['sessionHandle', 'turnId', 'state', 'traceId', 'messages'], ['error']) ||
     (data['state'] !== 'accepted' &&
       data['state'] !== 'processing' &&
@@ -442,7 +562,7 @@ export function decodeTurnResult(value: unknown): TurnResult | undefined {
   ) {
     return undefined;
   }
-  const sessionHandle = opaqueRef(data['sessionHandle']);
+  const sessionHandle = sessionHandleRef(data['sessionHandle']);
   const turnId = opaqueRef(data['turnId']);
   const traceId = opaqueRef(data['traceId']);
   const messages = decodeMessages(data['messages']);
@@ -476,6 +596,10 @@ export function decodeTurnResult(value: unknown): TurnResult | undefined {
         traceId,
         turnId,
       };
+}
+
+export function decodeTurnResult(value: unknown): TurnResult | undefined {
+  return decodeTurnResultData(decodeEnvelope(value));
 }
 
 function resolveApiBaseUrl(apiBaseUrl: string | undefined, origin: string | undefined): URL {
@@ -536,6 +660,41 @@ async function readFailureOptions(
     : { requestId: decoded.requestId, retryable: decoded.retryable };
 }
 
+function decodeTurnEvent(
+  frame: string,
+  expected: { clientMessageId: string; sessionHandle: string; turnId: string },
+): TurnResult | null {
+  if (frame.startsWith(':')) return null;
+  const lines = frame.split('\n');
+  if (lines.length !== 2 || !lines[0]?.startsWith('event: ') || !lines[1]?.startsWith('data: ')) {
+    throw new PublicApiClientError('invalid_response', '咨询事件格式无效。');
+  }
+  const eventName = lines[0].slice(7);
+  if (eventName === 'unavailable') {
+    throw new PublicApiClientError('unavailable', '实时更新暂不可用。', { retryable: true });
+  }
+  let payload: unknown;
+  try {
+    payload = JSON.parse(lines[1].slice(6)) as unknown;
+  } catch {
+    throw new PublicApiClientError('invalid_response', '咨询事件内容无效。');
+  }
+  const result = decodeTurnResultData(payload);
+  if (
+    !result ||
+    result.state !== eventName ||
+    result.sessionHandle !== expected.sessionHandle ||
+    result.turnId !== expected.turnId ||
+    !result.messages.some(
+      (message) =>
+        message.role === 'visitor' && message.clientMessageId === expected.clientMessageId,
+    )
+  ) {
+    throw new PublicApiClientError('invalid_response', '咨询事件与当前消息不匹配。');
+  }
+  return result;
+}
+
 export function createPublicAssistantApiClient(
   options: PublicApiClientOptions,
 ): PublicAssistantApiClient {
@@ -581,7 +740,7 @@ export function createPublicAssistantApiClient(
 
     async createSession({ publicSlug, sessionRequestId, snapshot, signal }) {
       if (
-        !clientIdPattern.test(sessionRequestId) ||
+        !sessionRequestPattern.test(sessionRequestId) ||
         !publicSlugPattern.test(publicSlug) ||
         snapshot.availability !== 'online'
       ) {
@@ -619,11 +778,113 @@ export function createPublicAssistantApiClient(
       return session;
     },
 
+    async resumeSession({ publicSlug, sessionRequestId, signal }) {
+      if (!publicSlugPattern.test(publicSlug) || !sessionRequestPattern.test(sessionRequestId)) {
+        throw new PublicApiClientError('invalid_input', '恢复咨询会话的参数无效。');
+      }
+      let response: Response;
+      try {
+        response = await fetchImpl(
+          endpointFor(`assistants/${encodeURIComponent(publicSlug)}/sessions/${sessionRequestId}`),
+          {
+            cache: 'no-store',
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json' },
+            method: 'GET',
+            redirect: 'error',
+            ...(signal === undefined ? {} : { signal }),
+          },
+        );
+      } catch {
+        throw new PublicApiClientError('unavailable', '无法恢复咨询会话。', { retryable: true });
+      }
+      if (response.status === 404) return null;
+      if (response.status !== 200) {
+        throw new PublicApiClientError('request_failed', '无法确认原咨询会话。', {
+          ...(await readFailureOptions(response, response.status >= 500)),
+        });
+      }
+      const session = decodePublicSession(await readJson(response));
+      if (!session) throw new PublicApiClientError('invalid_response', '会话恢复结果无效。');
+      return session;
+    },
+
+    async loadHistory({ sessionHandle, signal }) {
+      if (sessionHandleRef(sessionHandle) === undefined) {
+        throw new PublicApiClientError('invalid_input', '咨询会话标识无效。');
+      }
+      let response: Response;
+      try {
+        response = await fetchImpl(
+          endpointFor(`sessions/${encodeURIComponent(sessionHandle)}/history`),
+          {
+            cache: 'no-store',
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json' },
+            method: 'GET',
+            redirect: 'error',
+            ...(signal === undefined ? {} : { signal }),
+          },
+        );
+      } catch {
+        throw new PublicApiClientError('unavailable', '无法读取咨询记录。', { retryable: true });
+      }
+      if (response.status === 404) return null;
+      if (response.status !== 200) {
+        throw new PublicApiClientError('request_failed', '咨询记录暂不可用。', {
+          ...(await readFailureOptions(response, response.status >= 500)),
+        });
+      }
+      const history = decodePublicSessionHistory(await readJson(response));
+      if (!history || history.session.sessionHandle !== sessionHandle) {
+        throw new PublicApiClientError('invalid_response', '咨询记录与当前会话不匹配。');
+      }
+      return history;
+    },
+
+    async endSession({ sessionHandle, signal }) {
+      if (sessionHandleRef(sessionHandle) === undefined) {
+        throw new PublicApiClientError('invalid_input', '咨询会话标识无效。');
+      }
+      let response: Response;
+      try {
+        response = await fetchImpl(endpointFor(`sessions/${sessionHandle}/end`), {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' },
+          method: 'POST',
+          redirect: 'error',
+          ...(signal === undefined ? {} : { signal }),
+        });
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        throw new PublicApiClientError('unavailable', '无法结束原咨询，请重试。', {
+          retryable: true,
+        });
+      }
+      if (response.status === 404) return false;
+      if (response.status !== 200) {
+        throw new PublicApiClientError('request_failed', '服务端未确认结束原咨询。', {
+          ...(await readFailureOptions(response, response.status >= 500)),
+        });
+      }
+      const data = decodeEnvelope(await readJson(response));
+      if (
+        !data ||
+        !hasExactKeys(data, ['sessionHandle', 'state']) ||
+        data['sessionHandle'] !== sessionHandle ||
+        data['state'] !== 'ended'
+      ) {
+        throw new PublicApiClientError('invalid_response', '结束咨询结果无效。');
+      }
+      return true;
+    },
+
     async sendMessage({ clientMessageId, content, sessionHandle, signal }) {
       const normalizedContent = content.trim();
       if (
         !clientIdPattern.test(clientMessageId) ||
-        opaqueRef(sessionHandle) === undefined ||
+        sessionHandleRef(sessionHandle) === undefined ||
         normalizedContent.length === 0 ||
         normalizedContent.length > 2_000
       ) {
@@ -668,6 +929,72 @@ export function createPublicAssistantApiClient(
       return accepted;
     },
 
+    async *streamTurn({ clientMessageId, eventsUrl, sessionHandle, signal, turnId }) {
+      const safeUrl = resolveTrustedPublicUrl(eventsUrl, baseUrl, '/api/v1/public/');
+      const endpoint = safeUrl === undefined ? undefined : decodeTurnEndpoint(safeUrl, 'events');
+      if (
+        safeUrl === undefined ||
+        endpoint?.sessionHandle !== sessionHandle ||
+        endpoint.turnId !== turnId ||
+        !clientIdPattern.test(clientMessageId) ||
+        sessionHandleRef(sessionHandle) === undefined ||
+        opaqueRef(turnId) === undefined
+      ) {
+        throw new PublicApiClientError('invalid_input', '咨询事件地址无效。');
+      }
+      let response: Response;
+      try {
+        response = await fetchImpl(safeUrl, {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers: { Accept: 'text/event-stream' },
+          method: 'GET',
+          redirect: 'error',
+          ...(signal === undefined ? {} : { signal }),
+        });
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        throw new PublicApiClientError('unavailable', '实时更新暂不可用。', { retryable: true });
+      }
+      if (
+        response.status !== 200 ||
+        !response.headers.get('content-type')?.toLowerCase().startsWith('text/event-stream') ||
+        !response.body
+      ) {
+        throw new PublicApiClientError('unavailable', '实时更新暂不可用。', { retryable: true });
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      try {
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          buffer = (buffer + decoder.decode(chunk.value, { stream: true })).replaceAll(
+            '\r\n',
+            '\n',
+          );
+          if (buffer.length > 262_144) {
+            throw new PublicApiClientError('invalid_response', '咨询事件过长。');
+          }
+          let end = buffer.indexOf('\n\n');
+          while (end >= 0) {
+            const frame = buffer.slice(0, end);
+            buffer = buffer.slice(end + 2);
+            const result = decodeTurnEvent(frame, { clientMessageId, sessionHandle, turnId });
+            if (result) {
+              yield result;
+              if (result.state === 'completed' || result.state === 'failed') return;
+            }
+            end = buffer.indexOf('\n\n');
+          }
+        }
+      } finally {
+        await reader.cancel().catch(() => undefined);
+      }
+      throw new PublicApiClientError('unavailable', '实时更新已中断。', { retryable: true });
+    },
+
     async readTurn({ clientMessageId, resultUrl, sessionHandle, signal, turnId }) {
       const safeUrl = resolveTrustedPublicUrl(resultUrl, baseUrl, '/api/v1/public/');
       const resultEndpoint =
@@ -678,7 +1005,7 @@ export function createPublicAssistantApiClient(
         resultEndpoint.sessionHandle !== sessionHandle ||
         resultEndpoint.turnId !== turnId ||
         !clientIdPattern.test(clientMessageId) ||
-        opaqueRef(sessionHandle) === undefined ||
+        sessionHandleRef(sessionHandle) === undefined ||
         opaqueRef(turnId) === undefined
       ) {
         throw new PublicApiClientError('invalid_input', '消息结果地址无效。');

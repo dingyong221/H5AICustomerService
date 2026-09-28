@@ -261,6 +261,106 @@ const assertReleaseComposePolicy = () => {
   const floating = directImages.filter((image) => !/@sha256:[0-9a-f]{64}$/u.test(image));
   if (floating.length > 0)
     fail(`Floating image references in release Compose: ${floating.join(', ')}`);
+
+  const caTarget = '/etc/ssl/certs/h5cs-managed-mysql-ca.pem';
+  const caHostPath = environment.match(/^H5CS_MYSQL_CA_HOST_FILE=(\/[\S]+)$/mu)?.[1];
+  const caMount =
+    compose.split(/^x-mysql-ca-volumes: &mysql-ca-volumes\s*$/mu)[1]?.split(/^services:/mu)[0] ??
+    '';
+  if (
+    !caHostPath ||
+    !caMount.includes('source: ${H5CS_MYSQL_CA_HOST_FILE:?') ||
+    !caMount.includes(`target: ${caTarget}`) ||
+    !caMount.includes('read_only: true')
+  ) {
+    fail('Release Compose must mount the managed MySQL CA read-only from an absolute host path.');
+  }
+  const services = compose.split(/^services:\s*$/mu)[1]?.split(/^networks:\s*$/mu)[0] ?? '';
+  const headings = [...services.matchAll(/^  ([a-z][a-z0-9-]*):\s*$/gmu)];
+  for (const name of ['api', 'worker', 'merchant-web', 'ops-web']) {
+    const index = headings.findIndex((match) => match[1] === name);
+    if (index < 0) fail(`Release Compose is missing ${name}.`);
+    const service = services.slice(
+      headings[index].index,
+      headings[index + 1]?.index ?? services.length,
+    );
+    if (
+      !service.includes(`MYSQL_TLS_CA_FILE: ${caTarget}`) ||
+      !service.includes('volumes: *mysql-ca-volumes')
+    ) {
+      fail(`Release Compose ${name} must use the managed MySQL CA mount.`);
+    }
+  }
+
+  const serviceEnvironmentContracts = new Map([
+    [
+      'api',
+      {
+        variable: 'H5CS_API_ENV_FILE',
+        required: ['MYSQL_DATABASE_URL', 'OAUTH_ISSUER', 'WORKBUDDY_OPEN_API_CLIENT_SECRET'],
+      },
+    ],
+    [
+      'worker',
+      {
+        variable: 'H5CS_WORKER_ENV_FILE',
+        required: ['MYSQL_DATABASE_URL', 'CONVERSATION_WORKER_ENABLED', 'MODEL_API_KEY'],
+      },
+    ],
+    [
+      'merchant-web',
+      {
+        variable: 'H5CS_MERCHANT_ENV_FILE',
+        required: [
+          'MYSQL_DATABASE_URL',
+          'MERCHANT_PHONE_LOOKUP_KEY',
+          'PUBLIC_CONVERSATION_ENABLED',
+          'PUBLISH_MODEL_POLICY_VERSION',
+        ],
+      },
+    ],
+    [
+      'ops-web',
+      {
+        variable: 'H5CS_OPS_ENV_FILE',
+        required: [
+          'MYSQL_DATABASE_URL',
+          'OPS_ADMIN_PASSWORD_HASH',
+          'OPS_SESSION_SIGNING_KEY',
+          'MANAGEMENT_CONSOLE_URL',
+        ],
+      },
+    ],
+  ]);
+  for (const [name, contract] of serviceEnvironmentContracts) {
+    const index = headings.findIndex((match) => match[1] === name);
+    const service = services.slice(
+      headings[index].index,
+      headings[index + 1]?.index ?? services.length,
+    );
+    const path = `/etc/h5-ai-customer-service/${name}.env`;
+    const reference = '- ${' + contract.variable + ':-' + path + '}';
+    if (!service.includes(reference))
+      fail(`Release Compose ${name} must use ${contract.variable}.`);
+    if (!environment.includes(`${contract.variable}=${path}`)) {
+      fail(`release.env.example must point ${contract.variable} to its dedicated server file.`);
+    }
+    const template = readFileSync(
+      resolve(repositoryRoot, `infra/compose/${name}.env.example`),
+      'utf8',
+    );
+    for (const key of contract.required) {
+      if (!new RegExp(`^${key}=`, 'mu').test(template)) {
+        fail(`infra/compose/${name}.env.example must declare ${key}.`);
+      }
+    }
+    if (name !== 'worker' && /^MODEL_API_KEY=/mu.test(template)) {
+      fail(`MODEL_API_KEY must not be in the ${name} environment template.`);
+    }
+    if (name !== 'api' && /^WORKBUDDY_OPEN_API_CLIENT_SECRET=/mu.test(template)) {
+      fail(`WorkBuddy client secret must not be in the ${name} environment template.`);
+    }
+  }
 };
 
 const assertRequiredReleaseDocuments = () => {
@@ -282,6 +382,51 @@ const assertRequiredReleaseDocuments = () => {
   }
 };
 
+const assertWorkBuddyPackageStructure = (version) => {
+  const directory = 'integrations/workbuddy';
+  const metadata = readJson(`${directory}/connector-meta.json`);
+  const connection = readJson(`${directory}/mcp.json`);
+  const source = metadata.source;
+  const servers = connection.mcpServers;
+  if (
+    !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(source ?? '') ||
+    metadata.version !== version ||
+    !servers ||
+    Object.keys(servers).length !== 1 ||
+    servers[source]?.type !== 'streamableHttp'
+  ) {
+    fail('WorkBuddy connector metadata and the single MCP server must match this release.');
+  }
+  const endpoint = new URL(servers[source].url);
+  if (
+    endpoint.protocol !== 'https:' ||
+    endpoint.pathname !== '/mcp' ||
+    endpoint.search ||
+    endpoint.hash ||
+    endpoint.username ||
+    endpoint.password
+  ) {
+    fail('WorkBuddy MCP endpoint must be an HTTPS /mcp URL without embedded credentials.');
+  }
+  let icon;
+  try {
+    icon = readFileSync(resolve(repositoryRoot, directory, 'icon.svg'), 'utf8');
+  } catch {
+    fail('WorkBuddy connector requires icon.svg.');
+  }
+  if (
+    Buffer.byteLength(icon, 'utf8') > 20_000 ||
+    !/^<svg\s[^>]*xmlns="http:\/\/www\.w3\.org\/2000\/svg"[^>]*viewBox="[^"]+"/u.test(
+      icon.trim(),
+    ) ||
+    /<!DOCTYPE\b|<(?:script|foreignObject|style)\b|\bon[a-z]+\s*=|\b(?:href|xlink:href)\s*=|url\s*\(/iu.test(
+      icon,
+    )
+  ) {
+    fail('WorkBuddy icon.svg must be a small self-contained SVG without active or linked content.');
+  }
+};
+
 const assertStaticPolicy = (expectedVersion) => {
   log('[gate] static release policy');
   const version = assertVersionPolicy(expectedVersion);
@@ -290,6 +435,7 @@ const assertStaticPolicy = (expectedVersion) => {
   assertNoHistoricalSecrets();
   assertReleaseComposePolicy();
   assertRequiredReleaseDocuments();
+  assertWorkBuddyPackageStructure(version);
   git(['diff', '--check']);
   log(`[gate] static policy passed for v${version}`);
   return version;
@@ -674,6 +820,8 @@ const assertProductionEvidence = (path, expectedVersion) => {
   const version = expectedVersion ?? readJson('package.json').version;
   if (evidence.releaseVersion !== version)
     fail('Production evidence releaseVersion does not match.');
+  if (evidence.workBuddy?.status !== 'deferred')
+    fail('Web-only production release requires WorkBuddy status to be deferred.');
   if (!/^[0-9a-f]{40}$/u.test(evidence.gitCommit ?? '') || evidence.gitCommit === '0'.repeat(40))
     fail('Production evidence gitCommit is invalid.');
   const requiredTruePaths = [
@@ -686,14 +834,15 @@ const assertProductionEvidence = (path, expectedVersion) => {
     'staging.sameArtifactDigests',
     'staging.coreE2ePassed',
     'staging.tenantIsolationPassed',
-    'workBuddy.thirdPartyAppApproved',
-    'workBuddy.connectorApproved',
-    'workBuddy.realClientOauthPassed',
-    'workBuddy.tokenBoundaryPassed',
-    'managedMySql.provisioned',
-    'managedMySql.privateNetworkVerified',
-    'managedMySql.tlsVerified',
-    'managedMySql.backupRestoreDrillPassed',
+    'workBuddy.publicGatewayDisabled',
+    'mySql.approvedDeployment',
+    'mySql.privateAccessVerified',
+    'mySql.tlsVerified',
+    'mySql.backupRestoreDrillPassed',
+    'mySql.offHostBackupVerified',
+    'mySql.binlogArchiveVerified',
+    'mySql.pointInTimeRestoreDrillPassed',
+    'mySql.capacityAlertPassed',
     'model.formalProviderConfigured',
     'model.realGenerationSmokePassed',
     'model.mockFallbackDisabled',
@@ -755,7 +904,7 @@ const assertProductionEvidence = (path, expectedVersion) => {
   for (const referencePath of [
     'staging.evidenceReference',
     'workBuddy.evidenceReference',
-    'managedMySql.evidenceReference',
+    'mySql.evidenceReference',
     'model.evidenceReference',
     'tls.evidenceReference',
     'rollback.exerciseId',

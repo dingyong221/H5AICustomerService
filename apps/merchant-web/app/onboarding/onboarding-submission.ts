@@ -1,9 +1,9 @@
-import type { SkillIntentResult } from '@h5cs/contracts';
-
-import type { OnboardingApiClient, OnboardingEventPayload } from './onboarding-api-client';
+import type {
+  OnboardingApiClient,
+  OnboardingEventPayload,
+  OnboardingStartResult,
+} from './onboarding-api-client';
 import { buildEventForStep, type OnboardingFormValues } from './onboarding-form-model';
-
-type ContinueOnboardingResult = Extract<SkillIntentResult, { action: 'continue_onboarding' }>;
 
 interface SubmitOnboardingInput {
   client: OnboardingApiClient;
@@ -22,8 +22,10 @@ export async function submitCompleteOnboarding({
   client,
   createIdempotencyKey,
   values,
-}: SubmitOnboardingInput): Promise<ContinueOnboardingResult> {
+}: SubmitOnboardingInput): Promise<OnboardingStartResult> {
   let result = await client.startOrResume({ idempotencyKey: createIdempotencyKey() });
+
+  if (result.action !== 'continue_onboarding') return result;
 
   if (result.state === 'generating' || result.state === 'manageable') return result;
 
@@ -41,6 +43,15 @@ export async function submitCompleteOnboarding({
       idempotencyKey: createIdempotencyKey(),
       sessionId: result.onboarding_session_id,
     });
+  }
+
+  if (result.state === 'manageable' && !result.management_url) {
+    try {
+      const management = await client.startOrResume({ idempotencyKey: createIdempotencyKey() });
+      if (management.action !== 'continue_onboarding') return management;
+    } catch {
+      // The draft is already committed; keep the confirmed result and offer a separate link retry.
+    }
   }
 
   return result;

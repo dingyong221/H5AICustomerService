@@ -1,6 +1,7 @@
 import { createHealthServer } from './health-server.js';
 import { PollLoop } from './poll-loop.js';
 import { WorkerHealth } from './worker-health.js';
+import { createConversationDispatch } from './conversation-dispatch.js';
 
 const parseInteger = (name: string, value: string | undefined, fallback: number): number => {
   const parsed = Number(value ?? String(fallback));
@@ -17,10 +18,21 @@ const main = async (): Promise<void> => {
     process.env['WORKER_POLL_INTERVAL_MS'],
     5_000,
   );
+  const dispatch = createConversationDispatch();
 
-  // The first polling action only checks the fact-store dependency. Job claiming remains disabled
-  // until a real MySQL lease repository and registered handlers are implemented.
-  const pollLoop = new PollLoop(probeIntervalMs, () => health.probeDatabase());
+  const pollLoop = new PollLoop(probeIntervalMs, async (signal) => {
+    await health.probeDatabase();
+    if (!dispatch.configured || !health.databaseAvailable() || signal.aborted) {
+      health.setConversationReady(false);
+      return;
+    }
+    try {
+      await dispatch.processor.processOnce(signal);
+      health.setConversationReady(!signal.aborted);
+    } catch {
+      health.setConversationReady(false);
+    }
+  });
   await pollLoop.runOnce();
   pollLoop.start();
 
@@ -34,7 +46,11 @@ const main = async (): Promise<void> => {
   });
 
   process.stdout.write(`Worker health endpoint listening on ${host}:${String(port)}\n`);
-  process.stdout.write('Job dispatch is disabled until real lease storage and handlers exist.\n');
+  process.stdout.write(
+    dispatch.configured
+      ? 'Conversation job dispatch is configured.\n'
+      : `Conversation job dispatch is disabled: ${dispatch.reason}.\n`,
+  );
 
   const shutdown = async (): Promise<void> => {
     await pollLoop.stop();

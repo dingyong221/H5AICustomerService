@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildOnboardingViewModel,
   buildWorkBuddyEntryViewModel,
   buildWorkBuddyIdentityViewModel,
 } from './onboarding-view-model';
+
+afterEach(() => vi.unstubAllEnvs());
 
 describe('WorkBuddy view models', () => {
   it('keeps a disconnected, unbound onboarding session read-only', () => {
@@ -84,6 +86,63 @@ describe('WorkBuddy view models', () => {
     expect(viewModel.canCancel).toBe(false);
   });
 
+  it('shows a generated draft link only through the local login gate', () => {
+    const result = {
+      action: 'continue_onboarding' as const,
+      missing_items: [],
+      onboarding_session_id: '33333333333333333333333333333333',
+      state: 'manageable' as const,
+      management_url:
+        'https://h5cs.1rying.com/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444',
+    };
+    const own = buildOnboardingViewModel({
+      applicationOrigin: 'https://h5cs.1rying.com',
+      apiConnected: true,
+      authorization: 'authorized',
+      result,
+    });
+    expect(own.managementUrl).toContain('/account/login?merchant=22222222222222222222222222222222');
+    const foreign = buildOnboardingViewModel({
+      applicationOrigin: 'https://different.example.test',
+      apiConnected: true,
+      authorization: 'authorized',
+      result,
+    });
+    expect(foreign.managementUrl).toBeUndefined();
+  });
+
+  it('gates a console-prefixed generated link without leaking the prefix into the return path', () => {
+    vi.stubEnv('NEXT_PUBLIC_MERCHANT_BASE_PATH', '/console');
+    const result = {
+      action: 'continue_onboarding' as const,
+      missing_items: [],
+      onboarding_session_id: '33333333333333333333333333333333',
+      state: 'manageable' as const,
+      management_url:
+        'https://h5cs.1rying.com/console/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444',
+    };
+    const model = buildOnboardingViewModel({
+      applicationOrigin: 'https://h5cs.1rying.com',
+      apiConnected: true,
+      authorization: 'authorized',
+      result,
+    });
+    expect(model.managementUrl).toBe(
+      '/account/login?merchant=22222222222222222222222222222222&next=%2Fworkspace%2F22222222222222222222222222222222%2Fassistants%2F44444444444444444444444444444444',
+    );
+    expect(
+      buildOnboardingViewModel({
+        applicationOrigin: 'https://h5cs.1rying.com',
+        apiConnected: true,
+        authorization: 'authorized',
+        result: {
+          ...result,
+          management_url: result.management_url.replace('/console/', '/'),
+        },
+      }).managementUrl,
+    ).toBeUndefined();
+  });
+
   it('always gates management URLs behind login and rejects foreign origins', () => {
     const sameOrigin = buildWorkBuddyEntryViewModel({
       applicationOrigin: 'https://h5cs.1rying.com',
@@ -91,10 +150,11 @@ describe('WorkBuddy view models', () => {
       result: {
         action: 'open_management_console',
         assistant: {
-          assistant_ref: 'assistant-1',
+          assistant_ref: '44444444444444444444444444444444',
+          display_name: '客服一',
           status: 'published',
         },
-        url: 'https://h5cs.1rying.com/assistants/assistant-1?tab=knowledge',
+        url: 'https://h5cs.1rying.com/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444',
       },
     });
     const foreignOrigin = buildWorkBuddyEntryViewModel({
@@ -104,6 +164,7 @@ describe('WorkBuddy view models', () => {
         action: 'open_management_console',
         assistant: {
           assistant_ref: 'assistant-foreign',
+          display_name: '外部客服',
           status: 'draft',
         },
         url: 'https://example.invalid/secret-entry',
@@ -112,9 +173,9 @@ describe('WorkBuddy view models', () => {
 
     expect(sameOrigin.manage.requiresLogin).toBe(true);
     expect(sameOrigin.manage.href).toBe(
-      '/login?next=%2Fassistants%2Fassistant-1%3Ftab%3Dknowledge',
+      '/account/login?merchant=22222222222222222222222222222222&next=%2Fworkspace%2F22222222222222222222222222222222%2Fassistants%2F44444444444444444444444444444444',
     );
-    expect(foreignOrigin.manage.href).toBe('/login?next=%2F');
+    expect(foreignOrigin.manage.href).toBe('/account/login');
   });
 
   it('uses the exact authorized identity label', () => {

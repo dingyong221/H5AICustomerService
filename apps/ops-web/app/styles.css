@@ -25,6 +25,288 @@ a {
   color: inherit;
 }
 
+.ops-login-card,
+.ops-provision-panel {
+  background: #fff;
+  border: 1px solid #dce1ea;
+  border-radius: 16px;
+  margin: 1.5rem auto;
+  max-width: 70rem;
+  padding: clamp(1.2rem, 3vw, 2rem);
+}
+
+.ops-login-card {
+  max-width: 32rem;
+}
+
+.ops-form {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  max-width: 34rem;
+}
+
+.ops-form label {
+  display: grid;
+  font-size: 0.88rem;
+  font-weight: 700;
+  gap: 0.45rem;
+}
+
+.ops-form input {
+  border: 1px solid #b7c2d4;
+  border-radius: 9px;
+  font: inherit;
+  padding: 0.75rem 0.85rem;
+}
+
+.ops-form textarea {
+  border: 1px solid #b7c2d4;
+  border-radius: 9px;
+  font: inherit;
+  padding: 0.75rem 0.85rem;
+  resize: vertical;
+}
+
+.ops-template-form {
+  max-width: 43rem;
+}
+
+.ops-template-list {
+  display: grid;
+  gap: 0.7rem;
+  list-style: none;
+  padding: 0;
+}
+
+.ops-template-list li {
+  border: 1px solid #e2e7ef;
+  border-radius: 10px;
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.8rem;
+}
+
+.ops-template-list small {
+  color: #687387;
+}
+
+.ops-template-list p {
+  white-space: pre-wrap;
+}
+
+.ops-template-create {
+  border-top: 1px solid #e6e9ef;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+}
+
+.ops-form button,
+.ops-logout {
+  background: #315fe7;
+  border: 0;
+  border-radius: 9px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0.75rem 1rem;
+}
+
+.ops-form button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.ops-logout {
+  background: #31415a;
+}
+
+.ops-created {
+  background: #eff9f3;
+  border: 1px solid #a8dcc0;
+  border-radius: 10px;
+  margin-top: 1.5rem;
+  overflow-wrap: anywhere;
+  padding: 1rem;
+}
+
+.ops-created output,
+.ops-created small {
+  display: block;
+  margin-top: 0.65rem;
+}
+
+.ops-created output {
+  font-family: ui-monospace, monospace;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.ops-created button {
+  background: #275d43;
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.9rem;
+}
+
+.ops-created span {
+  display: block;
+  margin-top: 0.5rem;
+}
+
+.ops-reissue {
+  flex-basis: 100%;
+}
+
+.ops-reissue .ops-form {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0;
+  max-width: none;
+}
+
+.ops-reissue .ops-form label {
+  align-items: center;
+  display: flex;
+  font-weight: 500;
+}
+
+.ops-reissue .ops-form input[type='checkbox'] {
+  padding: 0;
+}
+
+.ops-merchant-list {
+  border-top: 1px solid #e6e9ef;
+  margin-top: 2rem;
+  padding-top: 1rem;
+}
+
+.ops-merchant-search {
+  display: grid;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.ops-merchant-search label {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.ops-merchant-search > div {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.ops-merchant-search input {
+  border: 1px solid #b7c2d4;
+  border-radius: 8px;
+  font: inherit;
+  max-width: 100%;
+  padding: 0.65rem 0.75rem;
+  width: min(24rem, 100%);
+}
+
+.ops-merchant-search button {
+  background: #315fe7;
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0.65rem 0.85rem;
+}
+
+.ops-merchant-search a {
+  color: #315bbd;
+  font-size: 0.85rem;
+}
+
+.ops-merchant-list ul {
+  list-style: none;
+  padding: 0;
+}
+
+.ops-merchant-list li {
+  align-items: center;
+  border-bottom: 1px solid #edf0f4;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  padding: 0.8rem 0;
+}
+
+.ops-merchant-list small {
+  color: #768195;
+  font-family: ui-monospace, monospace;
+}
+
+.ops-merchant-status-control {
+  flex-basis: 100%;
+}
+
+.ops-merchant-status-form {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.7rem;
+  max-width: 38rem;
+}
+
+.ops-merchant-status-form label:not(.ops-merchant-status-confirm) {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.ops-merchant-status-form textarea {
+  border: 1px solid #cbd3df;
+  border-radius: 8px;
+  font: inherit;
+  padding: 0.65rem;
+}
+
+.ops-merchant-status-confirm {
+  align-items: center;
+  display: flex;
+  gap: 0.4rem;
+}
+
+.ops-merchant-status-form button {
+  justify-self: start;
+}
+
+.ops-management-link {
+  align-items: center;
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.7rem;
+  min-width: 0;
+}
+
+.ops-management-link a {
+  color: #315bbd;
+  overflow-wrap: anywhere;
+}
+
+.ops-management-link button {
+  background: #edf2ff;
+  border: 1px solid #cbd8f5;
+  border-radius: 7px;
+  color: #244dad;
+  cursor: pointer;
+  padding: 0.35rem 0.65rem;
+}
+
 .ops-skip-link {
   background: #ffffff;
   border: 2px solid var(--ui-focus);
@@ -292,6 +574,46 @@ a {
 .operation-area-card .ui-button {
   grid-column: 1 / -1;
   justify-self: start;
+}
+
+.ops-area-link {
+  color: #315bbd;
+  font-size: 0.85rem;
+  font-weight: 600;
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.ops-audit-list,
+.ops-assistant-list,
+.ops-job-list {
+  display: grid;
+  gap: 0.7rem;
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+}
+
+.ops-audit-list li,
+.ops-assistant-list li,
+.ops-job-list li {
+  align-items: baseline;
+  border: 1px solid #e2e7ef;
+  border-radius: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.9rem;
+  padding: 0.7rem 0.9rem;
+}
+
+.ops-audit-list small,
+.ops-audit-list time,
+.ops-assistant-list small,
+.ops-assistant-list time,
+.ops-job-list small,
+.ops-job-list time {
+  color: #687387;
+  font-size: 0.78rem;
 }
 
 .attention-panel {

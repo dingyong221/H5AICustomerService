@@ -25,7 +25,9 @@ describe('worker foundation', () => {
       await health.probeDatabase();
 
       expect(livenessDataSchema.parse(health.liveness()).status).toBe('ok');
-      expect(readinessDataSchema.parse(health.readiness()).status).toBe('not_ready');
+      const readiness = readinessDataSchema.parse(health.readiness());
+      expect(readiness.status).toBe('not_ready');
+      expect(readiness.checks.conversation?.status).toBe('unconfigured');
     } finally {
       if (previous !== undefined) process.env['MYSQL_DATABASE_URL'] = previous;
     }

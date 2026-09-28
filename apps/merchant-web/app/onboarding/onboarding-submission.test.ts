@@ -37,6 +37,32 @@ const resultForEvent = (event: OnboardingEventPayload) => ({
 });
 
 describe('complete onboarding submission', () => {
+  it('returns the existing management entry without submitting any onboarding events', async () => {
+    const advance = vi.fn<OnboardingApiClient['advance']>();
+    const client: OnboardingApiClient = {
+      advance,
+      startOrResume: vi.fn(async () => ({
+        action: 'open_management_console' as const,
+        assistant: {
+          assistant_ref: '44444444444444444444444444444444',
+          display_name: '售前客服',
+          status: 'active',
+        },
+        url: 'https://merchant.test/workspace',
+      })),
+      openManagement: vi.fn(),
+    };
+
+    await expect(
+      submitCompleteOnboarding({
+        client,
+        createIdempotencyKey: () => 'reserved-key',
+        values: completeValues,
+      }),
+    ).resolves.toMatchObject({ action: 'open_management_console' });
+    expect(advance).not.toHaveBeenCalled();
+  });
+
   it('replays every edited section before confirming a resumed confirmation session', async () => {
     const advance = vi.fn<OnboardingApiClient['advance']>(async ({ event }) =>
       resultForEvent(event),
@@ -49,6 +75,7 @@ describe('complete onboarding submission', () => {
         onboarding_session_id: sessionId,
         state: 'confirmation' as const,
       })),
+      openManagement: vi.fn(),
     };
 
     await expect(
@@ -65,5 +92,73 @@ describe('complete onboarding submission', () => {
       'provide_policy',
       'confirm',
     ]);
+  });
+
+  it('returns the management link after a confirmed generation completes', async () => {
+    const startOrResume = vi
+      .fn<OnboardingApiClient['startOrResume']>()
+      .mockResolvedValueOnce({
+        action: 'continue_onboarding',
+        missing_items: [],
+        onboarding_session_id: sessionId,
+        state: 'industry',
+      })
+      .mockResolvedValueOnce({
+        action: 'open_management_console',
+        assistant: {
+          assistant_ref: '44444444444444444444444444444444',
+          display_name: '新客服',
+          status: 'draft_only',
+        },
+        url: 'https://merchant.test/workspace',
+      });
+    const client: OnboardingApiClient = {
+      startOrResume,
+      advance: vi.fn(async ({ event }) => ({
+        ...resultForEvent(event),
+        state: event.type === 'confirm' ? ('manageable' as const) : resultForEvent(event).state,
+      })),
+      openManagement: vi.fn(),
+    };
+
+    await expect(
+      submitCompleteOnboarding({
+        client,
+        createIdempotencyKey: () => 'reserved-key',
+        values: completeValues,
+      }),
+    ).resolves.toMatchObject({
+      action: 'open_management_console',
+      url: 'https://merchant.test/workspace',
+    });
+    expect(startOrResume).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses the generated draft link from the confirmation response without a second request', async () => {
+    const startOrResume = vi.fn<OnboardingApiClient['startOrResume']>(async () => ({
+      action: 'continue_onboarding',
+      missing_items: [],
+      onboarding_session_id: sessionId,
+      state: 'industry',
+    }));
+    const managementUrl =
+      'https://merchant.test/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444';
+    const client: OnboardingApiClient = {
+      startOrResume,
+      advance: vi.fn(async ({ event }) => ({
+        ...resultForEvent(event),
+        state: event.type === 'confirm' ? ('manageable' as const) : resultForEvent(event).state,
+        ...(event.type === 'confirm' ? { management_url: managementUrl } : {}),
+      })),
+      openManagement: vi.fn(),
+    };
+    await expect(
+      submitCompleteOnboarding({
+        client,
+        createIdempotencyKey: () => 'reserved-key',
+        values: completeValues,
+      }),
+    ).resolves.toMatchObject({ state: 'manageable', management_url: managementUrl });
+    expect(startOrResume).toHaveBeenCalledOnce();
   });
 });

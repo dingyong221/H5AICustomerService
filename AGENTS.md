@@ -17,4 +17,4 @@
 - 当前正式域名为 `h5cs.1rying.com`，A 记录已解析到 `114.132.92.111`。Nginx 仅为该 Host 在 TCP 80 提供 `/gateway-health`，其他路径返回 503；直接 IP 和未知 Host 被丢弃。TCP 443 只在云安全组和 UFW 预留，取得正式证书前不得启用无证书监听或自签名生产入口。
 - Docker 容器业务端口必须绑定 `127.0.0.1` 或仅加入内部网络，再由 Nginx 代理；禁止通过 `0.0.0.0:<内部端口>` 绕过 UFW。`ubuntu` 不加入 `docker` 组，Docker 管理继续使用 `sudo`/systemd。
 - 主业务事实存储已确定为 MySQL InnoDB，权威约束见 `docs/design/11-adr-mysql-storage.md`；此前 PostgreSQL/pgvector/RLS 专用设计已被取代。Redis与向量索引均不是业务真值。
-- 生产优先使用托管私网 MySQL；当前 2 vCPU/8 GiB 应用/网关机不得自行安装生产 MySQL。TCP 3306 永不开放公网，创建云实例、账号、Secret 或费用资源须另行明确授权。
+- 生产优先使用托管私网 MySQL。项目负责人于 2026-09-25 明确批准在当前 2 vCPU/8 GiB 应用/网关机安装生产 MySQL，并授权创建本项目专用库、最小权限账号及服务器本地受限凭据；这是单机例外，不等于批准新云资源或接受无离机备份的生产数据风险。当前 MySQL 8.4.11 位于独立内部 Docker 网络，不映射宿主机端口。TCP 3306 永不开放公网；新云实例、云 Secret、费用资源仍须另行明确授权。

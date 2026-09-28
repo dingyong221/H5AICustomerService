@@ -42,6 +42,7 @@ export type InteractionStatus =
   | 'saved'
   | 'generating'
   | 'generated'
+  | 'existing'
   | 'pausing'
   | 'paused'
   | 'resuming'
@@ -63,6 +64,7 @@ export type OnboardingInteractionAction =
   | { type: 'edit'; notice?: string }
   | { type: 'request_started'; operation: 'save' | 'pause' | 'resume' }
   | { type: 'server_succeeded'; result: ContinueOnboardingResult }
+  | { type: 'existing_assistant' }
   | { type: 'request_failed'; error: OnboardingClientError };
 
 export const formSteps: readonly FormStep[] = ['industry', 'materials', 'policy', 'confirmation'];
@@ -317,6 +319,11 @@ export function reduceOnboardingInteraction(
         status: nextStatus,
       };
     }
+    case 'existing_assistant':
+      return {
+        notice: '此商家已有 AI 客服，请进入现有管理后台；不会重复创建首次客服。',
+        status: 'existing',
+      };
     case 'request_failed':
       if (action.error.kind === 'conflict') {
         return {

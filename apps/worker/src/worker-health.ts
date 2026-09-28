@@ -6,6 +6,15 @@ export class WorkerHealth {
     status: 'unconfigured',
     reason: 'Database has not been probed',
   };
+  #conversationReady = false;
+
+  public setConversationReady(ready: boolean): void {
+    this.#conversationReady = ready;
+  }
+
+  public databaseAvailable(): boolean {
+    return this.#databaseCheck.status === 'up';
+  }
 
   public liveness(): LivenessData {
     return {
@@ -17,10 +26,16 @@ export class WorkerHealth {
 
   public readiness(): ReadinessData {
     return {
-      status: this.#databaseCheck.status === 'up' ? 'ready' : 'not_ready',
+      status:
+        this.#databaseCheck.status === 'up' && this.#conversationReady ? 'ready' : 'not_ready',
       service: 'worker',
       timestamp: new Date().toISOString(),
-      checks: { database: this.#databaseCheck },
+      checks: {
+        database: this.#databaseCheck,
+        conversation: this.#conversationReady
+          ? { status: 'up' }
+          : { status: 'unconfigured', reason: 'Conversation job dispatch is disabled' },
+      },
     };
   }
 

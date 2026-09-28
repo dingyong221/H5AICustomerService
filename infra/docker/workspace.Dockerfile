@@ -1,8 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-ARG NODE_VERSION=24
-
-FROM node:${NODE_VERSION}-bookworm-slim AS toolchain
+FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS toolchain
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=${PNPM_HOME}:${PATH}
@@ -20,11 +18,15 @@ ARG NEXT_PUBLIC_APP_ENV=production
 ARG NEXT_PUBLIC_API_BASE_URL=/api/v1
 ARG NEXT_PUBLIC_MERCHANT_API_BASE_URL=/api/v1
 ARG NEXT_PUBLIC_PUBLIC_API_BASE_URL=/api/v1/public
+ARG NEXT_PUBLIC_MERCHANT_BASE_PATH=
+ARG NEXT_PUBLIC_OPS_BASE_PATH=
 
 ENV NEXT_PUBLIC_APP_ENV=${NEXT_PUBLIC_APP_ENV}
 ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
 ENV NEXT_PUBLIC_MERCHANT_API_BASE_URL=${NEXT_PUBLIC_MERCHANT_API_BASE_URL}
 ENV NEXT_PUBLIC_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_PUBLIC_API_BASE_URL}
+ENV NEXT_PUBLIC_MERCHANT_BASE_PATH=${NEXT_PUBLIC_MERCHANT_BASE_PATH}
+ENV NEXT_PUBLIC_OPS_BASE_PATH=${NEXT_PUBLIC_OPS_BASE_PATH}
 
 COPY . .
 
@@ -37,11 +39,16 @@ RUN --mount=type=cache,id=h5cs-pnpm-store,target=/pnpm/store,sharing=locked \
     pnpm install --frozen-lockfile
 
 RUN pnpm exec turbo run build --filter="./apps/${APP_NAME}" \
-  && pnpm --filter "./apps/${APP_NAME}" --prod deploy --legacy /opt/deployed-app
+  && pnpm --config.inject-workspace-packages=true --filter "./apps/${APP_NAME}" --prod deploy /opt/deployed-app \
+  && if [ "${APP_KIND}" = api ]; then \
+       test -f /opt/deployed-app/node_modules/@h5cs/database/dist/config.js \
+       && node /opt/deployed-app/node_modules/@h5cs/database/scripts/migrate-managed.mjs --inventory >/dev/null; \
+     fi
 
-FROM node:${NODE_VERSION}-bookworm-slim AS runtime-base
+FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS runtime-base
 
 ENV NODE_ENV=production
+LABEL org.opencontainers.image.source="https://github.com/dingyong221/H5AICustomerService"
 
 WORKDIR /app
 
@@ -75,9 +82,14 @@ CMD ["node", "dist/main.js"]
 
 FROM runtime-base AS web
 
+ARG NEXT_PUBLIC_MERCHANT_BASE_PATH=
+ARG NEXT_PUBLIC_OPS_BASE_PATH=
+
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 ENV HEALTHCHECK_PATH=/
+ENV NEXT_PUBLIC_MERCHANT_BASE_PATH=${NEXT_PUBLIC_MERCHANT_BASE_PATH}
+ENV NEXT_PUBLIC_OPS_BASE_PATH=${NEXT_PUBLIC_OPS_BASE_PATH}
 
 EXPOSE 3000
 

@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
@@ -48,9 +49,29 @@ jobs:
 
       - name: Validate local infrastructure configuration
         shell: bash
+        env:
+          H5CS_API_ENV_FILE: ${{ github.workspace }}/infra/compose/api.env.example
+          H5CS_WORKER_ENV_FILE: ${{ github.workspace }}/infra/compose/worker.env.example
+          H5CS_MODEL_API_KEY_HOST_FILE: ${{ github.workspace }}/infra/compose/worker.env.example
+          H5CS_MIGRATION_URL_HOST_FILE: ${{ github.workspace }}/infra/compose/api.env.example
+          H5CS_MIGRATION_BACKUP_REF: ci-validation-only
+          H5CS_MIGRATION_CHANGE_ID: ci-validation-only
+          H5CS_MIGRATION_PLAN_SHA256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          H5CS_MERCHANT_ENV_FILE: ${{ github.workspace }}/infra/compose/merchant-web.env.example
+          H5CS_OPS_ENV_FILE: ${{ github.workspace }}/infra/compose/ops-web.env.example
         run: |
           docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml config --quiet
           docker compose --env-file infra/compose/release.env.example --file infra/compose/docker-compose.release.yml config --quiet
+          docker compose --env-file infra/compose/release.env.example --file infra/compose/docker-compose.release.yml --file infra/compose/docker-compose.release.model-secret.yml config --quiet
+          docker compose --env-file infra/compose/release.env.example --file infra/compose/docker-compose.release.yml --file infra/compose/docker-compose.release.single-node-mysql.yml --file infra/compose/docker-compose.release.migration.single-node-mysql.yml --profile migration config --quiet
+
+      - name: Validate candidate single-domain Nginx syntax and routing
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq nginx
+          bash scripts/quality/verify-nginx-single-domain.sh
+          bash scripts/quality/verify-nginx-routing.sh
 
       - name: Check formatting
         run: pnpm format:check
@@ -67,6 +88,32 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Verify optional same-domain Web path builds
+        shell: bash
+        env:
+          NEXT_PUBLIC_MERCHANT_BASE_PATH: /console
+          NEXT_PUBLIC_OPS_BASE_PATH: /ops
+        run: |
+          set -euo pipefail
+          for spec in 'merchant-web /console 3133 /console/account/login /account/login' 'ops-web /ops 3134 /ops/login /login'; do
+            read -r app prefix port live_path absent_path <<< "$spec"
+            pnpm --filter "@h5cs/${app}" build
+            (
+              cd "apps/${app}"
+              pnpm exec next start -p "$port" >/dev/null 2>&1 &
+              server_pid=$!
+              trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+              for attempt in {1..40}; do
+                if curl --silent --output /dev/null "http://127.0.0.1:${port}${live_path}"; then break; fi
+                sleep 1
+              done
+              test "$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${port}${live_path}")" = 200
+              test "$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${port}${absent_path}")" = 404
+              html="$(curl --silent "http://127.0.0.1:${port}${live_path}")"
+              grep -Fq "src=\"${prefix}/_next/static/" <<< "$html"
+            )
+          done
+
       - name: Generate SBOM and repository release evidence
         run: node scripts/quality/release-gate.mjs evidence --version 0.1.0 --output "${{ runner.temp }}/release-evidence"
 
@@ -80,3 +127,198 @@ jobs:
           path: ${{ runner.temp }}/release-evidence
           if-no-files-found: error
           retention-days: 14
+
+  mysql-integration:
+    name: Real MySQL merchant-to-consumer flow
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CI: 'true'
+      H5CS_MYSQL_DATABASE: h5cs_integration_ci
+      H5CS_MYSQL_USER: h5cs_ci
+      H5CS_MYSQL_PASSWORD: local-dev-ci-only
+      H5CS_MYSQL_ROOT_PASSWORD: local-dev-root-only
+      H5CS_INTEGRATION_MYSQL_URL: mysql://h5cs_ci:local-dev-ci-only@127.0.0.1:3306/h5cs_integration_ci
+      MYSQL_DATABASE_URL: mysql://h5cs_ci:local-dev-ci-only@127.0.0.1:3306/h5cs_integration_ci
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install pnpm 11
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Start loopback-only disposable MySQL
+        run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml up -d --wait mysql
+
+      - name: Apply reviewed MySQL migrations
+        run: pnpm --filter @h5cs/database exec drizzle-kit migrate --config drizzle.config.ts
+
+      - name: Build API and workspace dependencies
+        run: pnpm exec turbo run build --filter=@h5cs/api --concurrency=1
+
+      - name: Verify merchant-to-consumer persistence and public API
+        run: pnpm --filter @h5cs/api test:integration
+
+      - name: Drill non-empty logical backup and isolated restore
+        run: bash scripts/quality/verify-ci-mysql-restore.sh
+
+      - name: Stop disposable MySQL
+        if: always()
+        run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml down
+
+  browser-e2e:
+    name: Browser operator-to-consumer flow
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: 'true'
+      H5CS_MYSQL_DATABASE: h5cs_integration_ci
+      H5CS_MYSQL_USER: h5cs_ci
+      H5CS_MYSQL_PASSWORD: local-dev-ci-only
+      H5CS_MYSQL_ROOT_PASSWORD: local-dev-root-only
+      H5CS_INTEGRATION_MYSQL_URL: mysql://h5cs_ci:local-dev-ci-only@127.0.0.1:3306/h5cs_integration_ci
+      MYSQL_DATABASE_URL: mysql://h5cs_ci:local-dev-ci-only@127.0.0.1:3306/h5cs_integration_ci
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install pnpm 11
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Start loopback-only disposable MySQL
+        run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml up -d --wait mysql
+
+      - name: Apply reviewed MySQL migrations
+        run: pnpm --filter @h5cs/database exec drizzle-kit migrate --config drizzle.config.ts
+
+      - name: Build API, Worker and the three production Web apps
+        run: pnpm exec turbo run build --filter=@h5cs/api --filter=@h5cs/worker --filter=@h5cs/ops-web --filter=@h5cs/merchant-web --filter=@h5cs/consumer-h5 --concurrency=1
+
+      - name: Install Chromium for isolated browser acceptance
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Verify production-build operator, merchant and consumer browser workflow
+        run: pnpm test:e2e
+
+      - name: Build prefixed management Web variants
+        env:
+          NEXT_PUBLIC_MERCHANT_BASE_PATH: /console
+          NEXT_PUBLIC_OPS_BASE_PATH: /ops
+        run: |
+          pnpm --filter @h5cs/merchant-web build
+          pnpm --filter @h5cs/ops-web build
+
+      - name: Verify full browser workflow under prefixed management paths
+        env:
+          H5CS_E2E_PATH_MODE: subpaths
+          NEXT_PUBLIC_MERCHANT_BASE_PATH: /console
+          NEXT_PUBLIC_OPS_BASE_PATH: /ops
+        run: pnpm test:e2e
+
+      - name: Verify full browser workflow on one origin
+        env:
+          H5CS_E2E_PATH_MODE: single_domain
+          NEXT_PUBLIC_MERCHANT_BASE_PATH: /console
+          NEXT_PUBLIC_OPS_BASE_PATH: /ops
+        run: pnpm test:e2e
+
+      - name: Stop disposable MySQL
+        if: always()
+        run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml down
+
+  image-packaging:
+    name: Build five release container targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CI: 'true'
+      H5CS_MYSQL_DATABASE: h5cs_integration_ci
+      H5CS_MYSQL_USER: h5cs_ci
+      H5CS_MYSQL_PASSWORD: local-dev-ci-only
+      H5CS_MYSQL_ROOT_PASSWORD: local-dev-root-only
+      H5CS_INTEGRATION_MYSQL_URL: mysql://h5cs_ci:local-dev-ci-only@127.0.0.1:3306/h5cs_integration_ci
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js 24 for runtime probes
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Build image targets without publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          for spec in 'api api' 'worker worker' 'web merchant-web' 'web consumer-h5' 'web ops-web'; do
+            read -r kind name <<< "$spec"
+            docker build \
+              --file infra/docker/workspace.Dockerfile \
+              --target "$kind" \
+              --build-arg "APP_KIND=$kind" \
+              --build-arg "APP_NAME=$name" \
+              --tag "h5cs-$name:ci" \
+              .
+            docker image inspect "h5cs-$name:ci" \
+              --format 'image={{.RepoTags}} user={{.Config.User}} command={{.Config.Cmd}}'
+          done
+
+      - name: Smoke packaged runtime under release restrictions
+        run: bash scripts/quality/smoke-release-images.sh
+
+      - name: Build and smoke same-domain management image variants without publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build \
+            --file infra/docker/workspace.Dockerfile \
+            --target web \
+            --build-arg APP_KIND=web \
+            --build-arg APP_NAME=merchant-web \
+            --build-arg NEXT_PUBLIC_MERCHANT_BASE_PATH=/console \
+            --tag h5cs-merchant-web:ci \
+            .
+          H5CS_MERCHANT_BASE_PATH=/console bash scripts/quality/smoke-release-images.sh merchant-web
+          docker build \
+            --file infra/docker/workspace.Dockerfile \
+            --target web \
+            --build-arg APP_KIND=web \
+            --build-arg APP_NAME=ops-web \
+            --build-arg NEXT_PUBLIC_OPS_BASE_PATH=/ops \
+            --tag h5cs-ops-web:ci \
+            .
+          H5CS_OPS_BASE_PATH=/ops bash scripts/quality/smoke-release-images.sh ops-web
+
+      - name: Start isolated loopback MySQL for packaged runtime probes
+        run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml up -d --wait mysql
+
+      - name: Probe packaged API and Worker against real MySQL
+        run: bash scripts/quality/smoke-release-images-db.sh
+
+      - name: Stop isolated MySQL
+        if: always()
+        run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml down

@@ -21,18 +21,26 @@ x-web-defaults: &web-defaults
   mem_limit: 512m
   cpus: 0.35
 
+x-mysql-ca-volumes: &mysql-ca-volumes
+  - type: bind
+    source: ${H5CS_MYSQL_CA_HOST_FILE:?set H5CS_MYSQL_CA_HOST_FILE to the verified CA PEM file}
+    target: /etc/ssl/certs/h5cs-managed-mysql-ca.pem
+    read_only: true
+
 services:
   api:
     <<: *runtime-defaults
     image: ${H5CS_API_IMAGE:?set H5CS_API_IMAGE to an immutable image digest}
     pull_policy: always
     env_file:
-      - ${H5CS_RUNTIME_ENV_FILE:-/etc/h5-ai-customer-service/runtime.env}
+      - ${H5CS_API_ENV_FILE:-/etc/h5-ai-customer-service/api.env}
     environment:
       APP_ENV: production
       HOST: 0.0.0.0
+      MYSQL_TLS_CA_FILE: /etc/ssl/certs/h5cs-managed-mysql-ca.pem
       NODE_ENV: production
       PORT: 4000
+    volumes: *mysql-ca-volumes
     ports:
       - 127.0.0.1:${H5CS_API_LOOPBACK_PORT:-14000}:4000
     mem_limit: 1280m
@@ -53,12 +61,14 @@ services:
     image: ${H5CS_WORKER_IMAGE:?set H5CS_WORKER_IMAGE to an immutable image digest}
     pull_policy: always
     env_file:
-      - ${H5CS_RUNTIME_ENV_FILE:-/etc/h5-ai-customer-service/runtime.env}
+      - ${H5CS_WORKER_ENV_FILE:-/etc/h5-ai-customer-service/worker.env}
     environment:
       APP_ENV: production
+      MYSQL_TLS_CA_FILE: /etc/ssl/certs/h5cs-managed-mysql-ca.pem
       NODE_ENV: production
       WORKER_HEALTH_HOST: 0.0.0.0
       WORKER_HEALTH_PORT: 3011
+    volumes: *mysql-ca-volumes
     ports:
       - 127.0.0.1:${H5CS_WORKER_HEALTH_LOOPBACK_PORT:-13011}:3011
     mem_limit: 1536m
@@ -68,7 +78,7 @@ services:
         - CMD
         - node
         - -e
-        - fetch('http://127.0.0.1:3011/livez').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+        - fetch('http://127.0.0.1:3011/readyz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
       interval: 30s
       timeout: 5s
       start_period: 20s
@@ -78,6 +88,17 @@ services:
     <<: *web-defaults
     image: ${H5CS_MERCHANT_WEB_IMAGE:?set H5CS_MERCHANT_WEB_IMAGE to an immutable image digest}
     pull_policy: always
+    env_file:
+      - ${H5CS_MERCHANT_ENV_FILE:-/etc/h5-ai-customer-service/merchant-web.env}
+    environment:
+      API_READINESS_URL: http://api:4000/readyz
+      HOSTNAME: 0.0.0.0
+      MYSQL_TLS_CA_FILE: /etc/ssl/certs/h5cs-managed-mysql-ca.pem
+      NODE_ENV: production
+      PORT: 3000
+      HEALTHCHECK_PATH: ${H5CS_MERCHANT_HEALTHCHECK_PATH:-/account/login}
+      WORKER_READINESS_URL: http://worker:3011/readyz
+    volumes: *mysql-ca-volumes
     ports:
       - 127.0.0.1:${H5CS_MERCHANT_WEB_LOOPBACK_PORT:-13000}:3000
 
@@ -97,6 +118,15 @@ services:
     <<: *web-defaults
     image: ${H5CS_OPS_WEB_IMAGE:?set H5CS_OPS_WEB_IMAGE to an immutable image digest}
     pull_policy: always
+    env_file:
+      - ${H5CS_OPS_ENV_FILE:-/etc/h5-ai-customer-service/ops-web.env}
+    environment:
+      HOSTNAME: 0.0.0.0
+      MYSQL_TLS_CA_FILE: /etc/ssl/certs/h5cs-managed-mysql-ca.pem
+      NODE_ENV: production
+      PORT: 3000
+      HEALTHCHECK_PATH: ${H5CS_OPS_HEALTHCHECK_PATH:-/login}
+    volumes: *mysql-ca-volumes
     ports:
       - 127.0.0.1:${H5CS_OPS_WEB_LOOPBACK_PORT:-13002}:3000
 

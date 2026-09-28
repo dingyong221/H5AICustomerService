@@ -1,8 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createOnboardingApiClient, OnboardingClientError } from './onboarding-api-client';
 
 const sessionId = '33333333333333333333333333333333';
+
+afterEach(() => vi.unstubAllEnvs());
 
 const successResponse = () =>
   new Response(
@@ -105,6 +107,193 @@ describe('onboarding API client boundary', () => {
     expect(String(input)).toBe(`https://merchant.test/api/v1/skill/onboarding/${sessionId}/events`);
     expect(JSON.parse(String(init?.body))).toEqual({
       event: { industryCode: 'retail', type: 'provide_industry' },
+    });
+  });
+
+  it('accepts a same-origin existing assistant management link without starting onboarding', async () => {
+    const client = createOnboardingApiClient({
+      apiBaseUrl: '/api/v1/skill',
+      fetchImpl: vi.fn<typeof fetch>(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                action: 'open_management_console',
+                assistant: {
+                  assistant_ref: '44444444444444444444444444444444',
+                  display_name: '售前客服',
+                  status: 'active',
+                },
+                url: 'https://merchant.test/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444',
+              },
+              request_id: 'request-existing',
+            }),
+            { status: 200 },
+          ),
+      ),
+      getAccessToken: () => 'token',
+      origin: 'https://merchant.test',
+    });
+
+    await expect(client.startOrResume({ idempotencyKey: 'reserved-key' })).resolves.toEqual({
+      action: 'open_management_console',
+      assistant: {
+        assistant_ref: '44444444444444444444444444444444',
+        display_name: '售前客服',
+        status: 'active',
+      },
+      url: 'https://merchant.test/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444',
+    });
+  });
+
+  it('accepts only the configured console-prefixed management link in a subpath build', async () => {
+    vi.stubEnv('NEXT_PUBLIC_MERCHANT_BASE_PATH', '/console');
+    const makeClient = (path: string) =>
+      createOnboardingApiClient({
+        apiBaseUrl: '/api/v1/skill',
+        fetchImpl: vi.fn<typeof fetch>(
+          async () =>
+            new Response(
+              JSON.stringify({
+                data: {
+                  action: 'open_management_console',
+                  assistant: {
+                    assistant_ref: '44444444444444444444444444444444',
+                    display_name: '售前客服',
+                    status: 'active',
+                  },
+                  url: `https://merchant.test${path}`,
+                },
+                request_id: 'request-prefixed',
+              }),
+              { status: 200 },
+            ),
+        ),
+        getAccessToken: () => 'token',
+        origin: 'https://merchant.test',
+      });
+    const path =
+      '/console/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444';
+    await expect(makeClient(path).startOrResume({ idempotencyKey: 'key' })).resolves.toMatchObject({
+      url: `https://merchant.test${path}`,
+    });
+    await expect(
+      makeClient(path.slice('/console'.length)).startOrResume({ idempotencyKey: 'key' }),
+    ).rejects.toMatchObject({ kind: 'invalid_response' });
+  });
+
+  it('rejects cross-origin or embellished management links', async () => {
+    for (const url of [
+      'https://foreign.test/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444',
+      'https://merchant.test/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444?token=secret',
+      'https://merchant.test/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444#secret',
+      'https://merchant.test/workspace/22222222222222222222222222222222/assistants/55555555555555555555555555555555',
+      'https://merchant.test/setup',
+    ]) {
+      const client = createOnboardingApiClient({
+        apiBaseUrl: '/api/v1/skill',
+        fetchImpl: vi.fn<typeof fetch>(
+          async () =>
+            new Response(
+              JSON.stringify({
+                data: {
+                  action: 'open_management_console',
+                  assistant: {
+                    assistant_ref: '44444444444444444444444444444444',
+                    display_name: '售前客服',
+                    status: 'active',
+                  },
+                  url,
+                },
+                request_id: 'request-unsafe-link',
+              }),
+              { status: 200 },
+            ),
+        ),
+        getAccessToken: () => 'token',
+        origin: 'https://merchant.test',
+      });
+
+      await expect(client.startOrResume({ idempotencyKey: 'reserved-key' })).rejects.toMatchObject({
+        kind: 'invalid_response',
+      });
+    }
+  });
+
+  it('accepts a multi-assistant selection only with exact assistant summaries', async () => {
+    const client = createOnboardingApiClient({
+      apiBaseUrl: '/api/v1/skill',
+      fetchImpl: vi.fn<typeof fetch>(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                action: 'select_assistant',
+                assistants: [
+                  {
+                    assistant_ref: '44444444444444444444444444444444',
+                    display_name: '售前客服',
+                    status: 'active',
+                  },
+                  {
+                    assistant_ref: '55555555555555555555555555555555',
+                    display_name: '售后客服',
+                    status: 'paused',
+                  },
+                ],
+                selection_required: true,
+                url: 'https://merchant.test/workspace/22222222222222222222222222222222',
+              },
+              request_id: 'request-selection',
+            }),
+            { status: 200 },
+          ),
+      ),
+      getAccessToken: () => 'token',
+      origin: 'https://merchant.test',
+    });
+
+    await expect(client.startOrResume({ idempotencyKey: 'reserved-key' })).resolves.toMatchObject({
+      action: 'select_assistant',
+      selection_required: true,
+    });
+  });
+
+  it('sends an explicit assistant selection and accepts only a confirmed management link', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: {
+              action: 'open_management_console',
+              assistant: {
+                assistant_ref: '55555555555555555555555555555555',
+                display_name: '售后客服',
+                status: 'paused',
+              },
+              url: 'https://merchant.test/workspace/22222222222222222222222222222222/assistants/55555555555555555555555555555555',
+            },
+            request_id: 'request-selected',
+          }),
+          { status: 200 },
+        ),
+    );
+    const client = createOnboardingApiClient({
+      apiBaseUrl: '/api/v1/skill',
+      fetchImpl,
+      getAccessToken: () => 'token',
+      origin: 'https://merchant.test',
+    });
+
+    await expect(
+      client.openManagement({
+        assistantRef: '55555555555555555555555555555555',
+        idempotencyKey: 'reserved-key',
+      }),
+    ).resolves.toMatchObject({ action: 'open_management_console' });
+    expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body))).toEqual({
+      intent: 'open_management_console',
+      assistant_ref: '55555555555555555555555555555555',
     });
   });
 

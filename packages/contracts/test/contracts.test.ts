@@ -59,6 +59,18 @@ describe('shared contracts', () => {
     expect(skillIntentRequestSchema.parse({ intent: 'open_management_console' }).intent).toBe(
       'open_management_console',
     );
+    expect(
+      skillIntentRequestSchema.parse({
+        intent: 'open_management_console',
+        assistant_ref: '44444444444444444444444444444444',
+      }),
+    ).toMatchObject({ assistant_ref: '44444444444444444444444444444444' });
+    expect(() =>
+      skillIntentRequestSchema.parse({
+        intent: 'open_management_console',
+        assistant_ref: '../other-merchant',
+      }),
+    ).toThrow();
     expect(skillIntentRequestSchema.parse({ intent: 'help' }).intent).toBe('help');
     expect(() =>
       skillIntentRequestSchema.parse({
@@ -77,6 +89,30 @@ describe('shared contracts', () => {
         missing_items: [{ code: 'industry_code', message: '请选择行业' }],
       }).action,
     ).toBe('continue_onboarding');
+    const guided = skillIntentResultSchema.parse({
+      action: 'continue_onboarding',
+      onboarding_session_id: '33333333333333333333333333333333',
+      state: 'materials',
+      missing_items: [],
+      industry_guide: {
+        code: 'home_service',
+        display_name: '家居服务',
+        version: 2,
+        reference_notes: '仅提示核实资料。',
+        required_materials: ['服务项目'],
+        required_policies: ['价格条件'],
+      },
+    });
+    expect(guided.action).toBe('continue_onboarding');
+    const generated = skillIntentResultSchema.parse({
+      action: 'continue_onboarding',
+      onboarding_session_id: '33333333333333333333333333333333',
+      state: 'manageable',
+      missing_items: [],
+      management_url:
+        'https://console.example.test/workspace/22222222222222222222222222222222/assistants/44444444444444444444444444444444',
+    });
+    expect(generated).toHaveProperty('management_url');
   });
 
   it('rejects malformed external onboarding session IDs', () => {

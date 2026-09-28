@@ -51,17 +51,19 @@
     "evidenceReference": "REPLACE_WITH_NON_SECRET_REFERENCE"
   },
   "workBuddy": {
-    "thirdPartyAppApproved": false,
-    "connectorApproved": false,
-    "realClientOauthPassed": false,
-    "tokenBoundaryPassed": false,
+    "status": "deferred",
+    "publicGatewayDisabled": false,
     "evidenceReference": "REPLACE_WITH_NON_SECRET_REFERENCE"
   },
-  "managedMySql": {
-    "provisioned": false,
-    "privateNetworkVerified": false,
+  "mySql": {
+    "approvedDeployment": false,
+    "privateAccessVerified": false,
     "tlsVerified": false,
     "backupRestoreDrillPassed": false,
+    "offHostBackupVerified": false,
+    "binlogArchiveVerified": false,
+    "pointInTimeRestoreDrillPassed": false,
+    "capacityAlertPassed": false,
     "evidenceReference": "REPLACE_WITH_NON_SECRET_REFERENCE"
   },
   "model": {

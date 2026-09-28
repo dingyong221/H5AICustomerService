@@ -1,0 +1,2 @@
+ALTER TABLE `platform_login_session` ADD `merchant_id` binary(16);--> statement-breakpoint
+ALTER TABLE `platform_login_session` ADD CONSTRAINT `fk_platform_login_session_merchant` FOREIGN KEY (`merchant_id`) REFERENCES `merchant`(`id`) ON DELETE restrict ON UPDATE no action;

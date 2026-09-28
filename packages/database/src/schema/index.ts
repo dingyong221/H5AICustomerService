@@ -58,11 +58,33 @@ export const merchantUsers = mysqlTable(
   ],
 );
 
+export const merchantPasswordCredentials = mysqlTable(
+  'merchant_password_credential',
+  {
+    merchantUserId: id('merchant_user_id').notNull(),
+    phoneLookupDigest: digest('phone_lookup_digest').notNull(),
+    passwordSalt: binary('password_salt', { length: 16 }).notNull(),
+    passwordHash: binary('password_hash', { length: 64 }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.merchantUserId], name: 'pk_merchant_password_credential' }),
+    uniqueIndex('uq_merchant_password_phone').on(table.phoneLookupDigest),
+    foreignKey({
+      columns: [table.merchantUserId],
+      foreignColumns: [merchantUsers.id],
+      name: 'fk_merchant_password_user',
+    }).onDelete('restrict'),
+  ],
+);
+
 export const platformLoginSessions = mysqlTable(
   'platform_login_session',
   {
     sessionDigest: digest('session_digest').notNull(),
     merchantUserId: id('merchant_user_id').notNull(),
+    merchantId: id('merchant_id'),
     csrfDigest: digest('csrf_digest').notNull(),
     authenticationLevel: varchar('authentication_level', { length: 32 }).notNull(),
     authenticatedAt: utcDateTime('authenticated_at').notNull(),
@@ -89,6 +111,25 @@ export const platformLoginSessions = mysqlTable(
       foreignColumns: [merchantUsers.id],
       name: 'fk_platform_login_session_user',
     }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.merchantId],
+      foreignColumns: [merchants.id],
+      name: 'fk_platform_login_session_merchant',
+    }).onDelete('restrict'),
+  ],
+);
+
+export const platformOperatorLoginThrottles = mysqlTable(
+  'platform_operator_login_throttle',
+  {
+    sourceDigest: digest('source_digest').notNull(),
+    attempts: int('attempts', { unsigned: true }).notNull().default(0),
+    windowStartedAt: utcDateTime('window_started_at').notNull(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sourceDigest], name: 'pk_platform_operator_login_throttle' }),
+    index('idx_platform_operator_login_throttle_updated').on(table.updatedAt),
   ],
 );
 
@@ -162,6 +203,28 @@ export const merchantMemberships = mysqlTable(
       columns: [table.merchantUserId],
       foreignColumns: [merchantUsers.id],
       name: 'fk_merchant_membership_user',
+    }).onDelete('restrict'),
+  ],
+);
+
+export const merchantSetupInvitations = mysqlTable(
+  'merchant_setup_invitation',
+  {
+    tokenDigest: digest('token_digest').notNull(),
+    merchantId: id('merchant_id').notNull(),
+    createdByOperator: varchar('created_by_operator', { length: 128 }).notNull(),
+    expiresAt: utcDateTime('expires_at').notNull(),
+    claimedAt: utcDateTime('claimed_at'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tokenDigest], name: 'pk_merchant_setup_invitation' }),
+    index('idx_merchant_setup_invitation_merchant').on(table.merchantId, table.createdAt),
+    index('idx_merchant_setup_invitation_expiry').on(table.claimedAt, table.expiresAt),
+    foreignKey({
+      columns: [table.merchantId],
+      foreignColumns: [merchants.id],
+      name: 'fk_merchant_setup_invitation_merchant',
     }).onDelete('restrict'),
   ],
 );
@@ -704,6 +767,7 @@ export const sessions = mysqlTable(
     releaseId: id('release_id').notNull(),
     visitorCredentialId: id('visitor_credential_id').notNull(),
     status: varchar('status', { length: 32 }).notNull().default('active'),
+    followUpStatus: varchar('follow_up_status', { length: 32 }).notNull().default('pending'),
     nextSequence: int('next_sequence', { unsigned: true }).notNull().default(1),
     activeTurnId: id('active_turn_id'),
     version: int('version', { unsigned: true }).notNull().default(1),
@@ -724,6 +788,7 @@ export const sessions = mysqlTable(
       table.status,
       table.expiresAt,
     ),
+    index('idx_session_merchant_activity').on(table.merchantId, table.lastActivityAt, table.id),
     foreignKey({
       columns: [table.merchantId, table.assistantId],
       foreignColumns: [assistants.merchantId, assistants.id],
@@ -850,6 +915,7 @@ export const jobs = mysqlTable(
     uniqueIndex('uq_job_type_dedup').on(table.type, table.dedupKey),
     index('idx_job_claim').on(table.state, table.runAfter, table.priority, table.id),
     index('idx_job_lease_recovery').on(table.state, table.leaseUntil, table.id),
+    index('idx_job_state_updated').on(table.state, table.updatedAt, table.id),
     index('idx_job_merchant').on(table.merchantId, table.createdAt, table.id),
   ],
 );

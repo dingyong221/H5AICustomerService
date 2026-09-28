@@ -39,6 +39,10 @@ const createCustomerServiceIntentSchema = z
 const openManagementConsoleIntentSchema = z
   .object({
     intent: z.literal('open_management_console'),
+    assistant_ref: z
+      .string()
+      .regex(/^[0-9a-f]{32}$/u)
+      .optional(),
   })
   .strict();
 
@@ -61,12 +65,33 @@ export const skillIntentResultSchema = z.discriminatedUnion('action', [
     onboarding_session_id: onboardingSessionIdSchema,
     state: onboardingStateSchema,
     missing_items: z.array(onboardingMissingItemSchema),
+    management_url: z.string().url().optional(),
+    industry_options: z
+      .array(
+        z.object({
+          code: z.string().min(1).max(64),
+          display_name: z.string().min(1).max(128),
+          version: z.number().int().positive(),
+        }),
+      )
+      .optional(),
+    industry_guide: z
+      .object({
+        code: z.string().min(1).max(64),
+        display_name: z.string().min(1).max(128),
+        version: z.number().int().positive(),
+        reference_notes: z.string().min(1).max(4_000),
+        required_materials: z.array(z.string().min(1).max(200)),
+        required_policies: z.array(z.string().min(1).max(200)),
+      })
+      .optional(),
   }),
   z.object({
     action: z.literal('open_management_console'),
     url: z.string().url(),
     assistant: z.object({
       assistant_ref: z.string().min(1).max(128),
+      display_name: z.string().min(1).max(200),
       status: z.string().min(1).max(32),
     }),
   }),
@@ -82,6 +107,7 @@ export const skillIntentResultSchema = z.discriminatedUnion('action', [
       .array(
         z.object({
           assistant_ref: z.string().min(1).max(128),
+          display_name: z.string().min(1).max(200),
           status: z.string().min(1).max(32),
         }),
       )

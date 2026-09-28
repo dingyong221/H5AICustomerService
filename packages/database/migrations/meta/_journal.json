@@ -43,6 +43,48 @@
       "when": 1790005918359,
       "tag": "0005_striped_jack_murdock",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1790174978062,
+      "tag": "0006_icy_goblin_queen",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1790175379913,
+      "tag": "0007_outstanding_klaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1790176191652,
+      "tag": "0008_opposite_la_nuit",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1790324397843,
+      "tag": "0009_romantic_havok",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1790326377968,
+      "tag": "0010_slippery_fenris",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1790327596807,
+      "tag": "0011_closed_maximus",
+      "breakpoints": true
     }
   ]
 }

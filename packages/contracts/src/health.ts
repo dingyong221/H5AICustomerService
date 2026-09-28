@@ -18,6 +18,12 @@ export const readinessDataSchema = z.object({
       latency_ms: z.number().nonnegative().optional(),
       reason: z.string().min(1).optional(),
     }),
+    conversation: z
+      .object({
+        status: healthCheckStateSchema,
+        reason: z.string().min(1).optional(),
+      })
+      .optional(),
   }),
 });
 

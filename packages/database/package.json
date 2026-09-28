@@ -17,6 +17,7 @@
     "build": "tsc -p tsconfig.build.json",
     "check": "pnpm run typecheck && pnpm run test",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
+    "db:migrate:managed": "pnpm run build && node scripts/migrate-managed.mjs",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"

@@ -5,7 +5,6 @@ import Link from 'next/link';
 
 const navItems = [
   { href: '/', label: '工作台', short: '台' },
-  { href: '/onboarding', label: 'WorkBuddy 接入', short: 'W' },
   { href: '/#draft', label: '客服草稿', short: '草' },
   { href: '/#knowledge', label: '知识库', short: '知' },
   { href: '/#release', label: '测试与发布', short: '发' },
@@ -18,10 +17,7 @@ export function MerchantNavigation() {
   return (
     <nav aria-label="商家后台主导航" className="merchant-nav">
       {navItems.map((item) => {
-        const active =
-          item.href === '/onboarding'
-            ? pathname.startsWith('/onboarding')
-            : item.href === '/' && pathname === '/';
+        const active = item.href === '/' && pathname === '/';
 
         return (
           <Link

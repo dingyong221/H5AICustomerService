@@ -7,7 +7,14 @@ import {
   type SkillIntentResult,
 } from '@h5cs/contracts';
 
+import { relativeMerchantPath } from '../merchant-base-path';
+
 type ContinueOnboardingResult = Extract<SkillIntentResult, { action: 'continue_onboarding' }>;
+export type ExistingAssistantResult = Extract<
+  SkillIntentResult,
+  { action: 'open_management_console' | 'select_assistant' }
+>;
+export type OnboardingStartResult = ContinueOnboardingResult | ExistingAssistantResult;
 
 export type PricingAvailability = 'provided' | 'none_confirmed' | 'unknown';
 export type InsufficientFactPolicy = 'say_unconfirmed' | 'collect_lead' | 'contact_merchant';
@@ -96,7 +103,11 @@ export interface OnboardingApiClient {
   startOrResume(input: {
     idempotencyKey: string;
     resumeSessionId?: string;
-  }): Promise<ContinueOnboardingResult>;
+  }): Promise<OnboardingStartResult>;
+  openManagement(input: {
+    assistantRef: string;
+    idempotencyKey: string;
+  }): Promise<ExistingAssistantResult>;
 }
 
 interface ClientOptions {
@@ -160,6 +171,72 @@ function parseContinueResult(payload: unknown): ContinueOnboardingResult {
     throw new OnboardingClientError('invalid_response', '服务端未返回有效的引导状态。');
   }
   return parsed.data.data;
+}
+
+function parseStartResult(payload: unknown, origin: string): OnboardingStartResult {
+  const rawEnvelope = record(payload);
+  const rawData = rawEnvelope === undefined ? undefined : record(rawEnvelope['data']);
+  if (rawData?.['action'] === 'continue_onboarding') return parseContinueResult(payload);
+  const parsed = apiSuccessEnvelopeSchema(skillIntentResultSchema).strict().safeParse(payload);
+  if (
+    rawEnvelope === undefined ||
+    !exactKeys(rawEnvelope, ['data', 'request_id']) ||
+    rawData === undefined ||
+    !parsed.success ||
+    (parsed.data.data.action !== 'open_management_console' &&
+      parsed.data.data.action !== 'select_assistant')
+  ) {
+    throw new OnboardingClientError('invalid_response', '服务端未返回有效的客服管理入口。');
+  }
+  const result = parsed.data.data;
+  const expectedKeys =
+    result.action === 'open_management_console'
+      ? ['action', 'assistant', 'url']
+      : ['action', 'assistants', 'selection_required', 'url'];
+  const assistantRecords =
+    result.action === 'open_management_console' ? [rawData['assistant']] : rawData['assistants'];
+  if (
+    !exactKeys(rawData, expectedKeys) ||
+    !Array.isArray(assistantRecords) ||
+    assistantRecords.some((item) => {
+      const assistant = record(item);
+      return (
+        assistant === undefined ||
+        !exactKeys(assistant, ['assistant_ref', 'display_name', 'status'])
+      );
+    }) ||
+    !safeManagementUrl(result.url, origin, result)
+  ) {
+    throw new OnboardingClientError('invalid_response', '服务端返回的管理入口未通过安全校验。');
+  }
+  return result;
+}
+
+function safeManagementUrl(
+  value: string,
+  origin: string,
+  result: ExistingAssistantResult,
+): boolean {
+  try {
+    const target = new URL(value);
+    const application = new URL(origin);
+    const safeOrigin =
+      target.origin === application.origin &&
+      target.username === '' &&
+      target.password === '' &&
+      target.search === '' &&
+      target.hash === '';
+    if (!safeOrigin) return false;
+    const relativePath = relativeMerchantPath(target.pathname);
+    if (relativePath === null) return false;
+    if (result.action === 'select_assistant') {
+      return /^\/workspace\/[0-9a-f]{32}$/u.test(relativePath);
+    }
+    const match = /^\/workspace\/[0-9a-f]{32}\/assistants\/([0-9a-f]{32})$/u.exec(relativePath);
+    return match?.[1] === result.assistant.assistant_ref;
+  } catch {
+    return false;
+  }
 }
 
 function record(value: unknown): Readonly<Record<string, unknown>> | undefined {
@@ -255,7 +332,7 @@ export function createOnboardingApiClient(options: ClientOptions): OnboardingApi
     body: unknown,
     idempotencyKey: string,
     revision?: string,
-  ): Promise<ContinueOnboardingResult> => {
+  ): Promise<unknown> => {
     const baseUrl = resolveBaseUrl(options.apiBaseUrl, options.origin);
     const accessToken = options.getAccessToken();
     if (accessToken === undefined || accessToken.trim().length === 0) {
@@ -296,25 +373,44 @@ export function createOnboardingApiClient(options: ClientOptions): OnboardingApi
       throw error;
     }
 
-    return parseContinueResult(await response.json());
+    return response.json();
   };
 
   return {
-    advance: ({ event, idempotencyKey, revision, sessionId }) => {
+    advance: async ({ event, idempotencyKey, revision, sessionId }) => {
       const body = onboardingEventRequestSchema.parse({ event });
-      return request(
-        `onboarding/${encodeURIComponent(sessionId)}/events`,
-        body,
-        idempotencyKey,
-        revision,
+      return parseContinueResult(
+        await request(
+          `onboarding/${encodeURIComponent(sessionId)}/events`,
+          body,
+          idempotencyKey,
+          revision,
+        ),
       );
     },
-    startOrResume: ({ idempotencyKey, resumeSessionId }) => {
+    startOrResume: async ({ idempotencyKey, resumeSessionId }) => {
       const body = skillIntentRequestSchema.parse({
         intent: 'create_customer_service',
         ...(resumeSessionId === undefined ? {} : { resume_session_id: resumeSessionId }),
       });
-      return request('intents', body, idempotencyKey);
+      return parseStartResult(await request('intents', body, idempotencyKey), options.origin);
+    },
+    openManagement: async ({ assistantRef, idempotencyKey }) => {
+      const body = skillIntentRequestSchema.parse({
+        intent: 'open_management_console',
+        assistant_ref: assistantRef,
+      });
+      const result = parseStartResult(
+        await request('intents', body, idempotencyKey),
+        options.origin,
+      );
+      if (
+        result.action !== 'open_management_console' ||
+        result.assistant.assistant_ref !== assistantRef
+      ) {
+        throw new OnboardingClientError('invalid_response', '服务端未确认所选客服。');
+      }
+      return result;
     },
   };
 }

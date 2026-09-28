@@ -25,6 +25,225 @@ a {
   color: inherit;
 }
 
+.merchant-account-card {
+  background: #fff;
+  border: 1px solid #d9e4dc;
+  border-radius: 16px;
+  margin: 1.5rem 0;
+  max-width: 35rem;
+  padding: clamp(1.2rem, 3vw, 2rem);
+}
+
+.merchant-workspace-aside {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.merchant-workspace-aside [role='alert'] {
+  color: #a02d21;
+  font-size: 0.875rem;
+  margin: 0 0 0.35rem;
+}
+
+.merchant-account-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.merchant-account-form label {
+  display: grid;
+  font-weight: 700;
+  gap: 0.4rem;
+}
+
+.merchant-account-form input {
+  border: 1px solid #aebeb4;
+  border-radius: 9px;
+  font: inherit;
+  padding: 0.75rem;
+}
+
+.merchant-account-form button {
+  background: #176f4b;
+  border: 0;
+  border-radius: 9px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0.75rem 1rem;
+}
+
+.merchant-account-form button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.assistant-create-card {
+  max-width: 62rem;
+}
+
+.assistant-create-form,
+.assistant-edit-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.assistant-create-form label,
+.assistant-edit-form label {
+  display: grid;
+  font-weight: 700;
+  gap: 0.4rem;
+}
+
+.assistant-create-form input,
+.assistant-create-form select,
+.assistant-create-form textarea,
+.assistant-edit-form input,
+.assistant-edit-form textarea {
+  border: 1px solid #aebeb4;
+  border-radius: 9px;
+  font: inherit;
+  padding: 0.75rem;
+}
+
+.assistant-industry-guide {
+  background: #f0f7f2;
+  border: 1px solid #b9d9c6;
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.assistant-industry-guide h3 {
+  margin-top: 0;
+}
+
+.assistant-industry-guide p {
+  white-space: pre-wrap;
+}
+
+.assistant-industry-guide ul {
+  margin: 0.4rem 0 1rem;
+}
+
+.assistant-create-form button,
+.assistant-edit-form button {
+  background: #176f4b;
+  border: 0;
+  border-radius: 9px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0.75rem 1rem;
+}
+
+.assistant-create-form button:disabled,
+.assistant-edit-form button:disabled {
+  opacity: 0.6;
+}
+
+.assistant-workspace-list {
+  list-style: none;
+  padding: 0;
+}
+
+.assistant-workspace-list li {
+  border-bottom: 1px solid #e0e9e3;
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.8rem 0;
+}
+
+.assistant-detail-card {
+  max-width: 62rem;
+}
+
+.assistant-detail-card a {
+  overflow-wrap: anywhere;
+}
+
+.assistant-share {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0;
+  overflow-wrap: anywhere;
+}
+
+.assistant-share p {
+  margin: 0;
+}
+
+.assistant-share__qr {
+  align-items: start;
+  display: grid;
+  gap: 0.5rem;
+  justify-items: start;
+}
+
+.assistant-share__qr img {
+  background: #fff;
+  border: 1px solid #dbe7df;
+  border-radius: 0.5rem;
+  height: 224px;
+  padding: 0.25rem;
+  width: 224px;
+}
+
+.assistant-facts {
+  display: grid;
+  gap: 0;
+}
+
+.assistant-facts div {
+  border-top: 1px solid #e0e9e3;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(8rem, 12rem) 1fr;
+  padding: 1rem 0;
+}
+
+.assistant-facts dt {
+  color: #416052;
+  font-weight: 700;
+}
+
+.assistant-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.assistant-confirm-form {
+  display: grid;
+  gap: 1rem;
+  justify-items: start;
+}
+
+.assistant-confirm-form label {
+  display: flex;
+  gap: 0.6rem;
+  line-height: 1.6;
+}
+
+.assistant-confirm-form button {
+  background: #176f4b;
+  border: 0;
+  border-radius: 9px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0.75rem 1rem;
+}
+
+.assistant-confirm-form button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .skip-link {
   background: #ffffff;
   border: 2px solid var(--ui-focus);
@@ -1217,6 +1436,10 @@ a {
 }
 
 @media (max-width: 720px) {
+  .assistant-facts div {
+    gap: 0.35rem;
+    grid-template-columns: 1fr;
+  }
   .merchant-layout {
     padding: 4.5rem 0 0;
   }
@@ -1354,4 +1577,73 @@ a {
   .confirmation-summary {
     grid-template-columns: 1fr;
   }
+}
+
+.merchant-conversation-panel {
+  margin-top: 1.25rem;
+}
+
+.merchant-conversation-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.merchant-conversation-filters a,
+.merchant-conversation-list a {
+  color: #315bbd;
+}
+
+.merchant-conversation-list,
+.merchant-conversation-messages {
+  display: grid;
+  gap: 0.8rem;
+  list-style: none;
+  padding: 0;
+}
+
+.merchant-conversation-list li,
+.merchant-conversation-messages li {
+  border: 1px solid #e2e7ef;
+  border-radius: 10px;
+  display: grid;
+  gap: 0.35rem;
+  overflow-wrap: anywhere;
+  padding: 0.85rem;
+}
+
+.merchant-conversation-list small,
+.merchant-conversation-messages small {
+  color: #687387;
+}
+
+.merchant-conversation-messages p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.merchant-follow-up-form {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.merchant-follow-up-form select,
+.merchant-follow-up-form button {
+  border: 1px solid #cbd3e0;
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+}
+
+.merchant-follow-up-form button {
+  background: #315bbd;
+  color: #fff;
+  cursor: pointer;
+}
+
+.merchant-follow-up-form p {
+  flex-basis: 100%;
 }

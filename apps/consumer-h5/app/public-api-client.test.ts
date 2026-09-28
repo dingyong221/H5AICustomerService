@@ -5,11 +5,16 @@ import {
   decodeAcceptedTurn,
   decodePublicApiErrorEnvelope,
   decodePublicAssistantSnapshot,
+  decodePublicSession,
+  decodePublicSessionHistory,
   decodeTurnResult,
   type OnlinePublicAssistantSnapshot,
 } from './public-api-client';
 
 const origin = 'https://h5.example.com';
+const sessionRequestId = `session_request_${'11'.repeat(16)}`;
+const sessionHandle = `s_${'22'.repeat(16)}`;
+const otherSessionHandle = `s_${'33'.repeat(16)}`;
 
 function envelope(data: Readonly<Record<string, unknown>>): unknown {
   return { data, request_id: 'request_1234567890' };
@@ -38,6 +43,30 @@ const snapshot: OnlinePublicAssistantSnapshot = snapshotData;
 describe('public API response decoders', () => {
   it('accepts an exact online public snapshot', () => {
     expect(decodePublicAssistantSnapshot(envelope(snapshotData))).toEqual(snapshotData);
+    expect(
+      decodePublicAssistantSnapshot(
+        envelope({
+          ...snapshotData,
+          assistantDisplayName: '客'.repeat(200),
+        }),
+      ),
+    ).toBeDefined();
+    expect(
+      decodePublicAssistantSnapshot(
+        envelope({
+          ...snapshotData,
+          assistantDisplayName: '客'.repeat(201),
+        }),
+      ),
+    ).toBeUndefined();
+    expect(
+      decodePublicAssistantSnapshot(
+        envelope({
+          ...snapshotData,
+          businessScope: '服务 A\n服务 B',
+        }),
+      )?.businessScope,
+    ).toBe('服务 A\n服务 B');
   });
 
   it('accepts the shared request ID grammar including dots and rejects short IDs', () => {
@@ -62,7 +91,7 @@ describe('public API response decoders', () => {
     expect(
       decodeAcceptedTurn(
         envelope({
-          eventsUrl: '/api/v1/public/sessions/session_1234567890/turns/turn_1/events',
+          eventsUrl: `/api/v1/public/sessions/${sessionHandle}/turns/turn_1/events`,
           resultUrl: 'https://evil.example/api/v1/public/turns/turn_1',
           state: 'accepted',
           traceId: 'trace_1234567890',
@@ -89,8 +118,34 @@ describe('public API response decoders', () => {
     expect(
       decodeAcceptedTurn(
         envelope({
-          eventsUrl: '/api/v1/public/sessions/session_other_1234/turns/turn_1234567890/events',
-          resultUrl: '/api/v1/public/sessions/session_1234567890/turns/turn_1234567890',
+          eventsUrl: `/api/v1/public/sessions/${otherSessionHandle}/turns/turn_1234567890/events`,
+          resultUrl: `/api/v1/public/sessions/${sessionHandle}/turns/turn_1234567890`,
+          state: 'accepted',
+          traceId: 'trace_1234567890',
+          turnId: 'turn_1234567890',
+        }),
+        origin,
+      ),
+    ).toBeUndefined();
+  });
+
+  it('rejects a session credential embedded in a handle or polling URL', () => {
+    const bearerHandle = `${sessionHandle}_${'A'.repeat(43)}`;
+    expect(
+      decodePublicSession(
+        envelope({
+          createdAt: '2026-09-21T08:00:00.000Z',
+          releaseRef: snapshot.releaseRef,
+          sessionHandle: bearerHandle,
+          state: 'active',
+        }),
+      ),
+    ).toBeUndefined();
+    expect(
+      decodeAcceptedTurn(
+        envelope({
+          eventsUrl: `/api/v1/public/sessions/${bearerHandle}/turns/turn_1234567890/events`,
+          resultUrl: `/api/v1/public/sessions/${bearerHandle}/turns/turn_1234567890`,
           state: 'accepted',
           traceId: 'trace_1234567890',
           turnId: 'turn_1234567890',
@@ -144,16 +199,200 @@ describe('public API response decoders', () => {
           sourceLabel: 'AI 客服',
         },
       ],
-      sessionHandle: 'session_1234567890',
+      sessionHandle,
       state: 'completed',
       traceId: 'trace_1234567890',
       turnId: 'turn_1234567890',
     });
     expect(decodeTurnResult(result)).toBeUndefined();
   });
+
+  it('accepts pinned session history and rejects a mismatched active turn', () => {
+    const history = {
+      activeTurn: {
+        clientMessageId: 'message_1234567890',
+        content: '多少钱？',
+        turnId: 'turn_1234567890',
+      },
+      createdAt: '2026-09-21T08:00:00.000Z',
+      hasEarlierMessages: false,
+      messages: [
+        {
+          clientMessageId: 'message_1234567890',
+          content: '多少钱？',
+          createdAt: '2026-09-21T08:00:00.000Z',
+          messageId: 'server_message_1',
+          role: 'visitor',
+          sequence: 1,
+        },
+      ],
+      releaseRef: snapshot.releaseRef,
+      sessionHandle,
+      snapshot: snapshotData,
+    };
+    expect(decodePublicSessionHistory(envelope(history))).toMatchObject({
+      activeTurn: history.activeTurn,
+      messages: history.messages,
+      snapshot: snapshotData,
+    });
+    expect(
+      decodePublicSessionHistory(
+        envelope({ ...history, activeTurn: { ...history.activeTurn, content: '篡改后的问题' } }),
+      ),
+    ).toBeUndefined();
+    expect(
+      decodePublicSessionHistory(
+        envelope({
+          ...history,
+          snapshot: { ...snapshotData, releaseRef: 'release_other_1234567890' },
+        }),
+      ),
+    ).toBeUndefined();
+  });
 });
 
 describe('public assistant API client', () => {
+  it('reads same-origin SSE states with cookies and a validated terminal result', async () => {
+    const turnId = 'turn_1234567890';
+    const clientMessageId = 'message_client_1234567890';
+    const accepted = {
+      messages: [
+        {
+          clientMessageId,
+          content: '多少钱？',
+          createdAt: '2026-09-21T08:00:00.000Z',
+          messageId: 'server_message_1',
+          role: 'visitor',
+          sequence: 1,
+        },
+      ],
+      sessionHandle,
+      state: 'accepted',
+      traceId: 'trace_1234567890',
+      turnId,
+    };
+    const completed = {
+      ...accepted,
+      messages: [
+        ...accepted.messages,
+        {
+          content: '请以商家最终报价为准。',
+          createdAt: '2026-09-21T08:00:01.000Z',
+          messageId: 'server_message_2',
+          role: 'assistant',
+          sequence: 2,
+        },
+      ],
+      state: 'completed',
+    };
+    const stream = `event: accepted\ndata: ${JSON.stringify(accepted)}\n\n: keepalive\n\nevent: completed\ndata: ${JSON.stringify(completed)}\n\n`;
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () =>
+        new Response(stream, { headers: { 'Content-Type': 'text/event-stream; charset=utf-8' } }),
+    );
+    const client = createPublicAssistantApiClient({
+      apiBaseUrl: '/api/v1/public',
+      fetchImpl,
+      origin,
+    });
+    const received = [];
+    for await (const result of client.streamTurn({
+      clientMessageId,
+      eventsUrl: `${origin}/api/v1/public/sessions/${sessionHandle}/turns/${turnId}/events`,
+      sessionHandle,
+      turnId,
+    })) {
+      received.push(result.state);
+    }
+    expect(received).toEqual(['accepted', 'completed']);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      `${origin}/api/v1/public/sessions/${sessionHandle}/turns/${turnId}/events`,
+      expect.objectContaining({
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { Accept: 'text/event-stream' },
+        method: 'GET',
+      }),
+    );
+  });
+
+  it('uses same-origin credentialed GETs for resume and history', async () => {
+    const session = {
+      createdAt: '2026-09-21T08:00:00.000Z',
+      releaseRef: snapshot.releaseRef,
+      sessionHandle,
+      state: 'active',
+    };
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(envelope(session)))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          envelope({
+            activeTurn: null,
+            createdAt: session.createdAt,
+            hasEarlierMessages: false,
+            messages: [],
+            releaseRef: session.releaseRef,
+            sessionHandle: session.sessionHandle,
+            snapshot: snapshotData,
+          }),
+        ),
+      );
+    const client = createPublicAssistantApiClient({
+      apiBaseUrl: '/api/v1/public',
+      fetchImpl,
+      origin,
+    });
+    await expect(
+      client.resumeSession({ publicSlug: 'shop-help', sessionRequestId }),
+    ).resolves.toEqual(session);
+    await expect(
+      client.loadHistory({ sessionHandle: session.sessionHandle }),
+    ).resolves.toMatchObject({ session, snapshot: snapshotData });
+    expect(fetchImpl.mock.calls.map(([url]) => String(url))).toEqual([
+      `${origin}/api/v1/public/assistants/shop-help/sessions/${sessionRequestId}`,
+      `${origin}/api/v1/public/sessions/${session.sessionHandle}/history`,
+    ]);
+    expect(fetchImpl.mock.calls.map(([, options]) => options)).toEqual([
+      expect.objectContaining({ method: 'GET', credentials: 'same-origin', cache: 'no-store' }),
+      expect.objectContaining({ method: 'GET', credentials: 'same-origin', cache: 'no-store' }),
+    ]);
+  });
+
+  it('ends only the selected session with its visitor cookie and validates the confirmation', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(envelope({ sessionHandle, state: 'ended' })))
+      .mockResolvedValueOnce(jsonResponse({}, 404))
+      .mockResolvedValueOnce(
+        jsonResponse(envelope({ sessionHandle: otherSessionHandle, state: 'ended' })),
+      )
+      .mockResolvedValueOnce(jsonResponse({}, 503));
+    const client = createPublicAssistantApiClient({
+      apiBaseUrl: '/api/v1/public',
+      fetchImpl,
+      origin,
+    });
+
+    await expect(client.endSession({ sessionHandle })).resolves.toBe(true);
+    await expect(client.endSession({ sessionHandle })).resolves.toBe(false);
+    await expect(client.endSession({ sessionHandle })).rejects.toMatchObject({
+      kind: 'invalid_response',
+    });
+    await expect(client.endSession({ sessionHandle })).rejects.toMatchObject({
+      kind: 'request_failed',
+    });
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(
+      `${origin}/api/v1/public/sessions/${sessionHandle}/end`,
+    );
+    expect(fetchImpl.mock.calls[0]?.[1]).toMatchObject({
+      cache: 'no-store',
+      credentials: 'same-origin',
+      method: 'POST',
+    });
+  });
+
   it('fails closed for unknown, paused, malformed, and unavailable snapshots', async () => {
     const responses = [
       jsonResponse({}, 404),
@@ -201,7 +440,7 @@ describe('public assistant API client', () => {
           envelope({
             createdAt: '2026-09-21T08:00:00.000Z',
             releaseRef: snapshot.releaseRef,
-            sessionHandle: 'session_1234567890',
+            sessionHandle,
             state: 'active',
           }),
           201,
@@ -210,8 +449,8 @@ describe('public assistant API client', () => {
       .mockResolvedValueOnce(
         jsonResponse(
           envelope({
-            eventsUrl: '/api/v1/public/sessions/session_1234567890/turns/turn_1234567890/events',
-            resultUrl: '/api/v1/public/sessions/session_1234567890/turns/turn_1234567890',
+            eventsUrl: `/api/v1/public/sessions/${sessionHandle}/turns/turn_1234567890/events`,
+            resultUrl: `/api/v1/public/sessions/${sessionHandle}/turns/turn_1234567890`,
             state: 'accepted',
             traceId: 'trace_1234567890',
             turnId: 'turn_1234567890',
@@ -226,13 +465,13 @@ describe('public assistant API client', () => {
     });
     const session = await client.createSession({
       publicSlug: 'shop-help',
-      sessionRequestId: 'session_request_1234567890',
+      sessionRequestId,
       snapshot,
     });
     const [, sessionRequest] = fetchImpl.mock.calls[0]!;
     expect(sessionRequest?.body).toBeUndefined();
     expect(sessionRequest?.headers).toMatchObject({
-      'Idempotency-Key': 'session_request_1234567890',
+      'Idempotency-Key': sessionRequestId,
     });
     const clientMessageId = 'message_client_1234567890';
     await client.sendMessage({
@@ -279,8 +518,8 @@ describe('public assistant API client', () => {
     await expect(
       client.readTurn({
         clientMessageId: 'message_client_1234567890',
-        resultUrl: '/api/v1/public/sessions/session_other_1234/turns/turn_1234567890',
-        sessionHandle: 'session_1234567890',
+        resultUrl: `/api/v1/public/sessions/${otherSessionHandle}/turns/turn_1234567890`,
+        sessionHandle,
         turnId: 'turn_1234567890',
       }),
     ).rejects.toMatchObject({ kind: 'invalid_input' });
@@ -305,7 +544,7 @@ describe('public assistant API client', () => {
     await expect(
       client.createSession({
         publicSlug: 'shop-help',
-        sessionRequestId: 'session_request_1234567890',
+        sessionRequestId,
         snapshot,
       }),
     ).rejects.toMatchObject({ requestId: 'request_1234567890', retryable: true });

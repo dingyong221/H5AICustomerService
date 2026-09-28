@@ -14,3 +14,10 @@ export type ResponseLike = {
   status: (statusCode: number) => ResponseLike;
   json: (body: unknown) => unknown;
 };
+
+export type EventStreamResponseLike = ResponseLike & {
+  end: () => void;
+  flushHeaders?: () => void;
+  on: (event: 'close', listener: () => void) => void;
+  write: (chunk: string) => boolean;
+};
