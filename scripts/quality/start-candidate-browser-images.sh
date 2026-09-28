@@ -3,7 +3,10 @@ set -euo pipefail
 
 manifest=${1:-}
 database_url=${H5CS_INTEGRATION_MYSQL_URL:-}
-if [[ ${CI:-} != true || ${H5CS_E2E_PATH_MODE:-} != single_domain || ! -f $manifest || ! $database_url =~ ^mysql://h5cs_ci:[^@]+@127[.]0[.]0[.]1:3306/h5cs_integration_ci$ ]]; then
+revision=${GITHUB_SHA:-}
+repository=${GITHUB_REPOSITORY:-}
+repository=${repository,,}
+if [[ ${CI:-} != true || ${H5CS_E2E_PATH_MODE:-} != single_domain || ! -f $manifest || ! $database_url =~ ^mysql://h5cs_ci:[^@]+@127[.]0[.]0[.]1:3306/h5cs_integration_ci$ || ! $revision =~ ^[0-9a-f]{40}$ || ! $repository =~ ^[a-z0-9_-]+/[a-z0-9_-]+$ ]]; then
   echo 'Candidate browser images require the isolated CI MySQL and same-domain path mode.' >&2
   exit 64
 fi
@@ -15,12 +18,24 @@ for app in api worker merchant-web consumer-h5 ops-web; do
     echo "Candidate manifest must contain exactly one immutable ${app} image." >&2
     exit 64
   fi
+  if [[ ${matches[0]} != "ghcr.io/${repository}/${app}@sha256:"* ]]; then
+    echo "Candidate ${app} image belongs to a different repository." >&2
+    exit 64
+  fi
   images[$app]=${matches[0]}
 done
 if [[ $(wc -l < "$manifest") -ne 5 ]]; then
   echo 'Candidate manifest contains unexpected entries.' >&2
   exit 64
 fi
+
+for app in api worker merchant-web consumer-h5 ops-web; do
+  labels=$(docker image inspect "${images[$app]}" --format '{{index .Config.Labels "org.opencontainers.image.revision"}} {{index .Config.Labels "org.opencontainers.image.h5cs.web-path-mode"}}')
+  if [[ $labels != "$revision same_domain" ]]; then
+    echo "Candidate ${app} image revision or Web path mode differs from this workflow." >&2
+    exit 64
+  fi
+done
 
 names=(h5cs-artifact-e2e-api h5cs-artifact-e2e-worker h5cs-artifact-e2e-ops h5cs-artifact-e2e-merchant h5cs-artifact-e2e-consumer)
 for name in "${names[@]}"; do
