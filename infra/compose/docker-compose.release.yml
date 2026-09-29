@@ -108,6 +108,7 @@ services:
     pull_policy: always
     environment:
       CONSUMER_H5_ORIGIN: ${H5CS_PUBLIC_ORIGIN:?set H5CS_PUBLIC_ORIGIN to the canonical HTTPS origin}
+      CONSUMER_H5_INTERNAL_API_ORIGIN: http://api:4000
       HOSTNAME: 0.0.0.0
       NODE_ENV: production
       PORT: 3000
