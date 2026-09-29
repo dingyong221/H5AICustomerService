@@ -6,10 +6,14 @@ const origin = process.env.H5CS_STAGE_ORIGIN;
 const operatorUsername = process.env.H5CS_STAGE_OPERATOR_USERNAME;
 const operatorPassword = process.env.H5CS_STAGE_OPERATOR_PASSWORD;
 const chromePath = process.env.H5CS_STAGE_CHROME_PATH;
+const modelMode = process.env.H5CS_STAGE_MODEL_MODE ?? 'fake';
 delete process.env.H5CS_STAGE_OPERATOR_PASSWORD;
 
 if (!origin || !operatorUsername || !operatorPassword || !chromePath) {
   throw new Error('Staging browser smoke requires an origin, operator credentials and Chrome');
+}
+if (modelMode !== 'fake' && modelMode !== 'real') {
+  throw new Error('Staging browser smoke model mode must be fake or real');
 }
 const parsedOrigin = new URL(origin);
 if (
@@ -114,15 +118,25 @@ try {
   step = 'consumer-heading';
   await expect(consumerPage.getByRole('heading', { name: assistantName })).toBeVisible();
   step = 'consumer-send';
+  const assistantMessages = consumerPage.locator('.message-row--assistant .message-bubble p');
+  const assistantMessageCount = await assistantMessages.count();
   await consumerPage.getByRole('textbox', { name: '输入想咨询的问题' }).fill('你们提供什么服务？');
   await consumerPage.getByRole('button', { name: '发送消息' }).click();
   step = 'consumer-answer';
-  await expect(
-    consumerPage.getByText('我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。'),
-  ).toBeVisible({ timeout: 90_000 });
+  if (modelMode === 'fake') {
+    await expect(
+      consumerPage.getByText('我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。'),
+    ).toBeVisible({ timeout: 90_000 });
+  } else {
+    await expect(assistantMessages).toHaveCount(assistantMessageCount + 1, { timeout: 90_000 });
+    const answer = (await assistantMessages.last().textContent())?.trim();
+    if (!answer || answer.length < 8 || answer.length > 10_000) {
+      throw new Error('Real-model reply is empty or outside expected bounds');
+    }
+  }
 
   process.stdout.write(
-    'Staging browser smoke passed: operator login, merchant provision and claim, assistant publish, consumer AI reply.\n',
+    `Staging browser smoke passed (${modelMode} model): operator login, merchant provision and claim, assistant publish, consumer AI reply.\n`,
   );
 } catch {
   process.stderr.write(
