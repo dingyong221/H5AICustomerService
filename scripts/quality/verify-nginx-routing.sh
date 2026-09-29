@@ -99,8 +99,10 @@ test "$(curl "${resolve_https[@]}" "$https/api/v1/probe")" = 'api|/api/v1/probe|
 for blocked_path in /mcp /mcp/probe /oauth/probe /.well-known/oauth-authorization-server /api/v1/skill /api/v1/skill/probe /console/login /console/onboarding /console/onboarding/probe /console/auth/workbuddy/bind; do
   test "$(curl "${resolve_https[@]}" --output /dev/null --write-out '%{http_code}' "$https$blocked_path")" = 404
 done
-test "$(curl "${resolve_https[@]}" --output /dev/null --write-out '%{http_code}' "$https/ops")" = 308
-test "$(curl "${resolve_https[@]}" --output /dev/null --write-out '%{http_code}' "$https/console")" = 308
+test "$(curl "${resolve_https[@]}" "$https/ops")" = 'ops|/ops|h5cs.1rying.com|https'
+test "$(curl "${resolve_https[@]}" "$https/console")" = 'merchant|/console|h5cs.1rying.com|https'
+test "$(curl "${resolve_https[@]}" --location --max-redirs 3 "$https/ops/")" = 'ops|/ops|h5cs.1rying.com|https'
+test "$(curl "${resolve_https[@]}" --location --max-redirs 3 "$https/console/")" = 'merchant|/console|h5cs.1rying.com|https'
 test "$(curl --noproxy '*' --silent --insecure --output /dev/null --write-out '%{http_code}' https://127.0.0.1:18443/a/probe || true)" = 000
 test "$(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18080/ops/login || true)" = 000
 

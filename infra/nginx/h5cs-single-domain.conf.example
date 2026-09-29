@@ -73,14 +73,14 @@ server {
     }
 
     location = /ops {
-        return 308 /ops/;
+        proxy_pass http://127.0.0.1:13002;
     }
     location ^~ /ops/ {
         proxy_pass http://127.0.0.1:13002;
     }
 
     location = /console {
-        return 308 /console/;
+        proxy_pass http://127.0.0.1:13000;
     }
     # Legacy WorkBuddy pages remain unavailable during the Web-only stage.
     location = /console/login {
