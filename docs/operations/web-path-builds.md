@@ -2,14 +2,16 @@
 
 本说明只描述仓库已验证的可选构建方式，不是正式域名路由决策、镜像发布或生产切流授权。Next.js `basePath` 在构建时进入客户端资源；修改服务器环境变量或 Nginx 规则不能把已构建的根路径镜像变成子路径镜像。不同路径变体必须分别构建、生成不可变 digest，并在同一变体上完成验收。
 
-| 用法                         | 商家 Web 构建参数                         | 运营 Web 构建参数                | 链接与探针配置                                                                                                                                                      |
-| ---------------------------- | ----------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 独立主机根路径（当前默认）   | `NEXT_PUBLIC_MERCHANT_BASE_PATH=`         | `NEXT_PUBLIC_OPS_BASE_PATH=`     | `MANAGEMENT_CONSOLE_URL=https://<商家主机>/`；商家 `H5CS_MERCHANT_HEALTHCHECK_PATH=/account/login`；运营 `H5CS_OPS_HEALTHCHECK_PATH=/login`                         |
-| 同一域名分路径（待用户决定） | `NEXT_PUBLIC_MERCHANT_BASE_PATH=/console` | `NEXT_PUBLIC_OPS_BASE_PATH=/ops` | `MANAGEMENT_CONSOLE_URL=https://h5cs.1rying.com/console`；商家 `H5CS_MERCHANT_HEALTHCHECK_PATH=/console/account/login`；运营 `H5CS_OPS_HEALTHCHECK_PATH=/ops/login` |
+| 用法                       | 商家 Web 构建参数                         | 运营 Web 构建参数                | 链接与探针配置                                                                                                                                                      |
+| -------------------------- | ----------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 独立主机根路径（当前默认） | `NEXT_PUBLIC_MERCHANT_BASE_PATH=`         | `NEXT_PUBLIC_OPS_BASE_PATH=`     | `MANAGEMENT_CONSOLE_URL=https://<商家主机>/`；商家 `H5CS_MERCHANT_HEALTHCHECK_PATH=/account/login`；运营 `H5CS_OPS_HEALTHCHECK_PATH=/login`                         |
+| 同一域名分路径（已选定）   | `NEXT_PUBLIC_MERCHANT_BASE_PATH=/console` | `NEXT_PUBLIC_OPS_BASE_PATH=/ops` | `MANAGEMENT_CONSOLE_URL=https://h5cs.1rying.com/console`；商家 `H5CS_MERCHANT_HEALTHCHECK_PATH=/console/account/login`；运营 `H5CS_OPS_HEALTHCHECK_PATH=/ops/login` |
 
 `infra/docker/workspace.Dockerfile` 接收上述两个 build arg，并把相同路径保留在 Web 镜像的运行环境供 Next.js 读取；仅允许表中的空值、`/console` 与 `/ops`，无效值使对应 Next.js 构建失败。只在构建时传入 basePath 而在容器运行时丢失，会让已构建的分路径页面返回 404。运营后台和 WorkBuddy 生成管理链接时按 `MANAGEMENT_CONSOLE_URL` 保留 `/console`；商家客户端也只接受与自身构建前缀一致的可信管理链接。API 始终独立使用 `/api`，消费者 H5 的公开入口仍是 `/a`；本文件不改变它们。
 
 反向代理必须将原始 `/console/...`、`/ops/...` 路径完整转发给对应 Web 容器，不能剥掉前缀。仅将 `/console` 代理到根路径 Next.js 镜像，或把 `/console` 镜像部署到根路径，都会导致页面、静态资源、Server Actions 或重定向失败。发布前用正式构建镜像与代理一起验证登录、领取、创建、发布、消费者固定链接、静态资源和 Server Actions；不要把本机路由冒烟当成此项验收。
+
+消费者页面的服务端渲染需要先取得已发布客服快照。Release Compose 为消费者容器设置 `CONSUMER_H5_INTERNAL_API_ORIGIN=http://api:4000`，只允许服务端把同源的 `GET /api/v1/public/assistants/<slug>` 改走内部 API 服务，避免依赖公网 DNS 回流或未切流的维护入口；浏览器会话、消息和 SSE 仍使用公开域名下的 `/api/v1/public`。应用会拒绝其他内部目的地、跨源 URL 和非快照请求。此内部通道不应映射到宿主机或开放云安全组端口。
 
 同域名方案的[候选 Nginx 配置](../../infra/nginx/h5cs-single-domain.conf.example)把 `/ops/`、`/console/` 和业务 `/api/` 路由到各自的 loopback 端口，其余公开页面由消费者 H5 提供；当前 Web-only 阶段对 WorkBuddy 的 `/mcp`、`/oauth/`、OAuth 元数据、Skill API 及旧商家引导页返回 404。传给运营端的 `X-Real-IP` 由 Nginx 用真实 `$remote_addr` 覆盖。该文件只覆盖初始 Compose 端口，不会自动完成蓝绿切换。CI 用一次性自签证书检查语法，并在隔离高位端口用模拟后端检查路径转发、拒绝规则、ACME、跳转和未知 Host；自签证书不会进入镜像或生产，这些检查不等于正式证书、真实用户会话或服务器路由已验收。路由和 TLS 获批、正式镜像摘要确定后，仍须以受控变更在服务器上执行 `nginx -t`、回读有效配置、灰度验证和回滚准备，不能直接复制候选文件覆盖现有维护入口。
 
