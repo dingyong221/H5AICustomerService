@@ -73,6 +73,7 @@ try {
   await expect(merchantPage).toHaveURL(/\/console\/workspace\/[0-9a-f]{32}$/u, {
     timeout: 30_000,
   });
+  const firstWorkspaceUrl = merchantPage.url();
 
   step = 'assistant-draft';
   const assistantName = `测试客服 ${randomBytes(4).toString('hex')}`;
@@ -135,8 +136,50 @@ try {
     }
   }
 
+  step = 'second-merchant-provision';
+  await operatorPage.reload();
+  await operatorPage.getByLabel('商家名称').fill(`隔离验收商家 ${randomBytes(5).toString('hex')}`);
+  await operatorPage.getByRole('button', { name: '创建商家并生成领取链接' }).click();
+  const secondSetupOutput = operatorPage.locator('.ops-created output');
+  await expect(secondSetupOutput).toBeVisible({ timeout: 30_000 });
+  const secondSetupUrl = new URL((await secondSetupOutput.textContent())?.trim() ?? '');
+  if (
+    secondSetupUrl.origin !== origin ||
+    secondSetupUrl.pathname !== '/console/setup' ||
+    !/^#[A-Za-z0-9_-]{43}$/u.test(secondSetupUrl.hash) ||
+    secondSetupUrl.toString() === setupUrl.toString()
+  ) {
+    throw new Error('The second setup URL did not match the staging origin');
+  }
+
+  step = 'second-merchant-claim';
+  const secondMerchantContext = await browser.newContext({ ignoreHTTPSErrors: true });
+  const secondMerchantPage = await secondMerchantContext.newPage();
+  await secondMerchantPage.goto(secondSetupUrl.toString());
+  await expect(secondMerchantPage.getByRole('button', { name: '领取商家后台' })).toBeEnabled({
+    timeout: 30_000,
+  });
+  await secondMerchantPage
+    .getByLabel('负责人手机号')
+    .fill(`137${String(randomInt(0, 100_000_000)).padStart(8, '0')}`);
+  await secondMerchantPage
+    .getByLabel('平台登录密码（至少 12 位）')
+    .fill(randomBytes(24).toString('base64url'));
+  await secondMerchantPage.getByRole('button', { name: '领取商家后台' }).click();
+  await expect(secondMerchantPage).toHaveURL(/\/console\/workspace\/[0-9a-f]{32}$/u, {
+    timeout: 30_000,
+  });
+  const secondWorkspaceUrl = secondMerchantPage.url();
+  await expect(secondMerchantPage.getByRole('link', { name: assistantName })).toHaveCount(0);
+
+  step = 'cross-merchant-access';
+  await merchantPage.goto(secondWorkspaceUrl);
+  await expect(merchantPage).toHaveURL(/\/console\/account\/login\?merchant=[0-9a-f]{32}$/u);
+  await secondMerchantPage.goto(firstWorkspaceUrl);
+  await expect(secondMerchantPage).toHaveURL(/\/console\/account\/login\?merchant=[0-9a-f]{32}$/u);
+
   process.stdout.write(
-    `Staging browser smoke passed (${modelMode} model): operator login, merchant provision and claim, assistant publish, consumer AI reply.\n`,
+    `Staging browser smoke passed (${modelMode} model): provisioning, assistant publish, consumer AI reply and cross-merchant access isolation.\n`,
   );
 } catch {
   process.stderr.write(
