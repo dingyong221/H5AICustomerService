@@ -23,7 +23,7 @@
 ## 数据、模型和公网入口
 
 - 生产 MySQL 容器健康，数据库 `h5_ai_customer_service_prod` 的业务表数量为 **0**；首次迁移尚未执行。宿主机未监听 3306。现有生产 SQL 压缩备份位于本机 `/var/backups/h5-ai-customer-service/mysql/`，文件约 600 字节，反映空库状态；Staging 另有同机备份。只读盘点未发现项目离机备份目标或定时任务的证据，**不能据此证明不存在其他外部备份，也不能称现有备份为离机灾备**。
-- 受限的正式模型密钥文件存在，权限为 `0640`；Worker 配置中 `MODEL_PROVIDER=chat_completions`、`MODEL_NAME=qwen-plus`、接口地址已填写，但 `CONVERSATION_WORKER_ENABLED=false`，`MODEL_API_KEY` 和 `MODEL_API_KEY_FILE` 均为空。即正式 Worker 尚未接入密钥或业务流量；Staging 的测试模型容器仍运行。密钥内容未被读取或记录。
+- 受限的正式模型密钥文件存在，权限为 `0640`、数字 GID 为 `1000`，父目录为 `0700`；Worker 镜像运行身份为 `node`。Worker 配置中 `MODEL_PROVIDER=chat_completions`、`MODEL_NAME=qwen-plus`、接口地址已填写，但 `CONVERSATION_WORKER_ENABLED=false`，`MODEL_API_KEY` 和 `MODEL_API_KEY_FILE` 均为空。后者按[密钥文件接入方案](model-secret-file.md)应由发布时的 Compose 覆盖层设置，不应把空字段单独判为缺少密钥；目前**尚无正式 Worker 容器及挂载、真实模型调用验收**。Staging 的测试模型容器仍运行。密钥内容未被读取或记录。
 - `https://h5cs.1rying.com/gateway-health` 返回 200；`/ops/`、`/console/`、`/a/`、`/api/` 均返回 503。`/mcp` 和 `/oauth` 也返回 503，虽然没有对外启用 WorkBuddy，但尚未达到 Runbook 规定的明确 404。Nginx 配置语法通过，HTTPS 对外可达；公开业务切流尚未执行。
 
 ## 下一次发布必须先完成
