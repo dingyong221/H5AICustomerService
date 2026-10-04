@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "exceptions": [
+    {
+      "ghsa": "GHSA-vfj7-8cjw-p6xm",
+      "package": "braces",
+      "affectedVersion": "3.0.3",
+      "scope": "ESLint build-time dependency only; verify absence from released runtime images",
+      "approvedOn": "2026-10-04",
+      "expiresAt": "2026-11-03T15:59:59Z",
+      "approval": "Project owner authorized a temporary high-advisory waiver for controlled test release on 2026-10-04",
+      "removalCondition": "Remove immediately when a fixed upstream package is available or before expanding beyond controlled test use"
+    }
+  ]
+}

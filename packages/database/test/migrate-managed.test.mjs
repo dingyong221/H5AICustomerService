@@ -19,9 +19,39 @@ import {
   migrationDatabaseUrl,
   migrationInventory,
   parseMigrationArguments,
+  productionMigrationApproval,
 } from '../scripts/migrate-managed.mjs';
 
 describe('managed MySQL migration preflight', () => {
+  it('keeps backed-up production migration separate from the expiring controlled pilot', () => {
+    const change = { H5CS_MIGRATION_CHANGE_ID: 'H5CS-PILOT-20261004-01' };
+    expect(() => productionMigrationApproval(change)).toThrow('exactly one');
+    expect(
+      productionMigrationApproval({
+        ...change,
+        H5CS_MIGRATION_BACKUP_REF: 'offhost-backup-20261004',
+      }),
+    ).toEqual({ mode: 'backed-up' });
+    const pilot = {
+      ...change,
+      H5CS_MIGRATION_RISK_ACCEPTANCE_REF: 'H5CS-PILOT-RISK-20261004',
+      H5CS_PILOT_EXPIRES_AT: '2026-11-03T15:59:59Z',
+      H5CS_CONTROLLED_PILOT: 'true',
+    };
+    expect(productionMigrationApproval(pilot, new Date('2026-10-04T00:00:00Z'))).toEqual({
+      mode: 'controlled-pilot',
+    });
+    expect(() => productionMigrationApproval(pilot, new Date('2026-11-03T16:00:00Z'))).toThrow(
+      'invalid',
+    );
+    expect(() =>
+      productionMigrationApproval({ ...pilot, H5CS_MIGRATION_BACKUP_REF: 'offhost-backup' }),
+    ).toThrow('exactly one');
+    expect(() => productionMigrationApproval({ ...pilot, H5CS_CONTROLLED_PILOT: 'false' })).toThrow(
+      'invalid',
+    );
+  });
+
   it('reads a bounded migration URL from one protected file source without exposing it in errors', () => {
     const directory = mkdtempSync(join(tmpdir(), 'h5cs-migration-secret-'));
     const path = join(directory, 'migration-url');

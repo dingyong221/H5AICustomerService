@@ -18,7 +18,10 @@ services:
       NODE_ENV: production
       MYSQL_TLS_CA_FILE: /etc/ssl/certs/h5cs-managed-mysql-ca.pem
       MYSQL_MIGRATION_DATABASE_URL_FILE: /run/secrets/h5cs-migration-url
-      H5CS_MIGRATION_BACKUP_REF: ${H5CS_MIGRATION_BACKUP_REF:?set a verified offsite backup reference}
+      H5CS_MIGRATION_BACKUP_REF: ${H5CS_MIGRATION_BACKUP_REF:-}
+      H5CS_MIGRATION_RISK_ACCEPTANCE_REF: ${H5CS_MIGRATION_RISK_ACCEPTANCE_REF:-}
+      H5CS_CONTROLLED_PILOT: ${H5CS_CONTROLLED_PILOT:-false}
+      H5CS_PILOT_EXPIRES_AT: ${H5CS_PILOT_EXPIRES_AT:-}
       H5CS_MIGRATION_CHANGE_ID: ${H5CS_MIGRATION_CHANGE_ID:?set the approved change ID}
     volumes:
       - type: bind
