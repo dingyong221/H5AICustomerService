@@ -41,6 +41,7 @@ const modelKey = externalServices
       .update(databaseUrl, 'utf8')
       .digest('base64url')
   : randomBytes(32).toString('base64url');
+const previewToken = randomBytes(32).toString('base64url');
 process.env['H5CS_E2E_OPERATOR_PASSWORD'] = operatorPassword;
 const common = {
   MYSQL_DATABASE_URL: databaseUrl,
@@ -95,6 +96,7 @@ export default defineConfig({
               MODEL_PROVIDER: 'chat_completions',
               MODEL_NAME: 'browser-test-model',
               MODEL_API_KEY: modelKey,
+              PREVIEW_AUTH_TOKEN: previewToken,
               MODEL_CHAT_COMPLETIONS_URL: 'http://127.0.0.1:9020/chat/completions',
             },
             reuseExistingServer: false,
@@ -142,6 +144,7 @@ export default defineConfig({
               PUBLISH_MODEL_POLICY_VERSION: 'browser-v1',
               API_READINESS_URL: 'http://127.0.0.1:4000/readyz',
               WORKER_READINESS_URL: 'http://127.0.0.1:3011/readyz',
+              PREVIEW_AUTH_TOKEN: previewToken,
             },
             reuseExistingServer: false,
             timeout: 120_000,

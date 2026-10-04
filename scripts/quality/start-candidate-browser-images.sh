@@ -51,6 +51,7 @@ model_key=$(node -e 'const {createHash}=require("node:crypto");process.stdout.wr
 session_key=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')
 phone_key=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')
 visitor_key=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')
+preview_key=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')
 
 started=false
 cleanup_on_failure() {
@@ -73,6 +74,7 @@ docker run "${runtime[@]}" --name h5cs-artifact-e2e-worker \
   --env "MYSQL_DATABASE_URL=$database_url" --env CONVERSATION_WORKER_ENABLED=true \
   --env MODEL_PROVIDER=chat_completions --env MODEL_NAME=browser-test-model \
   --env "MODEL_API_KEY=$model_key" --env MODEL_CHAT_COMPLETIONS_URL=http://127.0.0.1:9020/chat/completions \
+  --env "PREVIEW_AUTH_TOKEN=$preview_key" \
   "${images[worker]}" >/dev/null
 
 docker run "${runtime[@]}" --name h5cs-artifact-e2e-ops \
@@ -94,6 +96,7 @@ docker run "${runtime[@]}" --name h5cs-artifact-e2e-merchant \
   --env PUBLISH_MODEL_POLICY_VERSION=browser-v1 \
   --env API_READINESS_URL=http://127.0.0.1:4000/readyz \
   --env WORKER_READINESS_URL=http://127.0.0.1:3011/readyz \
+  --env "PREVIEW_AUTH_TOKEN=$preview_key" \
   "${images[merchant-web]}" >/dev/null
 
 docker run "${runtime[@]}" --name h5cs-artifact-e2e-consumer \
