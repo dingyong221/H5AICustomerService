@@ -2,7 +2,7 @@ import { randomBytes, randomInt } from 'node:crypto';
 
 import { expect, test } from '@playwright/test';
 
-test('operator provisions a merchant, merchant publishes, consumer receives an AI reply', async ({
+test('operator provisions a merchant, merchant previews and publishes, consumer receives an AI reply', async ({
   browser,
 }) => {
   const operatorPassword = process.env['H5CS_E2E_OPERATOR_PASSWORD'];
@@ -140,6 +140,16 @@ test('operator provisions a merchant, merchant publishes, consumer receives an A
   await expect(merchantPage.getByText('当前草稿资料已确认')).toBeVisible();
   await merchantPage.reload();
   await expect(merchantPage.getByRole('button', { name: '确认发布 AI 客服' })).toBeEnabled();
+  await expect(merchantPage.getByRole('img', { name: '扫码打开消费者 AI 客服' })).toHaveCount(0);
+  await expect(merchantPage.locator('a[href^="http://127.0.0.1:3001/a/"]')).toHaveCount(0);
+  await merchantPage.getByLabel('试聊问题').fill('你们提供什么服务？');
+  await merchantPage.getByRole('button', { name: '发送测试问题' }).click();
+  const previewAnswer = merchantPage.locator('.assistant-preview-answer');
+  await expect(previewAnswer).toContainText(
+    '我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。',
+    { timeout: 60_000 },
+  );
+  await expect(merchantPage.locator('a[href^="http://127.0.0.1:3001/a/"]')).toHaveCount(0);
   await expect(merchantPage.getByRole('img', { name: '扫码打开消费者 AI 客服' })).toHaveCount(0);
   await merchantPage.getByLabel(/我确认发布当前修订/u).check();
   await merchantPage.getByRole('button', { name: '确认发布 AI 客服' }).click();

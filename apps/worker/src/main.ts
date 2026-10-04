@@ -2,6 +2,7 @@ import { createHealthServer } from './health-server.js';
 import { PollLoop } from './poll-loop.js';
 import { WorkerHealth } from './worker-health.js';
 import { createConversationDispatch } from './conversation-dispatch.js';
+import { createPreviewService } from './preview-service.js';
 
 const parseInteger = (name: string, value: string | undefined, fallback: number): number => {
   const parsed = Number(value ?? String(fallback));
@@ -36,7 +37,7 @@ const main = async (): Promise<void> => {
   await pollLoop.runOnce();
   pollLoop.start();
 
-  const server = createHealthServer(health);
+  const server = createHealthServer(health, createPreviewService());
   const host = process.env['WORKER_HEALTH_HOST'] ?? '127.0.0.1';
   const port = parseInteger('WORKER_HEALTH_PORT', process.env['WORKER_HEALTH_PORT'], 3_011);
 

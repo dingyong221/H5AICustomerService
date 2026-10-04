@@ -12,6 +12,7 @@ import { currentMerchant, currentMerchantCsrfToken } from '../../../../account/m
 import { publicApiReady } from '../../../api-readiness';
 import { ConfirmKnowledgeForm } from '../../../confirm-knowledge-form';
 import { EditDraftForm } from '../../../edit-draft-form';
+import { PreviewChatForm } from '../../../preview-chat-form';
 import { PublishAssistantForm } from '../../../publish-assistant-form';
 import { publicationPolicy, publicAssistantUrl } from '../../../publication-policy';
 import { workerReady } from '../../../worker-readiness';
@@ -133,6 +134,17 @@ export default async function AssistantDraftPage({
           assistantId={assistantId}
           draftRevision={assistant.draftRevision}
           alreadyConfirmed={assistant.knowledgeConfirmed}
+        />
+      </section>
+      <section className="merchant-account-card assistant-detail-card">
+        <h2>发布前试聊</h2>
+        <p>用当前未发布草稿测试回答，核对服务范围、价格和资料不足时的回复。</p>
+        <PreviewChatForm
+          merchantId={merchantId}
+          assistantId={assistantId}
+          draftRevision={assistant.draftRevision}
+          csrfToken={csrfToken}
+          available={workerAvailable && assistant.status !== 'paused'}
         />
       </section>
       <section className="merchant-account-card assistant-detail-card">

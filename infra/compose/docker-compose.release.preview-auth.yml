@@ -1,0 +1,19 @@
+# The shared internal token authorizes only merchant-to-Worker preview calls.
+# Keep the host file inside the project-only root directory and readable by uid/gid 1000.
+services:
+  worker:
+    environment:
+      PREVIEW_AUTH_TOKEN_FILE: /run/secrets/h5cs-preview-token
+    volumes:
+      - type: bind
+        source: ${H5CS_PREVIEW_AUTH_TOKEN_HOST_FILE:?set the approved preview token host file}
+        target: /run/secrets/h5cs-preview-token
+        read_only: true
+  merchant-web:
+    environment:
+      PREVIEW_AUTH_TOKEN_FILE: /run/secrets/h5cs-preview-token
+    volumes:
+      - type: bind
+        source: ${H5CS_PREVIEW_AUTH_TOKEN_HOST_FILE:?set the approved preview token host file}
+        target: /run/secrets/h5cs-preview-token
+        read_only: true

@@ -98,6 +98,24 @@ try {
   await merchantPage.reload();
   step = 'assistant-publish-ready';
   await expect(merchantPage.getByRole('button', { name: '确认发布 AI 客服' })).toBeEnabled();
+  await expect(merchantPage.locator(`a[href^="${origin}/a/"]`)).toHaveCount(0);
+  step = 'assistant-preview-submit';
+  await merchantPage.getByLabel('试聊问题').fill('你们提供什么服务？价格如何确认？');
+  await merchantPage.getByRole('button', { name: '发送测试问题' }).click();
+  step = 'assistant-preview-answer';
+  const previewAnswer = merchantPage.locator('.assistant-preview-answer');
+  await expect(previewAnswer).toBeVisible({ timeout: 90_000 });
+  if (modelMode === 'fake') {
+    await expect(previewAnswer).toContainText(
+      '我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。',
+    );
+  } else {
+    const answer = (await previewAnswer.locator('p').textContent())?.trim();
+    if (!answer || answer.length < 8 || answer.length > 8_000) {
+      throw new Error('Real-model preview reply is empty or outside expected bounds');
+    }
+  }
+  await expect(merchantPage.locator(`a[href^="${origin}/a/"]`)).toHaveCount(0);
   step = 'assistant-publish-submit';
   await merchantPage.getByLabel(/我确认发布当前修订/u).check();
   await merchantPage.getByRole('button', { name: '确认发布 AI 客服' }).click();
@@ -179,7 +197,7 @@ try {
   await expect(secondMerchantPage).toHaveURL(/\/console\/account\/login\?merchant=[0-9a-f]{32}$/u);
 
   process.stdout.write(
-    `Staging browser smoke passed (${modelMode} model): provisioning, assistant publish, consumer AI reply and cross-merchant access isolation.\n`,
+    `Staging browser smoke passed (${modelMode} model): provisioning, draft AI preview, assistant publish, consumer AI reply and cross-merchant access isolation.\n`,
   );
 } catch {
   process.stderr.write(
