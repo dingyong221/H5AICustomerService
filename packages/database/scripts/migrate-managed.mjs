@@ -116,6 +116,38 @@ export function migrationDatabaseUrl(environment = process.env) {
   }
 }
 
+const migrationReferencePattern = /^[A-Za-z0-9._:-]{8,128}$/u;
+
+export function productionMigrationApproval(environment = process.env, now = new Date()) {
+  if (!migrationReferencePattern.test(environment.H5CS_MIGRATION_CHANGE_ID ?? '')) {
+    throw new MigrationPreflightError('Production migration requires a change reference');
+  }
+  const backupRef = environment.H5CS_MIGRATION_BACKUP_REF ?? '';
+  const pilotRiskRef = environment.H5CS_MIGRATION_RISK_ACCEPTANCE_REF ?? '';
+  if (Boolean(backupRef) === Boolean(pilotRiskRef)) {
+    throw new MigrationPreflightError(
+      'Production migration requires exactly one backup or controlled-pilot risk reference',
+    );
+  }
+  if (backupRef) {
+    if (!migrationReferencePattern.test(backupRef)) {
+      throw new MigrationPreflightError('Production migration backup reference is invalid');
+    }
+    return { mode: 'backed-up' };
+  }
+  const expiresAt = Date.parse(environment.H5CS_PILOT_EXPIRES_AT ?? '');
+  if (
+    environment.H5CS_CONTROLLED_PILOT !== 'true' ||
+    !migrationReferencePattern.test(pilotRiskRef) ||
+    !Number.isFinite(expiresAt) ||
+    expiresAt <= now.valueOf() ||
+    expiresAt > Date.parse('2026-11-03T15:59:59Z')
+  ) {
+    throw new MigrationPreflightError('Controlled-pilot migration risk acceptance is invalid');
+  }
+  return { mode: 'controlled-pilot' };
+}
+
 const row = (value) => (Array.isArray(value) && value.length === 1 ? value[0] : null);
 
 async function verifyLiveConnection(connection, expectedDatabase) {
@@ -138,13 +170,7 @@ async function applyMigrations(options, inventory) {
   if (process.env.APP_ENV !== options.target) {
     throw new MigrationPreflightError('APP_ENV does not match the confirmed migration target');
   }
-  if (
-    options.target === 'production' &&
-    (!/^[A-Za-z0-9._:-]{8,128}$/u.test(process.env.H5CS_MIGRATION_BACKUP_REF ?? '') ||
-      !/^[A-Za-z0-9._:-]{8,128}$/u.test(process.env.H5CS_MIGRATION_CHANGE_ID ?? ''))
-  ) {
-    throw new MigrationPreflightError('Production migration requires backup and change references');
-  }
+  if (options.target === 'production') productionMigrationApproval();
   const migrationUrl = migrationDatabaseUrl();
   const { loadDatabaseConfig } = await import('../dist/config.js');
   const loaded = loadDatabaseConfig({

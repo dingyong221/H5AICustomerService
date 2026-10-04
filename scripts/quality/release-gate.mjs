@@ -382,6 +382,44 @@ const assertRequiredReleaseDocuments = () => {
   }
 };
 
+const temporaryAuditException = () => {
+  const workspace = readFileSync(resolve(repositoryRoot, 'pnpm-workspace.yaml'), 'utf8');
+  const expectedAuditConfig = '\naudit:\n  ignore:\n    - GHSA-vfj7-8cjw-p6xm\n';
+  if (!workspace.endsWith(expectedAuditConfig)) {
+    fail('Only the reviewed braces GHSA may be ignored by pnpm audit.');
+  }
+  const document = readJson('docs/release/security-exceptions.json');
+  const entries = document.exceptions;
+  if (
+    document.schemaVersion !== 1 ||
+    !Array.isArray(entries) ||
+    entries.length !== 1 ||
+    entries[0]?.ghsa !== 'GHSA-vfj7-8cjw-p6xm' ||
+    entries[0]?.package !== 'braces' ||
+    entries[0]?.affectedVersion !== '3.0.3' ||
+    entries[0]?.approvedOn !== '2026-10-04' ||
+    entries[0]?.scope !==
+      'ESLint build-time dependency only; verify absence from released runtime images'
+  ) {
+    fail('Temporary audit exception record does not match the reviewed test-only scope.');
+  }
+  const exception = entries[0];
+  const approvedAt = Date.parse(`${exception.approvedOn}T00:00:00Z`);
+  const expiresAt = Date.parse(exception.expiresAt);
+  if (
+    !Number.isFinite(expiresAt) ||
+    expiresAt <= approvedAt ||
+    expiresAt - approvedAt > 31 * 24 * 60 * 60 * 1000 ||
+    Date.now() > expiresAt
+  ) {
+    fail('Temporary braces audit exception is expired or exceeds the 31-day maximum.');
+  }
+  log(
+    `[gate] temporary test-only audit exception ${exception.ghsa} expires ${exception.expiresAt}`,
+  );
+  return exception;
+};
+
 const assertWorkBuddyPackageStructure = (version) => {
   const directory = 'integrations/workbuddy';
   const metadata = readJson(`${directory}/connector-meta.json`);
@@ -435,6 +473,7 @@ const assertStaticPolicy = (expectedVersion) => {
   assertNoHistoricalSecrets();
   assertReleaseComposePolicy();
   assertRequiredReleaseDocuments();
+  temporaryAuditException();
   assertWorkBuddyPackageStructure(version);
   git(['diff', '--check']);
   log(`[gate] static policy passed for v${version}`);
@@ -615,8 +654,14 @@ const generateEvidence = ({ allowDirty, expectedVersion, output }) => {
     fail(`Dependency audit did not return valid JSON: ${auditResult.stderr}`);
   }
   const vulnerabilityCounts = audit.metadata?.vulnerabilities ?? {};
-  if ((vulnerabilityCounts.high ?? 0) > 0 || (vulnerabilityCounts.critical ?? 0) > 0) {
-    fail('Dependency audit contains high or critical vulnerabilities.');
+  const highAudit = run(pnpmCommand, ['audit', '--audit-level=high'], {
+    capture: true,
+    allowFailure: true,
+  });
+  if (highAudit.status !== 0) {
+    fail(
+      `Dependency audit contains unapproved high or critical vulnerabilities.\n${highAudit.stdout}`,
+    );
   }
   const auditPath = join(outputDirectory, 'dependency-audit.json');
   writeJson(auditPath, audit);
@@ -660,6 +705,7 @@ const generateEvidence = ({ allowDirty, expectedVersion, output }) => {
         sha256: sha256File(resolve(repositoryRoot, 'pnpm-lock.yaml')),
       },
     },
+    securityExceptions: [temporaryAuditException()],
     ci: process.env.GITHUB_RUN_ID
       ? {
           provider: 'github-actions',
@@ -814,6 +860,9 @@ const assertNoSensitiveEvidenceFields = (value, path = '$') => {
 
 const assertProductionEvidence = (path, expectedVersion) => {
   assertStaticPolicy(expectedVersion);
+  fail(
+    'Formal production readiness cannot pass while the test-only braces audit exception is active.',
+  );
   const absolutePath = resolve(repositoryRoot, path);
   const evidence = JSON.parse(readFileSync(absolutePath, 'utf8'));
   assertNoSensitiveEvidenceFields(evidence);

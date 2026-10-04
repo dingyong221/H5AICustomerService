@@ -1,5 +1,9 @@
 # 发布与回滚 Runbook
 
+2026-10-03 的[Web 发布现场盘点](2026-10-03-production-inventory.md)记录了当前五镜像摘要、生产空库和公网 503 状态。它是准备变更单的起点，不是切流授权；执行前必须重新核验。
+
+[Web 生产变更包草案](web-production-change-package-draft.md)列出本次 Web-only 上线所需的冻结提交、证据、两次授权停点和回滚输入；字段未填全前不可执行。
+
 > 本文是执行模板，不授权生产写入。真实发布必须先满足 `docs/release/v0.1.0-standard-release-checklist.md` 的生产门禁，并取得当次变更授权。
 
 ## 1. 角色与不可变输入

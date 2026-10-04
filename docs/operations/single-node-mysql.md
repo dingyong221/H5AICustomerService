@@ -26,4 +26,6 @@
 
 目前仅完成数据库服务和账号的基础安装与 TLS/网络验证。尚未执行生产 Schema 迁移，也未接入业务、离机备份、PITR 或正式流量。根盘只有 50 GiB，MySQL、应用镜像和备份会争用同一故障域；备份不能只留在本机。若磁盘或数据库异常，先停止写入并保全卷和日志，不得盲目重建容器、删除卷或重跑初始化脚本。`provision-single-node-mysql.sh` 只用于空卷首次安装，检测到现有容器/卷会拒绝重跑。
 
-后续生产 Schema 迁移须先完成离机备份与恢复演练、变更审批，并取得已发布且验签的 API 镜像摘要。只读核对迁移清单后，使用 `docker-compose.release.yml`、`docker-compose.release.single-node-mysql.yml` 和 `docker-compose.release.migration.single-node-mysql.yml` 组合执行一次性 `migrator` profile。该容器仅接入数据库内部网络，没有对外端口，以非 root 用户读取受限的迁移连接串文件及 CA；变更单必须填写并确认备份引用、变更 ID、迁移计划 SHA-256 和目标库。此配置只是待执行路径，不代表已获当次生产迁移授权，也不得绕过发布 Runbook 的门禁。
+正式生产 Schema 迁移须先完成离机备份与恢复演练、变更审批，并取得已发布且验签的 API 镜像摘要。项目负责人于 2026-10-04 另行接受**仅限受控测试试运行**的单机数据丢失风险，并要求功能可行后直接发布；该风险接受不能填作“离机备份已验证”。迁移程序与 `docker-compose.release.migration.single-node-mysql.yml` 因此使用互斥的两类引用：正式路径为 `H5CS_MIGRATION_BACKUP_REF`，受控试运行路径为 `H5CS_MIGRATION_RISK_ACCEPTANCE_REF`、`H5CS_CONTROLLED_PILOT=true` 和不晚于 2026-11-03 23:59（北京时间）的 `H5CS_PILOT_EXPIRES_AT`。无论哪一类，都必须填写变更 ID、最终镜像的迁移计划 SHA-256 和目标库；两类同时提供、到期或缺项均拒绝执行。
+
+只读核对迁移清单后，使用 `docker-compose.release.yml`、`docker-compose.release.single-node-mysql.yml` 和 `docker-compose.release.migration.single-node-mysql.yml` 组合执行一次性 `migrator` profile。该容器仅接入数据库内部网络，没有对外端口，以非 root 用户读取受限的迁移连接串文件及 CA。受控试运行不改变正式生产门禁的 No-Go 结论；执行前仍须核对新五镜像、Staging、可回退配置、本机备份及容量，失败后不得盲目重试。
