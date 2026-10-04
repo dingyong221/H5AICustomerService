@@ -10,13 +10,13 @@
 
 服务器上当前 Staging 运行的五个镜像都标注源提交 `70ffb0503c17eb440dacccf1745444e352d52db4`、路由模式 `same_domain`。以下是容器实际引用的完整摘要，不是 `50d7766` 的新制品。
 
-| 部署单元 | Staging `70ffb05` 镜像摘要 | 保留的 previous `de74b248` 镜像摘要 |
-| --- | --- | --- |
-| API | `sha256:ae130e5207a1d471a2846e587b7c474f59ee88d97d76ad30f1781cf9c3ba2a74` | `sha256:8db78dfb711f0580a44651e4c8df25003c63935628f4c40a407bb2fe15cea694` |
-| Worker | `sha256:3165253f9dea7c7a26b4803250a96d75786665ee01343edcba22e12e213c2825` | `sha256:340f14e39ab31a34f9b38fac37f69e70cdc7a5f03a46ce0ec3337f5f0bc11c42` |
-| Ops Web | `sha256:44c96e4700e48ac66ed133dede434dda51aefde9a0fbe14bb78f76d90eca386d` | `sha256:3419b9c8bada4d3cc8726571214dbb148ff85062be46f1cf3707a29f0441fe4c` |
+| 部署单元     | Staging `70ffb05` 镜像摘要                                                | 保留的 previous `de74b248` 镜像摘要                                       |
+| ------------ | ------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| API          | `sha256:ae130e5207a1d471a2846e587b7c474f59ee88d97d76ad30f1781cf9c3ba2a74` | `sha256:8db78dfb711f0580a44651e4c8df25003c63935628f4c40a407bb2fe15cea694` |
+| Worker       | `sha256:3165253f9dea7c7a26b4803250a96d75786665ee01343edcba22e12e213c2825` | `sha256:340f14e39ab31a34f9b38fac37f69e70cdc7a5f03a46ce0ec3337f5f0bc11c42` |
+| Ops Web      | `sha256:44c96e4700e48ac66ed133dede434dda51aefde9a0fbe14bb78f76d90eca386d` | `sha256:3419b9c8bada4d3cc8726571214dbb148ff85062be46f1cf3707a29f0441fe4c` |
 | Merchant Web | `sha256:a14f53064cdd5f35ea0400503adb2c90236e1c76dfbd925c764dcabc45a8fdf1` | `sha256:39bb2bb16783b142e5cc58b006e452df736b52783f6fab1138c1ecbb00028939` |
-| Consumer H5 | `sha256:16cd09491ff76bd68277319e29beee829b948fb842a760cee01c7637dead6fe7` | `sha256:04253b5ab5c008c6338ca7cc9e448d40cb9b7dfaf501ef0a49d9aa1e80667d52` |
+| Consumer H5  | `sha256:16cd09491ff76bd68277319e29beee829b948fb842a760cee01c7637dead6fe7` | `sha256:04253b5ab5c008c6338ca7cc9e448d40cb9b7dfaf501ef0a49d9aa1e80667d52` |
 
 `previous` 五镜像在本机仍可检查到，并非生产数据库回滚保证；升级后的 Schema 兼容性仍须验证。服务器共有 20 个运行容器，包含 Staging、三套较早候选和生产 MySQL。根分区 50 GiB，已用约 22 GiB；盘点时系统报告 7.4 GiB 内存、约 4.2 GiB 可用。**清理旧候选栈仅是建议，不是本记录授权的操作**；必须先确定唯一回滚目标并取得停止/删除授权。
 
