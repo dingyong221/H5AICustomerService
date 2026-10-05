@@ -3,7 +3,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import { parseWritingInput, parseWritingResult } from '@h5cs/contracts';
 import { requestWorkerWriting } from './worker-writing';
 import { safeMerchantReturnPath } from '../account/merchant-return-path';
-import { helpTopics, manualMarkdown, searchHelp } from '../help/manual';
+import { helpTopics, manualMarkdown, manualText, searchHelp } from '../help/manual';
 
 const merchant = 'aa'.repeat(16);
 const input = { field: 'businessScope' as const, brief: '卖家居用品', currentText: '' };
@@ -72,5 +72,7 @@ describe('writing and merchant help contracts', () => {
     expect(manual).toContain('客服资料填写助手');
     expect(manual).toContain('不会自动保存或发布');
     expect(manual).not.toContain('sk-');
+    expect(manualText()).toContain('商家 AI 客服使用手册');
+    expect(manualText()).not.toMatch(/^#/mu);
   });
 });

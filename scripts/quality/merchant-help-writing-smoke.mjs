@@ -13,6 +13,8 @@ const browser = await chromium.launch({
   headless: true,
 });
 let step = 'operator';
+let testPage;
+let writingStatus;
 const checks = [];
 try {
   const opsContext = await browser.newContext({ ignoreHTTPSErrors: stage });
@@ -37,6 +39,11 @@ try {
     throw new Error('Invalid setup URL');
   const context = await browser.newContext({ ignoreHTTPSErrors: stage });
   const page = await context.newPage();
+  testPage = page;
+  page.on('response', (response) => {
+    if (new URL(response.url()).pathname.endsWith('/writing/generate'))
+      writingStatus = response.status();
+  });
   const errors = [];
   page.on('pageerror', () => errors.push('page-error'));
   await page.goto(setupUrl.href);
@@ -80,7 +87,11 @@ try {
   await page.getByLabel(/我同意将此简述/u).check();
   await page.getByRole('button', { name: '生成备选文案' }).click();
   await expect(page.locator('.writing-results article')).toHaveCount(3, { timeout: 40000 });
-  const generated = await page.getByLabel('备选 1', { exact: true }).inputValue();
+  const generated = await page
+    .locator('.writing-results article')
+    .first()
+    .locator('textarea')
+    .inputValue();
   if (!generated || generated.length > 500 || !/AI|人工智能/u.test(generated))
     throw new Error('Invalid real model suggestions');
   checks.push('real Qwen suggestions with explicit text consent');
@@ -97,25 +108,29 @@ try {
   const priceBefore = await page.getByLabel('价格与条件', { exact: true }).inputValue();
   await page.getByRole('button', { name: '帮我写欢迎语', exact: true }).click();
   const panel = page.getByRole('region', { name: '欢迎语填写助手' });
+  step = 'field-generation';
   await panel
     .getByLabel('简短描述')
     .fill('合成测试的零售店，欢迎顾客咨询商品，明确是 AI 客服，语气礼貌。');
   await panel.getByLabel(/我同意将此简述/u).check();
   await panel.getByRole('button', { name: '生成备选文案' }).click();
   await expect(panel.locator('.writing-results article')).toHaveCount(3, { timeout: 40000 });
-  const option = panel.getByLabel('备选 1', { exact: true });
+  const option = panel.locator('.writing-results article').first().locator('textarea');
   const selected = await option.inputValue();
+  step = 'field-stale-protection';
   await page.getByLabel('欢迎语', { exact: true }).fill('刚刚手动修改');
   await panel.getByRole('button', { name: '填入此字段' }).first().click();
-  await expect(page.locator('.draft-fields').getByRole('status')).toContainText('原字段已被修改');
+  await expect(page.locator('.draft-fields > [role="status"]')).toContainText('原字段已被修改');
   await expect(page.getByLabel('欢迎语', { exact: true })).toHaveValue('刚刚手动修改');
   await page.getByLabel('欢迎语', { exact: true }).fill(before);
+  step = 'field-apply-undo';
   await panel.getByRole('button', { name: '填入此字段' }).first().click();
   await expect(page.getByLabel('欢迎语', { exact: true })).toHaveValue(selected);
   await expect(page.getByLabel('价格与条件', { exact: true })).toHaveValue(priceBefore);
   await page.getByRole('button', { name: '撤销上次填入' }).click();
   await expect(page.getByLabel('欢迎语', { exact: true })).toHaveValue(before);
   await page.getByLabel('欢迎语', { exact: true }).fill(selected);
+  step = 'field-save-reload';
   const name = `填写助手合成客服 ${randomBytes(3).toString('hex')}`;
   await page.getByLabel('客服名称', { exact: true }).fill(name);
   await page.getByRole('button', { name: '创建客服草稿', exact: true }).click();
@@ -196,7 +211,17 @@ try {
   console.log(
     JSON.stringify({ status: 'passed', environment: stage ? 'staging' : 'controlled-web', checks }),
   );
-} catch {
+} catch (error) {
+  if (step === 'writing-generated-options' || step.startsWith('field-')) {
+    console.error(
+      JSON.stringify({
+        type: error.name,
+        writingStatus,
+        resultCount: await testPage.locator('.writing-results article').count(),
+        alerts: await testPage.locator('.writing-panel [role="alert"]').allTextContents(),
+      }),
+    );
+  }
   console.error(`Help/writing smoke failed at ${step}; no credentials or private links logged.`);
   process.exitCode = 1;
 } finally {

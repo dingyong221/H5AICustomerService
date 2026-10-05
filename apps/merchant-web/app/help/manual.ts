@@ -177,3 +177,9 @@ export function manualMarkdown(): string {
       .join('\n\n')
   );
 }
+
+export function manualText(): string {
+  return manualMarkdown()
+    .replace(/^#{1,2} /gmu, '')
+    .replace(/^- /gmu, '• ');
+}

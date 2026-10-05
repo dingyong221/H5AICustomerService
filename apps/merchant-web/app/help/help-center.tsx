@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { helpTopics, manualMarkdown, manualUpdated, searchHelp } from './manual';
+import { helpTopics, manualText, manualUpdated, searchHelp } from './manual';
 import { merchantPath } from '../tenant-paths';
 
 export function HelpCenter({ merchantId }: { merchantId: string }) {
@@ -21,11 +21,11 @@ export function HelpCenter({ merchantId }: { merchantId: string }) {
   }, []);
   function download() {
     const url = URL.createObjectURL(
-      new Blob([manualMarkdown()], { type: 'text/markdown;charset=utf-8' }),
+      new Blob(['\uFEFF', manualText()], { type: 'text/plain;charset=utf-8' }),
     );
     const link = document.createElement('a');
     link.href = url;
-    link.download = '商家AI客服使用手册.md';
+    link.download = '商家AI客服使用手册.txt';
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }

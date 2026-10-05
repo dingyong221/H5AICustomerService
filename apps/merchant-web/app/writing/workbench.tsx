@@ -12,7 +12,7 @@ export function WritingWorkbench({
 }) {
   const [field, setField] = useState<WritingField>('businessScope');
   return (
-    <div className="merchant-account-card assistant-create-card">
+    <div className="merchant-account-card assistant-create-card writing-workbench">
       <label>
         想要撰写的内容
         <select value={field} onChange={(event) => setField(event.target.value as WritingField)}>

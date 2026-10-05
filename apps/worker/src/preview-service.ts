@@ -149,7 +149,20 @@ export class PreviewService {
       const result = parseWritingResult(JSON.parse(answer), input.field);
       if (!result || !preservesProvidedNumbers(input, result))
         throw new Error('Invalid writing answer');
-      return result;
+      const labeled =
+        input.field === 'welcomeMessage'
+          ? parseWritingResult(
+              {
+                ...result,
+                options: result.options.map((text) =>
+                  /\bAI\b|人工智能/iu.test(text) ? text : `您好，我是 AI 客服。${text}`,
+                ),
+              },
+              input.field,
+            )
+          : result;
+      if (!labeled) throw new Error('Invalid labeled writing answer');
+      return labeled;
     } finally {
       this.#writingBusy.delete(merchantId);
     }

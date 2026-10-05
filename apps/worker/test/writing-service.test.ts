@@ -36,6 +36,19 @@ function fixture(content = JSON.stringify(result)) {
   };
 }
 describe('merchant writing service', () => {
+  it('keeps the AI identity visible in generated welcome messages', async () => {
+    const { service } = fixture(
+      JSON.stringify({
+        options: ['您好，欢迎咨询商品。', '欢迎光临，需要了解哪款商品？'],
+        reminders: [],
+      }),
+    );
+    const answer = await service.write(
+      { ...input, field: 'welcomeMessage' },
+      AbortSignal.timeout(1000),
+    );
+    expect(answer.options.every((text) => text.includes('AI 客服'))).toBe(true);
+  });
   it('sends only selected text, not merchant identifiers, and instructs against invented facts', async () => {
     const { service, fetchImpl } = fixture();
     await expect(service.write(input, AbortSignal.timeout(1000))).resolves.toEqual(result);
