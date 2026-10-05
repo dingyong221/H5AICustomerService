@@ -69,7 +69,7 @@ export default async function MerchantWorkspacePage({
     >
       {ready ? (
         <>
-          <section className="merchant-account-card assistant-create-card">
+          <section className="merchant-account-card assistant-create-card" id="create-assistant">
             <h2>客服基础资料</h2>
             <CreateAssistantForm
               merchantId={merchantId}
@@ -78,10 +78,11 @@ export default async function MerchantWorkspacePage({
               templatesReady={templatesReady}
             />
           </section>
-          <section className="merchant-account-card assistant-create-card">
+          <section className="merchant-account-card assistant-create-card" id="assistants">
             <h2>已创建的客服</h2>
+            <p>点击下方客服名称，即可进入资料编辑、知识确认、试聊和发布页面。</p>
             {assistants.length === 0 ? (
-              <p>还没有客服草稿。</p>
+              <p>还没有客服草稿。请先填写上方基础资料并点击“创建客服草稿”。</p>
             ) : (
               <ul className="assistant-workspace-list">
                 {assistants.map((assistant) => (
@@ -96,7 +97,7 @@ export default async function MerchantWorkspacePage({
               </ul>
             )}
           </section>
-          <section className="merchant-account-card assistant-create-card">
+          <section className="merchant-account-card assistant-create-card" id="conversations">
             <h2>客户咨询</h2>
             <p>查看消费者咨询与人工跟进状态。客服发布后产生的咨询会出现在这里。</p>
             <Link href={`/workspace/${merchantId}/conversations`}>进入咨询管理</Link>

@@ -1,6 +1,8 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useActionState, useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 import type { IndustryTemplateGuide } from '@h5cs/database';
 
@@ -19,13 +21,26 @@ export function CreateAssistantForm({
 }) {
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [industry, setIndustry] = useState('');
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const router = useRouter();
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateId);
   const [state, action, pending] = useActionState(createAssistantDraft, {
     error: null,
     created: null,
   });
+  useEffect(() => {
+    if (state.created) router.refresh();
+  }, [state.created, router]);
   return (
-    <form action={action} className="assistant-create-form">
+    <form
+      action={action}
+      className="assistant-create-form"
+      onChange={() => setValidationError(null)}
+      onInvalidCapture={() =>
+        setValidationError('请补齐必填资料；当前内容尚未保存，也未创建客服。')
+      }
+    >
+      <p>填好资料并创建后，页面会显示客服入口，可继续编辑、试聊和发布。</p>
       <input name="merchantId" type="hidden" value={merchantId} />
       <input name="idempotencyKey" type="hidden" value={idempotencyKey} />
       <label>
@@ -95,6 +110,7 @@ export function CreateAssistantForm({
       <label>
         价格与条件
         <textarea
+          defaultValue="价格需联系商家确认"
           maxLength={4000}
           name="pricingSummary"
           placeholder="没有公开价格时可填写：价格需联系商家确认"
@@ -105,6 +121,7 @@ export function CreateAssistantForm({
       <label>
         优惠与售卖策略
         <textarea
+          defaultValue="目前无已确认优惠"
           maxLength={4000}
           name="promotionSummary"
           placeholder="无优惠时可填写：目前无优惠活动"
@@ -114,15 +131,32 @@ export function CreateAssistantForm({
       </label>
       <label>
         欢迎语
-        <input maxLength={500} name="welcomeMessage" required />
+        <input
+          defaultValue="您好，请问需要了解哪项产品或服务？"
+          maxLength={500}
+          name="welcomeMessage"
+          required
+        />
       </label>
       <label>
         资料不足时的回复
-        <input maxLength={500} name="insufficientInfoMessage" required />
+        <input
+          defaultValue="这项信息尚未确认，请联系商家核实。"
+          maxLength={500}
+          name="insufficientInfoMessage"
+          required
+        />
       </label>
       {state.error ? <p role="alert">{state.error}</p> : null}
+      {validationError ? <p role="alert">{validationError}</p> : null}
       {state.created ? (
-        <p role="status">已创建客服草稿「{state.created.displayName}」。请在下方列表查看。</p>
+        <div className="assistant-created-result" role="status">
+          <strong>已创建客服草稿「{state.created.displayName}」。</strong>
+          <p>下一步：核对业务资料，试聊后发布给消费者。</p>
+          <Link href={`/workspace/${merchantId}/assistants/${state.created.assistantId}`}>
+            进入客服配置、试聊和发布
+          </Link>
+        </div>
       ) : null}
       <button disabled={pending || state.created !== null} type="submit">
         {pending ? '正在保存…' : '创建客服草稿'}

@@ -74,6 +74,19 @@ try {
     timeout: 30_000,
   });
   const firstWorkspaceUrl = merchantPage.url();
+  step = 'workspace-navigation';
+  const navigation = merchantPage.getByRole('navigation', { name: '商家后台主导航' });
+  await expect(merchantPage.getByText('商家已登录', { exact: true })).toBeVisible();
+  for (const name of ['客服草稿', '知识库', '测试与发布']) {
+    await navigation.getByRole('link', { name, exact: true }).click();
+    await expect(merchantPage).toHaveURL(`${firstWorkspaceUrl}#assistants`);
+    await expect(merchantPage.getByRole('heading', { name: '已创建的客服' })).toBeVisible();
+  }
+  await navigation.getByRole('link', { name: '工作台', exact: true }).click();
+  await expect(merchantPage).toHaveURL(firstWorkspaceUrl);
+  step = 'invalid-draft-feedback';
+  await merchantPage.getByRole('button', { name: '创建客服草稿' }).click();
+  await expect(merchantPage.getByRole('alert')).toContainText('尚未保存，也未创建客服');
 
   step = 'assistant-draft';
   const assistantName = `测试客服 ${randomBytes(4).toString('hex')}`;
@@ -87,15 +100,32 @@ try {
   await merchantPage.getByLabel('资料不足时的回复').fill('资料不足，请联系商家核实。');
   await merchantPage.getByRole('button', { name: '创建客服草稿' }).click();
   await expect(merchantPage.getByText(/已创建客服草稿/u)).toBeVisible({ timeout: 30_000 });
+  await expect(
+    merchantPage.locator('.assistant-workspace-list').getByRole('link', { name: assistantName }),
+  ).toBeVisible({ timeout: 30_000 });
 
   step = 'assistant-open';
-  await merchantPage.getByRole('link', { name: assistantName }).click();
+  await merchantPage.getByRole('link', { name: '进入客服配置、试聊和发布' }).click();
   await expect(merchantPage.getByRole('heading', { name: assistantName })).toBeVisible();
+  const assistantUrl = merchantPage.url();
+  step = 'assistant-navigation';
+  for (const [name, fragment, heading] of [
+    ['客服草稿', 'draft', '草稿修订 1'],
+    ['知识库', 'knowledge', '商家确认'],
+    ['测试与发布', 'release', '发布前试聊'],
+  ]) {
+    await navigation.getByRole('link', { name, exact: true }).click();
+    await expect(merchantPage).toHaveURL(`${assistantUrl}#${fragment}`);
+    await expect(merchantPage.getByRole('heading', { name: heading, exact: true })).toBeVisible();
+  }
+  step = 'authenticated-console-home';
+  await merchantPage.goto(`${origin}/console`);
+  await expect(merchantPage).toHaveURL(firstWorkspaceUrl, { timeout: 30_000 });
+  await merchantPage.getByRole('link', { name: assistantName }).click();
   step = 'assistant-confirm-materials';
   await merchantPage.getByLabel(/我已逐项核对以上资料/u).check();
   await merchantPage.getByRole('button', { name: '确认当前草稿资料' }).click();
   await expect(merchantPage.getByText('当前草稿资料已确认')).toBeVisible();
-  await merchantPage.reload();
   step = 'assistant-publish-ready';
   await expect(merchantPage.getByRole('button', { name: '确认发布 AI 客服' })).toBeEnabled();
   await expect(merchantPage.locator(`a[href^="${origin}/a/"]`)).toHaveCount(0);

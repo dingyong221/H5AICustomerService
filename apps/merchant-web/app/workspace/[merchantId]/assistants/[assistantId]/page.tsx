@@ -100,7 +100,7 @@ export default async function AssistantDraftPage({
       eyebrow="Assistant Draft"
       title={assistant.displayName}
     >
-      <section className="merchant-account-card assistant-detail-card">
+      <section className="merchant-account-card assistant-detail-card" id="draft">
         <div className="section-heading">
           <h2>草稿修订 {assistant.draftRevision}</h2>
           <StatusBadge tone={assistant.knowledgeConfirmed ? 'info' : 'warning'}>
@@ -126,7 +126,7 @@ export default async function AssistantDraftPage({
           draft={assistant.draft}
         />
       </section>
-      <section className="merchant-account-card assistant-detail-card">
+      <section className="merchant-account-card assistant-detail-card" id="knowledge">
         <h2>商家确认</h2>
         <p>只有经你确认的资料才会进入正式版本。价格、优惠、库存与承诺不得由模型自行补造。</p>
         <ConfirmKnowledgeForm
@@ -136,7 +136,7 @@ export default async function AssistantDraftPage({
           alreadyConfirmed={assistant.knowledgeConfirmed}
         />
       </section>
-      <section className="merchant-account-card assistant-detail-card">
+      <section className="merchant-account-card assistant-detail-card" id="release">
         <h2>发布前试聊</h2>
         <p>用当前未发布草稿测试回答，核对服务范围、价格和资料不足时的回复。</p>
         <PreviewChatForm

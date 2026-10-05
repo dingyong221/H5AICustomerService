@@ -1,8 +1,12 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 
 import { PageShell, StatusBadge } from '@h5cs/ui';
+import { currentMerchant } from './account/merchant-actions';
 
-export default function MerchantDashboardPage() {
+export default async function MerchantDashboardPage() {
+  const merchant = await currentMerchant();
+  if (merchant) redirect(`/workspace/${merchant.merchantId}`);
   return (
     <PageShell
       description={

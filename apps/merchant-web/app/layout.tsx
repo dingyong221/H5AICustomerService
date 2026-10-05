@@ -4,7 +4,10 @@ import type { ReactNode } from 'react';
 
 import '@h5cs/ui/styles.css';
 import './styles.css';
+import { currentMerchant } from './account/merchant-actions';
 import { MerchantNavigation } from './navigation';
+
+export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   description: '创建、测试并发布专属 AI 客服。',
@@ -21,7 +24,9 @@ export const viewport: Viewport = {
   width: 'device-width',
 };
 
-export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+  const merchant = await currentMerchant();
+  const workspaceHref = merchant ? `/workspace/${merchant.merchantId}` : '/';
   return (
     <html lang="zh-CN">
       <body>
@@ -30,7 +35,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
         </a>
         <div className="merchant-layout">
           <aside className="merchant-sidebar">
-            <Link aria-label="H5 AI 客服商家工作台" className="merchant-brand" href="/">
+            <Link aria-label="H5 AI 客服商家工作台" className="merchant-brand" href={workspaceHref}>
               <span aria-hidden="true" className="merchant-brand__mark">
                 H5
               </span>
@@ -39,14 +44,16 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
                 <small>商家工作台</small>
               </span>
             </Link>
-            <MerchantNavigation />
+            <MerchantNavigation merchantId={merchant?.merchantId} />
             <div className="merchant-sidebar__footer">
               <span className="merchant-avatar" aria-hidden="true">
                 商
               </span>
               <span>
-                <strong>商家账号</strong>
-                <Link href="/account/login">登录管理后台</Link>
+                <strong>{merchant ? '商家已登录' : '商家账号'}</strong>
+                <Link href={merchant ? workspaceHref : '/account/login'}>
+                  {merchant ? '进入商家工作台' : '登录管理后台'}
+                </Link>
               </span>
             </div>
           </aside>

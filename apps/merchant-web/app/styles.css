@@ -6,6 +6,27 @@ html {
   scroll-behavior: smooth;
 }
 
+section[id] {
+  scroll-margin-top: 1.5rem;
+}
+
+.assistant-created-result {
+  background: #eef8f2;
+  border: 1px solid #a7ceb8;
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.assistant-created-result a {
+  background: #176f4b;
+  border-radius: 9px;
+  color: #fff;
+  display: inline-block;
+  font-weight: 700;
+  padding: 0.75rem 1rem;
+  text-decoration: none;
+}
+
 body {
   background: #f3f6f4;
   color: var(--ui-ink);

@@ -72,7 +72,7 @@ const setSession = async (session: { sessionToken: string; csrfToken: string }):
   });
 };
 
-export async function currentMerchant(merchantId: string) {
+export async function currentMerchant(merchantId?: string) {
   const repository = getRepository();
   const origin = merchantOrigin();
   if (!repository || !origin) return null;
