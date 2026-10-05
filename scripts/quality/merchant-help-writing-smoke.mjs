@@ -70,6 +70,8 @@ try {
   const downloaded = page.waitForEvent('download');
   await page.getByRole('button', { name: '下载使用手册' }).click();
   const download = await downloaded;
+  if (download.suggestedFilename() !== '商家AI客服使用手册.txt')
+    throw new Error('Manual download must be readable plain text');
   const text = await readFile(await download.path(), 'utf8');
   if (!text.includes('客服资料填写助手') || !text.includes('不会自动保存或发布'))
     throw new Error('Incomplete help manual');
@@ -105,7 +107,7 @@ try {
   await nav.getByRole('link', { name: '客服草稿', exact: true }).click();
   await expect(page.getByRole('button', { name: '帮我写欢迎语', exact: true })).toBeVisible();
   const before = await page.getByLabel('欢迎语', { exact: true }).inputValue();
-  const priceBefore = await page.getByLabel('价格与条件', { exact: true }).inputValue();
+  const priceBefore = await page.locator('textarea[name="pricingSummary"]').inputValue();
   await page.getByRole('button', { name: '帮我写欢迎语', exact: true }).click();
   const panel = page.getByRole('region', { name: '欢迎语填写助手' });
   step = 'field-generation';
@@ -126,7 +128,7 @@ try {
   step = 'field-apply-undo';
   await panel.getByRole('button', { name: '填入此字段' }).first().click();
   await expect(page.getByLabel('欢迎语', { exact: true })).toHaveValue(selected);
-  await expect(page.getByLabel('价格与条件', { exact: true })).toHaveValue(priceBefore);
+  await expect(page.locator('textarea[name="pricingSummary"]')).toHaveValue(priceBefore);
   await page.getByRole('button', { name: '撤销上次填入' }).click();
   await expect(page.getByLabel('欢迎语', { exact: true })).toHaveValue(before);
   await page.getByLabel('欢迎语', { exact: true }).fill(selected);
