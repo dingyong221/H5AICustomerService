@@ -1,11 +1,12 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import Link from 'next/link';
 
 import type { AssistantDraftConfig } from '@h5cs/domain';
 
 import { saveAssistantDraftAction } from './knowledge-actions';
+import { DraftFields, type DraftFieldValues } from '../writing/draft-fields';
 
 export function EditDraftForm({
   merchantId,
@@ -13,79 +14,31 @@ export function EditDraftForm({
   draftRevision,
   draft,
   returnPath,
+  csrfToken,
 }: {
   merchantId: string;
   assistantId: string;
   draftRevision: number;
   draft: AssistantDraftConfig;
   returnPath?: string;
+  csrfToken: string;
 }) {
   const [state, action, pending] = useActionState(saveAssistantDraftAction, {
     error: null,
     saved: false,
   });
+  const [values, setValues] = useState<DraftFieldValues>({ displayName: '', ...draft });
   return (
     <form action={action} className="assistant-edit-form">
       <input name="merchantId" type="hidden" value={merchantId} />
       <input name="assistantId" type="hidden" value={assistantId} />
       <input name="draftRevision" type="hidden" value={draftRevision} />
-      <label>
-        细分行业
-        <input defaultValue={draft.industry} maxLength={128} name="industry" required />
-      </label>
-      <label>
-        业务范围
-        <textarea
-          defaultValue={draft.businessScope}
-          maxLength={2000}
-          name="businessScope"
-          required
-          rows={3}
-        />
-      </label>
-      <label>
-        商品或服务资料
-        <textarea
-          defaultValue={draft.materialsSummary}
-          maxLength={4000}
-          name="materialsSummary"
-          required
-          rows={4}
-        />
-      </label>
-      <label>
-        价格与条件
-        <textarea
-          defaultValue={draft.pricingSummary}
-          maxLength={4000}
-          name="pricingSummary"
-          required
-          rows={2}
-        />
-      </label>
-      <label>
-        优惠与售卖策略
-        <textarea
-          defaultValue={draft.promotionSummary}
-          maxLength={4000}
-          name="promotionSummary"
-          required
-          rows={2}
-        />
-      </label>
-      <label>
-        欢迎语
-        <input defaultValue={draft.welcomeMessage} maxLength={500} name="welcomeMessage" required />
-      </label>
-      <label>
-        资料不足时的回复
-        <input
-          defaultValue={draft.insufficientInfoMessage}
-          maxLength={500}
-          name="insufficientInfoMessage"
-          required
-        />
-      </label>
+      <DraftFields
+        merchantId={merchantId}
+        csrfToken={csrfToken}
+        values={values}
+        onChange={(field, value) => setValues((previous) => ({ ...previous, [field]: value }))}
+      />
       {state.error ? <p role="alert">{state.error}</p> : null}
       {state.saved ? (
         <p role="status">

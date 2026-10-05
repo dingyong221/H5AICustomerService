@@ -51,6 +51,9 @@ export default async function MerchantConversationsPage({
       eyebrow="Merchant Consultations"
       title="咨询管理"
     >
+      <p>
+        <Link href={`/${merchantId}/help#conversations`}>查看咨询跟进帮助</Link>
+      </p>
       <section className="merchant-account-card merchant-conversation-panel">
         <div className="section-heading">
           <h2>最近咨询</h2>

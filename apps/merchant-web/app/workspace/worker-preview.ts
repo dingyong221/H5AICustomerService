@@ -4,7 +4,7 @@ import type { AssistantDraftConfig } from '@h5cs/domain';
 
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/u;
 
-function previewToken(environment: NodeJS.ProcessEnv): string | null {
+export function previewToken(environment: NodeJS.ProcessEnv): string | null {
   const inline = environment['PREVIEW_AUTH_TOKEN'];
   const path = environment['PREVIEW_AUTH_TOKEN_FILE'];
   if (inline && path) return null;

@@ -19,6 +19,9 @@ export async function AssistantCollection({
       eyebrow="Merchant Workspace"
       description={<p>商家编号：{merchantId}。请选择本商家的客服，进入对应功能页面。</p>}
     >
+      <p>
+        <Link href={`${merchantPath(merchantId, 'help')}#${section}`}>查看操作帮助</Link>
+      </p>
       <section className="merchant-account-card assistant-create-card">
         <h2>选择要{section === 'knowledge' ? '维护资料' : '试聊和发布'}的客服</h2>
         {assistants.length ? (

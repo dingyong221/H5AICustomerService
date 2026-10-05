@@ -9,6 +9,7 @@ import type { IndustryTemplateGuide } from '@h5cs/database';
 import type { CreateAssistantState } from './workspace-actions';
 import { parseAssistantDraftForm } from './draft-form';
 import { retailDefaultDraft, retailTemplateCode } from './retail-preset';
+import { DraftFields, type DraftFieldValues } from '../writing/draft-fields';
 
 const subscribe = () => () => {};
 const clientReady = () => true;
@@ -19,16 +20,28 @@ export function CreateAssistantForm({
   idempotencyKey,
   templates,
   templatesReady,
+  csrfToken,
 }: {
   merchantId: string;
   idempotencyKey: string;
   templates: readonly IndustryTemplateGuide[];
   templatesReady: boolean;
+  csrfToken: string;
 }) {
   const defaultTemplate = templates.find((template) => template.code === retailTemplateCode);
   const preset = defaultTemplate ? retailDefaultDraft : null;
   const [selectedTemplateId, setSelectedTemplateId] = useState(defaultTemplate?.id ?? '');
-  const [industry, setIndustry] = useState(preset?.industry ?? '');
+  const [values, setValues] = useState<DraftFieldValues>({
+    displayName: preset ? '电商零售客服' : '',
+    industry: preset?.industry ?? '',
+    businessScope: preset?.businessScope ?? '',
+    materialsSummary: preset?.materialsSummary ?? '',
+    pricingSummary: preset?.pricingSummary ?? '价格需联系商家确认',
+    promotionSummary: preset?.promotionSummary ?? '目前无已确认优惠',
+    welcomeMessage: preset?.welcomeMessage ?? '您好，请问需要了解哪项产品或服务？',
+    insufficientInfoMessage:
+      preset?.insufficientInfoMessage ?? '这项信息尚未确认，请联系商家核实。',
+  });
   const [validationError, setValidationError] = useState<string | null>(null);
   const router = useRouter();
   const hydrated = useSyncExternalStore(subscribe, clientReady, serverReady);
@@ -115,21 +128,13 @@ export function CreateAssistantForm({
       <input name="merchantId" type="hidden" value={merchantId} />
       <input name="idempotencyKey" type="hidden" value={idempotencyKey} />
       <label>
-        客服名称
-        <input
-          defaultValue={preset ? '电商零售客服' : ''}
-          maxLength={200}
-          name="displayName"
-          required
-        />
-      </label>
-      <label>
         行业资料引导（可选）
         <select
           onChange={(event) => {
             const selected = templates.find((template) => template.id === event.target.value);
             setSelectedTemplateId(event.target.value);
-            if (selected && !industry.trim()) setIndustry(selected.displayName);
+            if (selected && !values.industry.trim())
+              setValues((previous) => ({ ...previous, industry: selected.displayName }));
           }}
           value={selectedTemplateId}
         >
@@ -167,76 +172,13 @@ export function CreateAssistantForm({
           </p>
         </aside>
       ) : null}
-      <label>
-        细分行业
-        <input
-          maxLength={128}
-          name="industry"
-          onChange={(event) => setIndustry(event.target.value)}
-          required
-          value={industry}
-        />
-      </label>
-      <label>
-        业务范围
-        <textarea
-          defaultValue={preset?.businessScope}
-          maxLength={2000}
-          name="businessScope"
-          required
-          rows={3}
-        />
-      </label>
-      <label>
-        商品或服务资料
-        <textarea
-          defaultValue={preset?.materialsSummary}
-          maxLength={4000}
-          name="materialsSummary"
-          required
-          rows={10}
-        />
-      </label>
-      <label>
-        价格与条件
-        <textarea
-          defaultValue={preset?.pricingSummary ?? '价格需联系商家确认'}
-          maxLength={4000}
-          name="pricingSummary"
-          placeholder="没有公开价格时可填写：价格需联系商家确认"
-          required
-          rows={2}
-        />
-      </label>
-      <label>
-        优惠与售卖策略
-        <textarea
-          defaultValue={preset?.promotionSummary ?? '目前无已确认优惠'}
-          maxLength={4000}
-          name="promotionSummary"
-          placeholder="无优惠时可填写：目前无优惠活动"
-          required
-          rows={2}
-        />
-      </label>
-      <label>
-        欢迎语
-        <input
-          defaultValue={preset?.welcomeMessage ?? '您好，请问需要了解哪项产品或服务？'}
-          maxLength={500}
-          name="welcomeMessage"
-          required
-        />
-      </label>
-      <label>
-        资料不足时的回复
-        <input
-          defaultValue={preset?.insufficientInfoMessage ?? '这项信息尚未确认，请联系商家核实。'}
-          maxLength={500}
-          name="insufficientInfoMessage"
-          required
-        />
-      </label>
+      <DraftFields
+        merchantId={merchantId}
+        csrfToken={csrfToken}
+        values={values}
+        includeName
+        onChange={(field, value) => setValues((previous) => ({ ...previous, [field]: value }))}
+      />
       {validationError || state.error ? (
         <p role="alert">{validationError ?? state.error} 当前填写内容不会清空。</p>
       ) : null}

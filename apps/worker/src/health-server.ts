@@ -55,8 +55,11 @@ async function handlePreview(
   }
   try {
     const payload = await readPreviewBody(request);
-    const answer = await service.reply(payload, AbortSignal.timeout(20_000));
-    writeJson(response, 200, { data: { answer }, request_id: requestId }, requestId);
+    const data =
+      request.url === '/internal/writing'
+        ? await service.write(payload, AbortSignal.timeout(20_000))
+        : { answer: await service.reply(payload, AbortSignal.timeout(20_000)) };
+    writeJson(response, 200, { data, request_id: requestId }, requestId);
   } catch (error) {
     const status = error instanceof PreviewError ? error.statusCode : 503;
     writeJson(
@@ -99,7 +102,10 @@ export const createHealthServer = (
       return;
     }
 
-    if (request.method === 'POST' && request.url === '/internal/preview') {
+    if (
+      request.method === 'POST' &&
+      ['/internal/preview', '/internal/writing'].includes(request.url ?? '')
+    ) {
       void handlePreview(request, response, preview, requestId);
       return;
     }

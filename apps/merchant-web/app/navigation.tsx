@@ -41,6 +41,16 @@ export function MerchantNavigation({ merchantId }: { merchantId?: string | undef
       label: '咨询管理',
       short: '询',
     },
+    {
+      href: authorizedMerchant ? merchantPath(authorizedMerchant, 'writing') : login,
+      label: '资料填写助手',
+      short: '写',
+    },
+    {
+      href: authorizedMerchant ? merchantPath(authorizedMerchant, 'help') : login,
+      label: '帮助中心',
+      short: '助',
+    },
   ];
   return (
     <nav aria-label="商家后台主导航" className="merchant-nav">
@@ -48,6 +58,8 @@ export function MerchantNavigation({ merchantId }: { merchantId?: string | undef
         <Link
           key={item.label}
           href={item.href}
+          title={item.label}
+          aria-label={item.label}
           aria-current={item.href === pathname ? 'page' : undefined}
           className={item.href === pathname ? 'merchant-nav__item is-active' : 'merchant-nav__item'}
         >

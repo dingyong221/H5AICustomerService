@@ -33,6 +33,12 @@ export default async function MerchantDashboard({
           <Link className="tenant-feature-link" href={merchantPath(merchantId, 'conversations')}>
             咨询管理
           </Link>
+          <Link className="tenant-feature-link" href={merchantPath(merchantId, 'writing')}>
+            客服资料填写助手
+          </Link>
+          <Link className="tenant-feature-link" href={merchantPath(merchantId, 'help')}>
+            帮助中心与使用手册
+          </Link>
         </div>
         {!assistants.length ? (
           <p>商家已开通。下一步请点击“客服草稿”，填写业务资料并创建第一个客服。</p>

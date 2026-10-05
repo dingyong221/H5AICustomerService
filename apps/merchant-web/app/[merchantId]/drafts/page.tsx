@@ -16,6 +16,7 @@ import { currentMerchant, currentMerchantCsrfToken } from '../../account/merchan
 import { MerchantLogoutForm } from '../../account/logout-form';
 import { assistantListStatus } from '../../workspace/assistant-list-status';
 import { CreateAssistantForm } from '../../workspace/create-assistant-form';
+import { merchantPath } from '../../tenant-paths';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,6 +71,10 @@ export default async function MerchantWorkspacePage({
       eyebrow="Merchant Workspace"
       title="客服草稿"
     >
+      <p>
+        <Link href={`${merchantPath(merchantId, 'help')}#drafts`}>创建客服操作指南</Link> ·{' '}
+        <Link href={merchantPath(merchantId, 'writing')}>客服资料填写助手</Link>
+      </p>
       {ready ? (
         <>
           <section className="merchant-account-card assistant-create-card" id="create-assistant">
@@ -79,6 +84,7 @@ export default async function MerchantWorkspacePage({
               idempotencyKey={randomUUID()}
               templates={templates}
               templatesReady={templatesReady}
+              csrfToken={csrfToken}
             />
           </section>
           <section className="merchant-account-card assistant-create-card" id="assistants">

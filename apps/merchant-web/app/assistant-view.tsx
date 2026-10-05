@@ -119,6 +119,9 @@ export async function AssistantView({
         <Link href={merchantPath(merchantId, 'knowledge', assistantId)}>知识库</Link>
         <Link href={merchantPath(merchantId, 'publish', assistantId)}>测试与发布</Link>
       </div>
+      <p>
+        <Link href={`${merchantPath(merchantId, 'help')}#${section}`}>查看本页操作帮助</Link>
+      </p>
       <section className="merchant-account-card assistant-detail-card" id="draft">
         <div className="section-heading">
           <h2>草稿修订 {assistant.draftRevision}</h2>
@@ -140,6 +143,8 @@ export async function AssistantView({
           <h2>修订草稿</h2>
           <p>修改后将产生新修订，已有资料确认失效，需重新核对。</p>
           <EditDraftForm
+            key={assistant.draftRevision}
+            csrfToken={csrfToken}
             returnPath={merchantPath(merchantId, section, assistantId)}
             merchantId={merchantId}
             assistantId={assistantId}
