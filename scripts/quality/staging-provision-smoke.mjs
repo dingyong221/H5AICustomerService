@@ -89,12 +89,15 @@ try {
   await expect(merchantPage).toHaveURL(firstWorkspaceUrl);
   await navigation.getByRole('link', { name: '客服草稿', exact: true }).click();
   step = 'invalid-draft-feedback';
+  await merchantPage.getByLabel('商品或服务资料').fill('');
+  await merchantPage.getByLabel('客服名称').fill('输入保留验证');
   await expect(merchantPage.getByRole('button', { name: '创建客服草稿' })).toBeEnabled();
   await merchantPage.getByRole('button', { name: '创建客服草稿' }).click();
   await expect(merchantPage.locator('.assistant-create-form').getByRole('alert')).toContainText(
-    '尚未保存，也未创建客服',
+    '尚未创建客服',
   );
 
+  await expect(merchantPage.getByLabel('客服名称')).toHaveValue('输入保留验证');
   step = 'assistant-draft';
   const assistantName = `测试客服 ${randomBytes(4).toString('hex')}`;
   await merchantPage.getByLabel('客服名称').fill(assistantName);
@@ -218,6 +221,14 @@ try {
     timeout: 30_000,
   });
   const secondWorkspaceUrl = secondMerchantPage.url();
+  step = 'cross-merchant-create';
+  const deniedCreate = await merchantPage.evaluate(async (target) => {
+    const data = new FormData();
+    data.set('merchantId', target.split('/').at(-1));
+    return (await fetch(target + '/drafts/create', { method: 'POST', body: data })).status;
+  }, secondWorkspaceUrl);
+  if (deniedCreate !== 403)
+    throw new Error('Cross-merchant create was not denied before processing');
   await expect(secondMerchantPage.getByRole('link', { name: assistantName })).toHaveCount(0);
 
   step = 'cross-merchant-access';

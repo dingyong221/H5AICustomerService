@@ -23,6 +23,10 @@ describe('merchant assistant draft form', () => {
     const multiline = completeForm();
     multiline.set('materialsSummary', '服务 A\r\n服务 B');
     expect(parseAssistantDraftForm(multiline)?.materialsSummary).toBe('服务 A\n服务 B');
+    multiline.set('materialsSummary', '问：服务范围？\t答：需向商家确认。');
+    expect(parseAssistantDraftForm(multiline)?.materialsSummary).toBe(
+      '问：服务范围？ 答：需向商家确认。',
+    );
   });
 
   it('rejects missing, oversized, and control-character facts', () => {

@@ -4,7 +4,9 @@ export function parseAssistantDraftForm(formData: FormData): AssistantDraftConfi
   const field = (name: string, maximum: number, multiline = false): string | null => {
     const value = formData.get(name);
     if (typeof value !== 'string') return null;
-    const normalized = (multiline ? value.replace(/\r\n?/gu, '\n') : value).trim();
+    const normalized = (
+      multiline ? value.replace(/\r\n?/gu, '\n').replace(/\t/gu, ' ') : value
+    ).trim();
     return normalized.length > 0 &&
       normalized.length <= maximum &&
       !(multiline
