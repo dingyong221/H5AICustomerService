@@ -7,7 +7,7 @@ describe('merchant management URL', () => {
     const base = managementBaseUrl('https://h5cs.1rying.com/');
     expect(base).not.toBeNull();
     expect(merchantWorkspaceUrl(base!, 'a'.repeat(32))).toBe(
-      `https://h5cs.1rying.com/workspace/${'a'.repeat(32)}`,
+      `https://h5cs.1rying.com/${'a'.repeat(32)}`,
     );
     expect(() => merchantWorkspaceUrl(base!, '../login')).toThrow('Merchant ID is invalid');
     expect(merchantSetupUrl(base!, 'opaque-token')).toBe(
@@ -15,14 +15,14 @@ describe('merchant management URL', () => {
     );
   });
 
-  it('keeps generated setup and workspace links under the dedicated console prefix', () => {
+  it('keeps setup under console and gives each merchant a canonical root workspace', () => {
     const base = managementBaseUrl('https://h5cs.1rying.com/console');
     expect(base).not.toBeNull();
     expect(merchantSetupUrl(base!, 'opaque-token')).toBe(
       'https://h5cs.1rying.com/console/setup#opaque-token',
     );
     expect(merchantWorkspaceUrl(base!, 'a'.repeat(32))).toBe(
-      `https://h5cs.1rying.com/console/workspace/${'a'.repeat(32)}`,
+      `https://h5cs.1rying.com/${'a'.repeat(32)}`,
     );
   });
 

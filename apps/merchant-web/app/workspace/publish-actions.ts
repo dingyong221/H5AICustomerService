@@ -117,8 +117,12 @@ export async function publishAssistantAction(
       },
       now,
     });
-    revalidatePath(`/workspace/${merchantId}/assistants/${assistantId}`);
-    revalidatePath(`/workspace/${merchantId}`);
+    for (const section of ['drafts', 'knowledge', 'publish'])
+      revalidatePath(`/${merchantId}/${section}/${assistantId}`);
+    revalidatePath(`/${merchantId}`);
+    revalidatePath(`/${merchantId}/drafts`);
+    revalidatePath(`/${merchantId}/knowledge`);
+    revalidatePath(`/${merchantId}/publish`);
     const publicSnapshot = await repository.findPublicSnapshot(assistant.publicSlug);
     const publicUrl =
       publicSnapshot?.releaseRef === release.releaseId

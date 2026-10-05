@@ -14,7 +14,7 @@ export default async function MerchantPasswordLoginPage({
   const merchantId = merchant && /^[0-9a-f]{32}$/u.test(merchant) ? merchant : undefined;
   const nextPath = merchantId ? safeMerchantReturnPath(merchantId, next) : null;
   const session = await currentMerchant(merchantId);
-  if (session) redirect(nextPath ?? `/workspace/${session.merchantId}`);
+  if (session) redirect(nextPath ?? `/${session.merchantId}`);
   return (
     <PageShell
       description={<p>使用领取商家后台时填写的手机号和密码登录。</p>}

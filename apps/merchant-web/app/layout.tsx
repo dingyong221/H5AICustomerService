@@ -26,7 +26,7 @@ export const viewport: Viewport = {
 
 export default async function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   const merchant = await currentMerchant();
-  const workspaceHref = merchant ? `/workspace/${merchant.merchantId}` : '/';
+  const workspaceHref = merchant ? `/${merchant.merchantId}` : '/console';
   return (
     <html lang="zh-CN">
       <body>
@@ -51,9 +51,9 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
               </span>
               <span>
                 <strong>{merchant ? '商家已登录' : '商家账号'}</strong>
-                <Link href={merchant ? workspaceHref : '/account/login'}>
+                <a href={merchant ? workspaceHref : '/console/account/login'}>
                   {merchant ? '进入商家工作台' : '登录管理后台'}
-                </Link>
+                </a>
               </span>
             </div>
           </aside>

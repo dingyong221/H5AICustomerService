@@ -12,11 +12,13 @@ export function EditDraftForm({
   assistantId,
   draftRevision,
   draft,
+  returnPath,
 }: {
   merchantId: string;
   assistantId: string;
   draftRevision: number;
   draft: AssistantDraftConfig;
+  returnPath?: string;
 }) {
   const [state, action, pending] = useActionState(saveAssistantDraftAction, {
     error: null,
@@ -88,7 +90,7 @@ export function EditDraftForm({
       {state.saved ? (
         <p role="status">
           草稿已保存，原有资料确认已失效。请
-          <Link href={`/workspace/${merchantId}/assistants/${assistantId}`}>
+          <Link href={returnPath ?? `/${merchantId}/drafts/${assistantId}`}>
             重新打开并核对新修订
           </Link>
           。

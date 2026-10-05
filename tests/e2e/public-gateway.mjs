@@ -19,7 +19,10 @@ http
         ? 4000
         : singleDomain && (pathname === '/ops' || pathname.startsWith('/ops/'))
           ? 3002
-          : singleDomain && (pathname === '/console' || pathname.startsWith('/console/'))
+          : singleDomain &&
+              (pathname === '/console' ||
+                pathname.startsWith('/console/') ||
+                /^\/[0-9a-f]{32}(?:\/|$)/u.test(pathname))
             ? 3000
             : 3003;
     const upstream = http.request(

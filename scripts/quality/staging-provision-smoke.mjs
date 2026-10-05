@@ -70,21 +70,26 @@ try {
     .getByLabel('平台登录密码（至少 12 位）')
     .fill(randomBytes(24).toString('base64url'));
   await merchantPage.getByRole('button', { name: '领取商家后台' }).click();
-  await expect(merchantPage).toHaveURL(/\/console\/workspace\/[0-9a-f]{32}$/u, {
+  await expect(merchantPage).toHaveURL(/\/[0-9a-f]{32}$/u, {
     timeout: 30_000,
   });
   const firstWorkspaceUrl = merchantPage.url();
   step = 'workspace-navigation';
   const navigation = merchantPage.getByRole('navigation', { name: '商家后台主导航' });
-  await expect(merchantPage.getByText('商家已登录', { exact: true })).toBeVisible();
-  for (const name of ['客服草稿', '知识库', '测试与发布']) {
+  for (const [name, section] of [
+    ['客服草稿', 'drafts'],
+    ['知识库', 'knowledge'],
+    ['测试与发布', 'publish'],
+  ]) {
     await navigation.getByRole('link', { name, exact: true }).click();
-    await expect(merchantPage).toHaveURL(`${firstWorkspaceUrl}#assistants`);
-    await expect(merchantPage.getByRole('heading', { name: '已创建的客服' })).toBeVisible();
+    await expect(merchantPage).toHaveURL(firstWorkspaceUrl + '/' + section);
+    await expect(merchantPage.getByRole('heading', { name, exact: true })).toBeVisible();
   }
   await navigation.getByRole('link', { name: '工作台', exact: true }).click();
   await expect(merchantPage).toHaveURL(firstWorkspaceUrl);
+  await navigation.getByRole('link', { name: '客服草稿', exact: true }).click();
   step = 'invalid-draft-feedback';
+  await expect(merchantPage.getByRole('button', { name: '创建客服草稿' })).toBeEnabled();
   await merchantPage.getByRole('button', { name: '创建客服草稿' }).click();
   await expect(merchantPage.getByRole('alert')).toContainText('尚未保存，也未创建客服');
 
@@ -108,24 +113,17 @@ try {
   await merchantPage.getByRole('link', { name: '进入客服配置、试聊和发布' }).click();
   await expect(merchantPage.getByRole('heading', { name: assistantName })).toBeVisible();
   const assistantUrl = merchantPage.url();
+  const assistantId = new URL(assistantUrl).pathname.split('/').at(-1);
   step = 'assistant-navigation';
-  for (const [name, fragment, heading] of [
-    ['客服草稿', 'draft', '草稿修订 1'],
-    ['知识库', 'knowledge', '商家确认'],
-    ['测试与发布', 'release', '发布前试聊'],
-  ]) {
-    await navigation.getByRole('link', { name, exact: true }).click();
-    await expect(merchantPage).toHaveURL(`${assistantUrl}#${fragment}`);
-    await expect(merchantPage.getByRole('heading', { name: heading, exact: true })).toBeVisible();
-  }
-  step = 'authenticated-console-home';
-  await merchantPage.goto(`${origin}/console`);
-  await expect(merchantPage).toHaveURL(firstWorkspaceUrl, { timeout: 30_000 });
-  await merchantPage.getByRole('link', { name: assistantName }).click();
+  await navigation.getByRole('link', { name: '知识库', exact: true }).click();
+  await expect(merchantPage).toHaveURL(firstWorkspaceUrl + '/knowledge/' + assistantId);
+  await expect(merchantPage.getByRole('heading', { name: '知识库', exact: true })).toBeVisible();
   step = 'assistant-confirm-materials';
   await merchantPage.getByLabel(/我已逐项核对以上资料/u).check();
   await merchantPage.getByRole('button', { name: '确认当前草稿资料' }).click();
   await expect(merchantPage.getByText('当前草稿资料已确认')).toBeVisible();
+  await navigation.getByRole('link', { name: '测试与发布', exact: true }).click();
+  await expect(merchantPage).toHaveURL(firstWorkspaceUrl + '/publish/' + assistantId);
   step = 'assistant-publish-ready';
   await expect(merchantPage.getByRole('button', { name: '确认发布 AI 客服' })).toBeEnabled();
   await expect(merchantPage.locator(`a[href^="${origin}/a/"]`)).toHaveCount(0);
@@ -214,17 +212,32 @@ try {
     .getByLabel('平台登录密码（至少 12 位）')
     .fill(randomBytes(24).toString('base64url'));
   await secondMerchantPage.getByRole('button', { name: '领取商家后台' }).click();
-  await expect(secondMerchantPage).toHaveURL(/\/console\/workspace\/[0-9a-f]{32}$/u, {
+  await expect(secondMerchantPage).toHaveURL(/\/[0-9a-f]{32}$/u, {
     timeout: 30_000,
   });
   const secondWorkspaceUrl = secondMerchantPage.url();
   await expect(secondMerchantPage.getByRole('link', { name: assistantName })).toHaveCount(0);
 
   step = 'cross-merchant-access';
-  await merchantPage.goto(secondWorkspaceUrl);
-  await expect(merchantPage).toHaveURL(/\/console\/account\/login\?merchant=[0-9a-f]{32}$/u);
+  for (const section of ['', '/drafts', '/knowledge', '/publish', '/conversations']) {
+    await merchantPage.goto(secondWorkspaceUrl + section);
+    await expect(merchantPage).toHaveURL(
+      /\/console\/account\/login\?merchant=[0-9a-f]{32}(?:&next=[^ ]+)?$/u,
+    );
+    await expect(merchantPage.getByRole('heading', { name: '登录商家管理后台' })).toBeVisible();
+  }
   await secondMerchantPage.goto(firstWorkspaceUrl);
-  await expect(secondMerchantPage).toHaveURL(/\/console\/account\/login\?merchant=[0-9a-f]{32}$/u);
+  await expect(secondMerchantPage).toHaveURL(
+    /\/console\/account\/login\?merchant=[0-9a-f]{32}(?:&next=[^ ]+)?$/u,
+  );
+  step = 'cross-merchant-write';
+  await merchantPage.goto(firstWorkspaceUrl + '/knowledge/' + assistantId);
+  const edit = merchantPage.locator('.assistant-edit-form');
+  await edit.locator('input[name="merchantId"]').evaluate((element, value) => {
+    element.value = value;
+  }, new URL(secondWorkspaceUrl).pathname.slice(1));
+  await edit.getByRole('button', { name: '保存草稿修订' }).click();
+  await expect(edit.getByRole('alert')).toContainText('无权管理此商家');
 
   process.stdout.write(
     `Staging browser smoke passed (${modelMode} model): provisioning, draft AI preview, assistant publish, consumer AI reply and cross-merchant access isolation.\n`,

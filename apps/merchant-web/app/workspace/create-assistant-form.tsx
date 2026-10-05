@@ -1,12 +1,16 @@
 'use client';
 
-import { useActionState, useEffect, useState } from 'react';
+import { useActionState, useEffect, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 import type { IndustryTemplateGuide } from '@h5cs/database';
 
 import { createAssistantDraft } from './workspace-actions';
+
+const subscribe = () => () => {};
+const clientReady = () => true;
+const serverReady = () => false;
 
 export function CreateAssistantForm({
   merchantId,
@@ -23,6 +27,7 @@ export function CreateAssistantForm({
   const [industry, setIndustry] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
   const router = useRouter();
+  const hydrated = useSyncExternalStore(subscribe, clientReady, serverReady);
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateId);
   const [state, action, pending] = useActionState(createAssistantDraft, {
     error: null,
@@ -153,13 +158,13 @@ export function CreateAssistantForm({
         <div className="assistant-created-result" role="status">
           <strong>已创建客服草稿「{state.created.displayName}」。</strong>
           <p>下一步：核对业务资料，试聊后发布给消费者。</p>
-          <Link href={`/workspace/${merchantId}/assistants/${state.created.assistantId}`}>
+          <Link href={`/${merchantId}/drafts/${state.created.assistantId}`}>
             进入客服配置、试聊和发布
           </Link>
         </div>
       ) : null}
-      <button disabled={pending || state.created !== null} type="submit">
-        {pending ? '正在保存…' : '创建客服草稿'}
+      <button disabled={!hydrated || pending || state.created !== null} type="submit">
+        {!hydrated ? '正在准备表单…' : pending ? '正在保存…' : '创建客服草稿'}
       </button>
     </form>
   );

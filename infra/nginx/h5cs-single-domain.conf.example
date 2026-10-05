@@ -80,7 +80,7 @@ server {
     }
 
     location = /console {
-        proxy_pass http://127.0.0.1:13000;
+        proxy_pass http://127.0.0.1:13000/;
     }
     # Legacy WorkBuddy pages remain unavailable during the Web-only stage.
     location = /console/login {
@@ -96,6 +96,11 @@ server {
         return 404;
     }
     location ^~ /console/ {
+        proxy_pass http://127.0.0.1:13000/;
+    }
+
+    # Each management page is scoped by the merchant ID; the app verifies membership.
+    location ~ "^/[0-9a-f]{32}(?:/|$)" {
         proxy_pass http://127.0.0.1:13000;
     }
 

@@ -43,8 +43,8 @@ export async function updateFollowUpStatus(
       sessionId,
       status,
     });
-    revalidatePath(`/workspace/${merchantId}/conversations`);
-    revalidatePath(`/workspace/${merchantId}/conversations/${sessionId}`);
+    revalidatePath(`/${merchantId}/conversations`);
+    revalidatePath(`/${merchantId}/conversations/${sessionId}`);
     return { error: null, saved: true };
   } catch {
     return { error: '更新失败；请刷新页面确认状态后再试。', saved: false };

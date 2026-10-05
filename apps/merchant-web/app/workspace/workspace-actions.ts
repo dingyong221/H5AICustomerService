@@ -66,7 +66,10 @@ export async function createAssistantDraft(
       },
       now,
     });
-    revalidatePath(`/workspace/${merchantId}`);
+    revalidatePath(`/${merchantId}`);
+    revalidatePath(`/${merchantId}/drafts`);
+    revalidatePath(`/${merchantId}/knowledge`);
+    revalidatePath(`/${merchantId}/publish`);
     return {
       error: null,
       created: { assistantId: created.assistantId, displayName: created.displayName },
