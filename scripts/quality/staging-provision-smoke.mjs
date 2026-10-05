@@ -91,7 +91,9 @@ try {
   step = 'invalid-draft-feedback';
   await expect(merchantPage.getByRole('button', { name: '创建客服草稿' })).toBeEnabled();
   await merchantPage.getByRole('button', { name: '创建客服草稿' }).click();
-  await expect(merchantPage.getByRole('alert')).toContainText('尚未保存，也未创建客服');
+  await expect(merchantPage.locator('.assistant-create-form').getByRole('alert')).toContainText(
+    '尚未保存，也未创建客服',
+  );
 
   step = 'assistant-draft';
   const assistantName = `测试客服 ${randomBytes(4).toString('hex')}`;
