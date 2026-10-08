@@ -1,6 +1,23 @@
-# WorkBuddy Connector 本地联调稿
+# WorkBuddy 技能与 Connector 接入
 
-> 状态：远程 Streamable HTTP MCP 与四个最小工具已可本地协议测试；当前不是可安装、可上传或可发布的成品。
+> 两条路线分开：`standalone-skills/` 是四个无本项目后端依赖的独立 Skill，可构建本地导入候选包；本目录根部的 MCP Connector 仍为联调稿，不是已上线或已审核的直连服务。禁止把整个目录当作成品包上传。
+
+## 第一阶段独立技能
+
+| 独立目录                               | 用途                                  | 与后端的关系                                |
+| -------------------------------------- | ------------------------------------- | ------------------------------------------- |
+| standalone-skills/h5cs-material-writer | 商家客服资料撰写、改写与备选          | 仅准备文字，不调用项目服务器                |
+| standalone-skills/h5cs-faq-builder     | 从已有资料整理 FAQ、缺失项与冲突      | 仅整理资料，不上传或发布知识                |
+| standalone-skills/h5cs-release-check   | 草稿与回答审查、试聊问题和核对清单    | 无真实回答时明确“未实测”，不自动发布        |
+| standalone-skills/h5cs-web-guide       | 生成资料或打开已有后台的 Web 协同引导 | 创建、保存与发布仍由本人在独立商家 Web 完成 |
+
+每个包自带 `SKILL.md` 和所需引用，不要求同时安装其他三个包。Skill 使用宿主当前模型，不需要本项目千问密钥，但不承诺用户文字完全离线或不由宿主处理。
+
+构建前执行 `node scripts/skills/validate-workbuddy-skills.mjs`；单独打包执行 `powershell -NoProfile -File scripts/skills/build-workbuddy-skill-packs.ps1`，默认输出到 `artifacts/workbuddy-skills/`。已存在的包和清单不会被覆盖。构建过程校验引用、字段约束、秘密样式、ZIP 条目和逐文件摘要；不等于已通过真实 WorkBuddy 客户端导入或市场审核。
+
+WorkBuddy 官方客户端支持在“技能 → 添加技能 → 上传技能”中导入本地包。逐个选择一个独立 ZIP，不选择本仓库根目录。首次验证建议从资料撰写助手开始。实机观察触发、文字输出、取消、字段修改、秘密误粘贴、未知价格和文档指令攻击；没有实机证据前不标记为可公开上架。
+
+完整能力拆分、验收和下一阶段见 [Skill 能力沉淀与接入设计](../../docs/design/20-skill-capability-extraction.md)。以下章节仅描述根目录 MCP Connector，不适用于这些独立包。
 
 本目录保存 H5 AI 客服的 WorkBuddy Connector/Skill 联调稿，面向两个自然语言入口：
 
@@ -39,15 +56,15 @@ integrations/workbuddy/
 
 远程 HTTP MCP 必须在进入工具执行前完成 OAuth 发现和 Bearer 校验。当前 Nest 入口已在原始 MCP transport 前返回标准 HTTP `401` challenge；适配器内部的结构化认证错误仅作为纵深防御。MySQL OAuth仓储代码虽已存在，但生产数据库配置、verifier、账号会话和真实WorkBuddy客户端尚未接通，因此这一实现仍不能作为发布证据。
 
-| 协议面                        | 目标契约                                                                                                                                                 | 当前状态                                                                                                           |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| 401/403 challenge             | 缺失/无效/过期 token 时返回 HTTP `401` 和 `resource_metadata`；scope 不足返回 `403`，并带 `error="insufficient_scope"`、最小 `scope` 和同一 metadata URL | 本地 middleware 与缺 token 测试已实现；生产 verifier、403 scope challenge/错误矩阵未实测                           |
-| Protected Resource Metadata   | 主地址 `/.well-known/oauth-protected-resource/mcp`，`resource` 精确等于 `https://h5cs.1rying.com/mcp`，并列出授权服务器和 scopes                         | 标准路径与根路径兼容别名均已实现；正式域名尚未部署                                                                 |
-| Authorization Server Metadata | `/.well-known/oauth-authorization-server` 公布 issuer、authorization/token/registration endpoints、grants、scopes、`S256` 和 token endpoint 认证方式     | 本地实现并通过 Schema 测试；正式 issuer 尚未部署                                                                   |
-| 客户端注册                    | WorkBuddy 当前要求 DCR 公共客户端，`token_endpoint_auth_method=none`，不签发或要求 `client_secret`；MCP 2026 已优先 CIMD、保留 DCR 兼容                  | DCR服务、MySQL仓储/迁移与正负测试已实现；需显式`MYSQL_DATABASE_URL`且尚无生产库，CIMD/预注册和目标客户端协商未实测 |
-| 授权与换票                    | Authorization Code + PKCE S256；校验 `state`、一次性 code、`resource`、client、issuer/`iss` 和逐字匹配的 redirect URI；Bearer 只从 header 读取           | 本地服务、一次性 code、PKCE/JWT 和 RFC 9207 `iss` 正负测试已实现；生产登录/同意会话与签名密钥未接入                |
-| 回调                          | 优先 `workbuddy://workbuddy/mcp/connector%3A<source>/oauth/callback`；私有 scheme 被拒时回退一次到 `http://127.0.0.1:{dynamic-port}/oauth/callback`      | 精确 source 与 `127.0.0.1` 动态端口限制已有测试；目标 WorkBuddy 客户端未实测                                       |
-| 刷新与撤销                    | 短期 access token；refresh token 轮换、重用检测和撤销；断开、成员关系变化或账号停用后失效                                                                | MySQL原子轮换/重放撤销仓储与测试已实现；正式签名、grant/binding撤销端点与传播未实现                                |
+| 协议面                        | 目标契约                                                                                                                                                 | 当前状态                                                                                                 |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| 401/403 challenge             | 缺失/无效/过期 token 时返回 HTTP `401` 和 `resource_metadata`；scope 不足返回 `403`，并带 `error="insufficient_scope"`、最小 `scope` 和同一 metadata URL | 本地 middleware 与缺 token 测试已实现；生产 verifier、403 scope challenge/错误矩阵未实测                 |
+| Protected Resource Metadata   | 主地址 `/.well-known/oauth-protected-resource/mcp`，`resource` 精确等于 `https://h5cs.1rying.com/mcp`，并列出授权服务器和 scopes                         | 标准路径与根路径兼容别名均已实现；正式域名尚未部署                                                       |
+| Authorization Server Metadata | `/.well-known/oauth-authorization-server` 公布 issuer、authorization/token/registration endpoints、grants、scopes、`S256` 和 token endpoint 认证方式     | 本地实现并通过 Schema 测试；正式 issuer 尚未部署                                                         |
+| 客户端注册                    | WorkBuddy 当前要求 DCR 公共客户端，`token_endpoint_auth_method=none`，不签发或要求 `client_secret`；MCP 2026 已优先 CIMD、保留 DCR 兼容                  | DCR 服务、MySQL 仓储和本地测试已实现；Web MySQL 已可用，Connector 持久化授权与目标客户端协商仍需实机验收 |
+| 授权与换票                    | Authorization Code + PKCE S256；校验 `state`、一次性 code、`resource`、client、issuer/`iss` 和逐字匹配的 redirect URI；Bearer 只从 header 读取           | 本地服务、一次性 code、PKCE/JWT 和 RFC 9207 `iss` 正负测试已实现；生产登录/同意会话与签名密钥未接入      |
+| 回调                          | 优先 `workbuddy://workbuddy/mcp/connector%3A<source>/oauth/callback`；私有 scheme 被拒时回退一次到 `http://127.0.0.1:{dynamic-port}/oauth/callback`      | 精确 source 与 `127.0.0.1` 动态端口限制已有测试；目标 WorkBuddy 客户端未实测                             |
+| 刷新与撤销                    | 短期 access token；refresh token 轮换、重用检测和撤销；断开、成员关系变化或账号停用后失效                                                                | MySQL原子轮换/重放撤销仓储与测试已实现；正式签名、grant/binding撤销端点与传播未实现                      |
 
 ### 两套 OAuth 凭据不得混用
 
@@ -110,13 +127,13 @@ consent 必须绑定用户、外部身份、商家、client、resource、scopes�
 ## 尚未完成且阻止发布的内容
 
 - 已补齐官方要求的市场图标 `icon.svg`；隐私、权限用途、支持与撤销说明等审核材料仍未准备。
-- 已实现OAuth MySQL仓储/迁移并在显式`MYSQL_DATABASE_URL`时装配，但尚无托管生产库；正式签名密钥/KMS、平台登录与授权同意会话、身份绑定解析器或撤销端点仍未实现。因此DCR之外的authorize/token和受保护调用继续fail closed，不会假成功。
+- Web 已使用经项目负责人批准的单机 MySQL 并完成客服小闭环，不再把“没有托管生产库”列为 Skill 本身的阻碍。Connector 的正式签名配置、可运行的平台登录与授权同意、主体解析、撤销传播仍需完成；不可用时保持拒绝调用。
 - WorkBuddy 第三方应用尚未注册/审核；本地 authorize/换票/身份桥接和 callback/consent/UI/迁移/MySQL 仓储草案虽已出现，state + browser-session 摘要及配置版本也已在本地 consume 路径核对，但默认 runtime 与平台登录/授权适配器仍不可用。完整 redirect/scope/merchant 事务快照、外部身份一对一上线、针对具体 client/resource/scopes/membership 的显式商家 consent、加密 token 保管、单飞刷新、phoneverification 和解绑流程均未形成可运行闭环；官方远端撤销入口也尚未确认。
-- 没有可用于生产的账号绑定、托管私网 MySQL、客服生成服务和目标 WorkBuddy 客户端实机证据。
+- Web 账号、商家独立后台和客服生成发布已可用于受控测试，但这不证明 WorkBuddy 连接器的账号授权和目标客户端实机流程已经完成。
 - `mcp.json` 中的正式 HTTPS 地址只是部署目标；本轮没有部署该路由，也没有提交审核。
 - 未写入 Client ID、Token、密钥或任何真实凭据；未来凭据仍只能由安全连接流程提供。
 
-在 OAuth、账号绑定、数据库、生成闭环、远程部署、审核材料和真实 WorkBuddy 客户端验证完成前，**禁止将本目录打包上传、提交审核或对外发布**。
+根目录 MCP Connector 在 OAuth、账号授权、生成调用、远程接入、审核材料和真实 WorkBuddy 客户端验证完成前，**不得当作成品打包上传、提交审核或对外发布**。独立 Skill 只按前述范围构建本地测试候选包，不携带此目录的 `mcp.json` 或 Connector 配置。
 
 ## 当前目录结构与最终包差距
 

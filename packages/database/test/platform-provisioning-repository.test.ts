@@ -49,6 +49,15 @@ const repositoryWith = (failOn?: string, merchantStatus = 'pending_owner', failE
 };
 
 describe('platform merchant provisioning', () => {
+  it('allows the same operator to provision distinct independent merchants', async () => {
+    const { repository, calls, commit } = repositoryWith();
+    const first = await repository.provisionMerchant({ name: '合成商家甲', operatorId: 'admin' });
+    const second = await repository.provisionMerchant({ name: '合成商家乙', operatorId: 'admin' });
+    expect(first.id).not.toBe(second.id);
+    expect(first.setupToken).not.toBe(second.setupToken);
+    expect(calls.filter((call) => /INSERT INTO merchant\s*\(/u.test(call.sql))).toHaveLength(2);
+    expect(commit).toHaveBeenCalledTimes(2);
+  });
   it('finds older merchants by exact ID or escaped name without loading private records', async () => {
     const merchantId = Buffer.from('ab'.repeat(16), 'hex');
     const createdAt = new Date('2026-09-01T00:00:00.000Z');

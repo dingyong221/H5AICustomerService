@@ -91,6 +91,64 @@ const repositoryWith = (
 };
 
 describe('merchant invitation and scoped session', () => {
+  it('requires an explicit target when one verified owner has multiple merchants', async () => {
+    const merchants = [merchantId, Buffer.from('33'.repeat(16), 'hex')];
+    const salt = randomBytes(16);
+    const hash = scryptSync(password, salt, 64);
+    const calls: Array<{ sql: string; values: readonly unknown[] }> = [];
+    const connection = {
+      execute: async (sql: string, values: readonly unknown[] = []) => {
+        calls.push({ sql, values });
+        if (sql.includes('FROM merchant_password_credential'))
+          return [
+            [{ merchant_user_id: merchantUserId, password_salt: salt, password_hash: hash }],
+            [],
+          ];
+        if (sql.includes('SELECT mm.merchant_id')) {
+          const target = sql.includes('AND mm.merchant_id = ?') ? (values[1] as Buffer) : null;
+          return [
+            merchants
+              .filter((id) => !target || id.equals(target))
+              .map((id) => ({ merchant_id: id })),
+            [],
+          ];
+        }
+        return [resultHeader, []];
+      },
+      end: vi.fn(async () => undefined),
+    } as unknown as Connection;
+    const database = {
+      openConnection: async () => connection,
+      summary: { host: 'test', database: 'test', tlsRequested: false },
+      toJSON: () => ({ host: 'test', database: 'test', tlsRequested: false }),
+    } satisfies DatabaseConnectionConfig;
+    const repository = new MySqlMerchantAccessRepository(database, phoneKey);
+    await expect(repository.login({ phone: '13800138000', password })).rejects.toThrow(
+      '请选择有权管理的商家',
+    );
+    expect(calls.some((call) => call.sql.includes('INSERT INTO platform_login_session'))).toBe(
+      false,
+    );
+    for (const target of merchants) {
+      const session = await repository.login({
+        phone: '13800138000',
+        password,
+        merchantId: target.toString('hex'),
+      });
+      expect(session.merchantId).toBe(target.toString('hex'));
+      expect(session.merchantUserId).toBe(merchantUserId.toString('hex'));
+    }
+    const sessionInserts = calls.filter((call) =>
+      call.sql.includes('INSERT INTO platform_login_session'),
+    );
+    expect(sessionInserts.map((call) => call.values[2])).toEqual(merchants);
+    await expect(
+      repository.login({ phone: '13800138000', password, merchantId: '44'.repeat(16) }),
+    ).rejects.toThrow('请选择有权管理的商家');
+    expect(
+      calls.filter((call) => call.sql.includes('INSERT INTO platform_login_session')),
+    ).toHaveLength(2);
+  });
   it('claims one invitation, activates its merchant, and stores only credential digests', async () => {
     const { repository, calls, commit, rollback } = repositoryWith();
     const session = await repository.claimInvitation({
