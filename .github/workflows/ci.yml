@@ -166,6 +166,9 @@ jobs:
       - name: Start loopback-only disposable MySQL
         run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml up -d --wait mysql
 
+      - name: Verify non-empty twelve-to-thirteen schema upgrade and replay
+        run: node packages/database/scripts/verify-ci-upgrade.mjs --run
+
       - name: Apply reviewed MySQL migrations
         run: pnpm --filter @h5cs/database exec drizzle-kit migrate --config drizzle.config.ts
 

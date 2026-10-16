@@ -16,8 +16,9 @@
     "lint": "turbo run lint",
     "release:check": "node scripts/quality/release-gate.mjs repository --version 0.1.0",
     "release:static": "node scripts/quality/release-gate.mjs static --version 0.1.0",
-    "test": "turbo run test",
+    "test": "turbo run test && pnpm test:quality-tools",
     "test:e2e": "playwright test",
+    "test:quality-tools": "pnpm exec turbo run build --filter=@h5cs/worker --concurrency=1 && node --test scripts/quality/consumer-scenario-probe.test.mjs scripts/quality/improvement-model-scenarios.test.mjs scripts/quality/staging-improvement-smoke.test.mjs",
     "typecheck": "turbo run typecheck && pnpm typecheck:e2e",
     "typecheck:e2e": "tsc -p tsconfig.e2e.json --noEmit"
   },
