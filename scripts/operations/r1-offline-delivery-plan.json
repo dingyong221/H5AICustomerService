@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "repository": "dingyong221/H5AICustomerService",
+  "sourceSha": "a3edb4274480207cbb541b016cae87dd12169a56",
+  "pathMode": "same_domain",
+  "sourceCandidateRunId": 38958679037,
+  "sourceCandidateAttempt": 1,
+  "sourceCiRunId": 38957600094,
+  "sourceCiAttempt": 1,
+  "sourceManifestArtifactId": 12071593142,
+  "sourceManifestArchiveSha256": "sha256:6239ac3ad9d85fa0f47976339fde1c24f4097070ea5e163a43cc61e38252de8e",
+  "sourceManifestSha256": "sha256:fa2569298fe9f87ec9148e5940f1c921aecf6a4b0add63ebf63bf90b3afceaeb",
+  "maxArchiveBytes": 536870912,
+  "maxUnpackedTarBytes": 2147483648,
+  "minimumRunnerFreeBytes": 2147483648,
+  "images": {
+    "api": "ghcr.io/dingyong221/h5aicustomerservice/api@sha256:a51825cd4f60c8e06eb351b7ce2cc5e2f716dedaac1b8e751d58e028b5d420c2",
+    "worker": "ghcr.io/dingyong221/h5aicustomerservice/worker@sha256:a73e7c55c0d7040a06c5ab1b706eace2988d639f9a53f6a18fa9f31aa050c256",
+    "merchant-web": "ghcr.io/dingyong221/h5aicustomerservice/merchant-web@sha256:7c1858211006649a8c73eae0bcde40745e0a4ef762dba56b9420929656cbb58f",
+    "consumer-h5": "ghcr.io/dingyong221/h5aicustomerservice/consumer-h5@sha256:7162f4d2d8a2eea928b21beaec0d7c24cfe643f99cde31561bf97919ecdf65db",
+    "ops-web": "ghcr.io/dingyong221/h5aicustomerservice/ops-web@sha256:46500e457cade3777ccad29dad9b47cd42e01982c4eb0e38f014387c2a082755"
+  }
+}
