@@ -3,7 +3,11 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Readable, Writable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import test from 'node:test';
+
+import { boundedArchiveStream, requiredExportFreeBytes } from './export-candidate-offline.mjs';
 
 import {
   OfflineDeliveryError,
@@ -116,6 +120,62 @@ const changed = (value, mutate) => {
   mutate(copy);
   return copy;
 };
+
+test('export capacity reserves bounded tar and gzip once rather than double-counting virtual image layers', () => {
+  const p = plan();
+  assert.equal(
+    requiredExportFreeBytes(p),
+    BigInt(p.maxUnpackedTarBytes) +
+      BigInt(p.maxArchiveBytes) +
+      BigInt(p.minimumRunnerFreeBytes) +
+      67_108_864n,
+  );
+  expectCode(() => requiredExportFreeBytes({ ...p, maxArchiveBytes: 0 }), 'OFFLINE_PLAN_INVALID');
+});
+
+test('tar stream writes exactly the configured byte bound without Docker or files', async () => {
+  const bounded = boundedArchiveStream(7);
+  const accepted = [];
+  await pipeline(
+    Readable.from([Buffer.from('abc'), Buffer.from('defg')]),
+    bounded.stream,
+    new Writable({
+      write(chunk, _encoding, callback) {
+        accepted.push(Buffer.from(chunk));
+        callback();
+      },
+    }),
+  );
+  assert.equal(Buffer.concat(accepted).toString('utf8'), 'abcdefg');
+  assert.equal(bounded.writtenBytes(), 7);
+});
+
+test('tar stream rejects an oversized first chunk or cumulative bytes before forwarding excess', async () => {
+  for (const chunks of [[Buffer.from('abcdef')], [Buffer.from('abc'), Buffer.from('def')]]) {
+    const bounded = boundedArchiveStream(5);
+    let forwarded = 0;
+    await assert.rejects(
+      pipeline(
+        Readable.from(chunks),
+        bounded.stream,
+        new Writable({
+          write(chunk, _encoding, callback) {
+            forwarded += chunk.length;
+            callback();
+          },
+        }),
+      ),
+      (error) => error instanceof OfflineDeliveryError && error.code === 'OVERSIZED_DOCKER_ARCHIVE',
+    );
+    assert.ok(forwarded <= 3);
+    assert.ok(bounded.writtenBytes() <= 3);
+  }
+});
+
+test('tar stream refuses invalid bounds using a static error code', () => {
+  for (const maximum of [0, -1, 1.5, '5', null, NaN, Number.MAX_SAFE_INTEGER + 1])
+    expectCode(() => boundedArchiveStream(maximum), 'INVALID_ARCHIVE_STREAM_BOUND');
+});
 
 const exporterPath = fileURLToPath(new URL('./export-candidate-offline.mjs', import.meta.url));
 const exporterRoot = fileURLToPath(new URL('../../', import.meta.url));

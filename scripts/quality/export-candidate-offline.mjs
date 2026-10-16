@@ -11,7 +11,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
@@ -107,6 +107,72 @@ async function readSmallRegularFile(path, limit) {
   if (!info.isFile() || info.isSymbolicLink() || info.size > limit)
     fail('INVALID_SOURCE_EVIDENCE_FILE');
   return readFile(path);
+}
+
+export function requiredExportFreeBytes(plan) {
+  const checked = validatePlan(plan);
+  // Pulled images already occupy disk and are accounted for by statfs. The
+  // export adds one bounded tar plus its bounded gzip and a retained reserve.
+  // Summing virtual image sizes would double-count shared layers.
+  return (
+    BigInt(checked.maxUnpackedTarBytes) +
+    BigInt(checked.maxArchiveBytes) +
+    BigInt(checked.minimumRunnerFreeBytes) +
+    64n * 1024n * 1024n
+  );
+}
+
+export function boundedArchiveStream(maximumBytes) {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) fail('INVALID_ARCHIVE_STREAM_BOUND');
+  let bytes = 0;
+  const stream = new Transform({
+    transform(chunk, _encoding, callback) {
+      if (chunk.length > maximumBytes - bytes) {
+        callback(new OfflineDeliveryError('OVERSIZED_DOCKER_ARCHIVE'));
+        return;
+      }
+      bytes += chunk.length;
+      callback(null, chunk);
+    },
+  });
+  return { stream, writtenBytes: () => bytes };
+}
+
+async function saveBoundedImages(path, tags, maximumBytes, environment) {
+  const child = spawn('docker', ['image', 'save', ...tags], {
+    cwd: repositoryRoot,
+    env: childEnvironment(environment),
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: false,
+  });
+  const exited = new Promise((resolveExit) => {
+    child.once('error', () => resolveExit(false));
+    child.once('close', (code, signal) => resolveExit(code === 0 && signal === null));
+  });
+  // Never print Docker stderr; a stalled exporter or overlarge diagnostic is
+  // stopped only through this exact child process, not the daemon or images.
+  let stderrBytes = 0;
+  child.stderr.on('data', (chunk) => {
+    stderrBytes += chunk.length;
+    if (stderrBytes > 65_536) child.kill('SIGKILL');
+  });
+  const timeout = setTimeout(() => child.kill('SIGKILL'), 300_000);
+  const bounded = boundedArchiveStream(maximumBytes);
+  try {
+    await pipeline(
+      child.stdout,
+      bounded.stream,
+      createWriteStream(path, { flags: 'wx', mode: 0o600 }),
+    );
+    if (!(await exited)) fail('LOCAL_TOOL_FAILED');
+    return bounded.writtenBytes();
+  } catch (error) {
+    child.kill('SIGKILL');
+    await exited;
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function exportCandidateOffline(
@@ -265,24 +331,36 @@ export async function exportCandidateOffline(
     const imageBytes = records.reduce((total, record) => total + record.sizeBytes, 0);
     const disk = await statfs(temporaryRoot, { bigint: true });
     const freeBytes = disk.bavail * disk.bsize;
-    if (
-      !Number.isSafeInteger(imageBytes) ||
-      imageBytes > plan.maxUnpackedTarBytes ||
-      freeBytes < BigInt(imageBytes * 2 + plan.maxArchiveBytes + plan.minimumRunnerFreeBytes)
-    )
+    const requiredFreeBytes = requiredExportFreeBytes(plan);
+    output({
+      type: 'capacity',
+      virtualImageBytes: imageBytes,
+      freeBytes: freeBytes.toString(),
+      requiredFreeBytes: requiredFreeBytes.toString(),
+      maxUnpackedTarBytes: plan.maxUnpackedTarBytes,
+      maxArchiveBytes: plan.maxArchiveBytes,
+    });
+    if (!Number.isSafeInteger(imageBytes) || freeBytes < requiredFreeBytes)
       fail('INSUFFICIENT_EPHEMERAL_EXPORT_CAPACITY');
 
     const directory = await mkdtemp(join(temporaryRoot, 'h5cs-offline-'));
     const tarPath = join(directory, 'candidate-images.tar');
     const archivePath = join(directory, 'candidate-images.tar.gz');
     phase = 'save_exact_images';
-    command(
-      'docker',
-      ['image', 'save', '--output', tarPath, ...records.map((record) => record.loadTag)],
+    const savedBytes = await saveBoundedImages(
+      tarPath,
+      records.map((record) => record.loadTag),
+      plan.maxUnpackedTarBytes,
       environment,
     );
     const tarInfo = await lstat(tarPath);
-    if (!tarInfo.isFile() || tarInfo.isSymbolicLink() || tarInfo.size > plan.maxUnpackedTarBytes)
+    if (
+      !tarInfo.isFile() ||
+      tarInfo.isSymbolicLink() ||
+      tarInfo.size !== savedBytes ||
+      tarInfo.size < 1 ||
+      tarInfo.size > plan.maxUnpackedTarBytes
+    )
       fail('INVALID_OR_OVERSIZED_DOCKER_ARCHIVE');
     phase = 'compress_bounded_archive';
     let compressedBytes = 0;
