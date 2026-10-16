@@ -10,7 +10,7 @@
   "sourceManifestArtifactId": 12071593142,
   "sourceManifestArchiveSha256": "sha256:6239ac3ad9d85fa0f47976339fde1c24f4097070ea5e163a43cc61e38252de8e",
   "sourceManifestSha256": "sha256:fa2569298fe9f87ec9148e5940f1c921aecf6a4b0add63ebf63bf90b3afceaeb",
-  "maxArchiveBytes": 536870912,
+  "maxArchiveBytes": 1073741824,
   "maxUnpackedTarBytes": 2147483648,
   "minimumRunnerFreeBytes": 2147483648,
   "images": {
