@@ -13,6 +13,7 @@ import {
   checkedCompletedTurn,
   checkedSessionHistory,
   checkedStagingLink,
+  modelExecutionBoundary,
   parseStagingImprovementOptions,
   syntheticRetailScenario,
   waitForManualDecision,
@@ -31,6 +32,18 @@ const environment = () => ({
 });
 const expectCode = (action, code) =>
   assert.throws(action, (error) => error instanceof StagingSmokeSafetyError && error.code === code);
+
+test('requested real model never claims verified runtime provider without independent evidence', async () => {
+  assert.deepEqual(modelExecutionBoundary, {
+    requestedMode: 'real',
+    runtimeProviderVerified: false,
+    verificationRequired: 'independent_worker_configuration_and_image_evidence',
+  });
+  assert.equal(Object.isFrozen(modelExecutionBoundary), true);
+  const smoke = await readFile(script, 'utf8');
+  assert.ok(smoke.includes('modelExecution: modelExecutionBoundary'));
+  assert.ok(!smoke.includes("modelMode: 'real'"));
+});
 
 test('valid explicit private HTTPS configuration is immutable and does not mutate caller env', () => {
   const source = environment();

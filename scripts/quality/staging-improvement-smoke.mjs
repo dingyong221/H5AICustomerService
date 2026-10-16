@@ -4,6 +4,12 @@ import { fileURLToPath } from 'node:url';
 
 // Standalone private-staging journey. Importing this file never launches a browser.
 // Do not run with Playwright debug recording, attach to a user's browser, or persist auth state.
+export const modelExecutionBoundary = Object.freeze({
+  requestedMode: 'real',
+  runtimeProviderVerified: false,
+  verificationRequired: 'independent_worker_configuration_and_image_evidence',
+});
+
 export const syntheticRetailScenario = Object.freeze({
   question: '新疆单件运费，满99是否包邮',
   previewQuestion: '500ml保温杯单件多少钱，普通地区运费和包邮门槛是什么？',
@@ -743,11 +749,11 @@ async function runStagingImprovementSmoke(options, input = process.stdin) {
       synthetic: true,
       workflowState: 'completed',
       qualityVerdict: 'manually_approved',
-      modelMode: 'real',
+      modelExecution: modelExecutionBoundary,
       plannedModelCalls: 5,
       ...versions,
       newReleaseRef: nextSnapshot.releaseRef,
-      note: '本次合成场景人工验收，不是准确率、全量质量结论或公网发布证明；合成商家及验收记录保留在私有staging。',
+      note: '本次合成场景人工验收；此脚本不核验实际模型提供方，需另行关联Worker配置与镜像证据。不是准确率、全量质量结论或公网发布证明；合成商家及验收记录保留在私有staging。',
     });
     return true;
   } catch (error) {
@@ -767,7 +773,7 @@ if (invokedAsCli) {
     const args = process.argv.slice(2);
     if (args.length === 1 && args[0] === '--help') {
       process.stdout.write(
-        'Private staging R1 smoke (real browser/model; synthetic data only).\nRequired environment: H5CS_STAGE_ORIGIN=https://127.0.0.1:<port>, H5CS_STAGE_CHROME_PATH=<absolute path>, H5CS_STAGE_OPERATOR_USERNAME, H5CS_STAGE_OPERATOR_PASSWORD, H5CS_STAGE_MODEL_MODE=real, H5CS_STAGE_SYNTHETIC_DATA_CONSENT=true. Optional H5CS_STAGE_REVIEW_TIMEOUT_SECONDS=30..900 (default 300). No credentials in arguments. Two fresh manual challenges require pass <challenge> or abort on stdin. No screenshots, trace, stored auth, automatic retries or public deployment.\n',
+        'Private staging R1 smoke (real browser; requested real model; synthetic data only).\nRequired environment: H5CS_STAGE_ORIGIN=https://127.0.0.1:<port>, H5CS_STAGE_CHROME_PATH=<absolute path>, H5CS_STAGE_OPERATOR_USERNAME, H5CS_STAGE_OPERATOR_PASSWORD, H5CS_STAGE_MODEL_MODE=real, H5CS_STAGE_SYNTHETIC_DATA_CONSENT=true. Optional H5CS_STAGE_REVIEW_TIMEOUT_SECONDS=30..900 (default 300). Actual model provider and isolation require independent Worker configuration and image verification; this script does not certify them. No credentials in arguments. Two fresh manual challenges require pass <challenge> or abort on stdin. No screenshots, trace, stored auth, automatic retries or public deployment.\n',
       );
     } else {
       const options = parseStagingImprovementOptions(process.env, args);

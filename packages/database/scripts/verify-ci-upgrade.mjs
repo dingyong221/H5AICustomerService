@@ -30,6 +30,61 @@ export class UpgradeProbeError extends Error {
   }
 }
 
+export function safeProbeFailure(error, phase) {
+  const previousPhase = error instanceof UpgradeProbeError ? error.phase : undefined;
+  const candidatePhase = previousPhase ?? phase;
+  const safePhase =
+    typeof candidatePhase === 'string' && /^[a-z][a-z0-9_]{0,63}$/u.test(candidatePhase)
+      ? candidatePhase
+      : 'unknown';
+  let driverCode;
+  let driverErrno;
+  let current = error;
+  // Drizzle wraps driver errors in `cause`. Never include message, SQL, stack,
+  // connection options or the cause object in diagnostics.
+  for (let depth = 0; depth < 4 && current && typeof current === 'object'; depth++) {
+    if (
+      driverCode === undefined &&
+      typeof current.code === 'string' &&
+      /^(?:ER_[A-Z0-9_]{1,60}|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EHOSTUNREACH|EPIPE)$/u.test(
+        current.code,
+      )
+    )
+      driverCode = current.code;
+    if (
+      driverErrno === undefined &&
+      Number.isSafeInteger(current.errno) &&
+      Math.abs(current.errno) <= 65_535
+    )
+      driverErrno = current.errno;
+    current = current.cause;
+  }
+  const diagnostic = new UpgradeProbeError(
+    `CI upgrade probe failed in phase=${safePhase}; driver_code=${driverCode ?? 'unavailable'} driver_errno=${driverErrno ?? 'unavailable'}; database details omitted`,
+  );
+  diagnostic.phase = safePhase;
+  diagnostic.code = driverCode;
+  diagnostic.errno = driverErrno;
+  return diagnostic;
+}
+
+export async function acquireMigrationLock(connection) {
+  const [rows] = await connection.query(
+    "SELECT GET_LOCK('h5cs_schema_migration_v1', 0) AS acquired",
+  );
+  const value = rows?.[0]?.acquired;
+  // GET_LOCK is a BIGINT expression. mysql2's bigNumberStrings setting returns
+  // even the successful value 1 as '1'; do not mistake it for lock contention.
+  if (value !== 1 && value !== '1') {
+    throw new UpgradeProbeError(
+      value === 0 || value === '0'
+        ? 'Another schema migration is active'
+        : 'Migration lock acquisition did not report success',
+    );
+  }
+  return { acquired: true, driverValueType: typeof value };
+}
+
 export function parseUpgradeArguments(args) {
   if (args.length === 1 && args[0] === '--run') return { action: 'run' };
   if (args.length === 1 && args[0] === '--check-target') return { action: 'check-target' };
@@ -496,7 +551,7 @@ async function assertConstraintRejected(action, expectedCode, label) {
     await action();
   } catch (error) {
     if (error?.code === expectedCode) return label;
-    throw new UpgradeProbeError(`Unexpected failure while checking ${label}`);
+    throw safeProbeFailure(error, `constraint_${label}`);
   }
   throw new UpgradeProbeError(`${label} unexpectedly accepted invalid scoped data`);
 }
@@ -692,45 +747,55 @@ async function seedPostUpgradeData(connection, ids) {
 }
 
 export async function runUpgradeProbe(environment = process.env) {
-  const target = validateUpgradeTarget(environment);
-  const plan = await reviewedUpgradePlan();
+  let phase = 'validate_target';
   let password;
-  try {
-    password = decodeURIComponent(new URL(environment.H5CS_INTEGRATION_MYSQL_URL).password);
-  } catch {
-    throw new UpgradeProbeError('CI credential encoding is invalid');
-  }
-  const [{ createConnection }, { drizzle }, { migrate }] = await Promise.all([
-    import('mysql2/promise'),
-    import('drizzle-orm/mysql2'),
-    import('drizzle-orm/mysql2/migrator'),
-  ]);
-  const connection = await createConnection({
-    ...target,
-    password,
-    timezone: 'Z',
-    dateStrings: true,
-    supportBigNumbers: true,
-    bigNumberStrings: true,
-  });
-  password = undefined;
+  let connection;
   let locked = false;
   let scratch;
   try {
-    const [lock] = await connection.query(
-      "SELECT GET_LOCK('h5cs_schema_migration_v1', 0) AS acquired",
-    );
-    if (lock[0]?.acquired !== 1) throw new UpgradeProbeError('Another schema migration is active');
+    const target = validateUpgradeTarget(environment);
+    phase = 'review_migration_plan';
+    const plan = await reviewedUpgradePlan();
+    phase = 'read_ci_credential';
+    try {
+      password = decodeURIComponent(new URL(environment.H5CS_INTEGRATION_MYSQL_URL).password);
+    } catch {
+      throw new UpgradeProbeError('CI credential encoding is invalid');
+    }
+    phase = 'load_database_driver';
+    const [{ createConnection }, { drizzle }, { migrate }] = await Promise.all([
+      import('mysql2/promise'),
+      import('drizzle-orm/mysql2'),
+      import('drizzle-orm/mysql2/migrator'),
+    ]);
+    phase = 'connect_database';
+    connection = await createConnection({
+      ...target,
+      password,
+      timezone: 'Z',
+      dateStrings: true,
+      supportBigNumbers: true,
+      bigNumberStrings: true,
+    });
+    password = undefined;
+    phase = 'acquire_migration_lock';
+    const migrationLock = await acquireMigrationLock(connection);
     locked = true;
+    phase = 'verify_empty_database';
     await assertEmptyCiDatabase(connection);
+    phase = 'read_mysql_version';
     const mysqlVersion = await readMysqlVersion(connection);
+    phase = 'prepare_baseline_migrations';
     scratch = await baselineMigrationFolder(plan);
     const db = drizzle({ client: connection });
+    phase = 'apply_twelve_migrations';
     await migrate(db, { migrationsFolder: scratch.folder });
+    phase = 'verify_baseline_history';
     const baselineHistory = await assertMigrationHistory(
       connection,
       plan.entries.slice(0, expectedBaselineCount),
     );
+    phase = 'inspect_baseline_schema';
     const tables = await applicationTables(connection);
     if (
       tables.length !== 29 ||
@@ -738,7 +803,9 @@ export async function runUpgradeProbe(environment = process.env) {
       tables.includes('assistant_evaluation_run')
     )
       throw new UpgradeProbeError('Baseline is not the real pre-0012 application schema');
+    phase = 'seed_baseline_data';
     const ids = await seedBaselineData(connection);
+    phase = 'snapshot_baseline_data';
     const before = await snapshotTables(connection, tables);
     for (const [table, minimum] of [
       ['merchant', 2],
@@ -756,11 +823,15 @@ export async function runUpgradeProbe(environment = process.env) {
           'Baseline fixture is missing representative non-empty business data',
         );
     }
+    phase = 'apply_thirteenth_migration';
     await migrate(db, { migrationsFolder: sourceFolder });
+    phase = 'verify_upgraded_history';
     const upgradedHistory = await assertMigrationHistory(connection, plan.entries);
+    phase = 'verify_preserved_legacy_data';
     const after = await snapshotTables(connection, tables);
     if (before.sha256 !== after.sha256)
       throw new UpgradeProbeError('Existing business rows or schema changed during 0012 upgrade');
+    phase = 'verify_upgraded_schema';
     const fullTables = await applicationTables(connection);
     if (
       fullTables.length !== 31 ||
@@ -770,14 +841,20 @@ export async function runUpgradeProbe(environment = process.env) {
       )
     )
       throw new UpgradeProbeError('Upgrade produced an unexpected application-table set');
+    phase = 'verify_new_table_constraints';
     const constraints = await assertNewTableConstraints(connection, ids);
+    phase = 'seed_post_upgrade_data';
     await seedPostUpgradeData(connection, ids);
     const newTables = ['assistant_evaluation_run', 'assistant_improvement'];
+    phase = 'snapshot_new_table_data';
     const beforeReplayNewData = await snapshotTables(connection, newTables);
     if (beforeReplayNewData.tables.some((table) => table.count !== 1))
       throw new UpgradeProbeError('Post-upgrade data is not populated for the replay check');
+    phase = 'replay_thirteen_migrations';
     await migrate(db, { migrationsFolder: sourceFolder });
+    phase = 'verify_replay_history';
     const replayHistory = await assertMigrationHistory(connection, plan.entries);
+    phase = 'verify_replayed_data';
     const repeated = await snapshotTables(connection, tables);
     const afterReplayNewData = await snapshotTables(connection, newTables);
     if (
@@ -794,6 +871,7 @@ export async function runUpgradeProbe(environment = process.env) {
       modelCalled: false,
       target,
       mysqlVersion,
+      migrationLock,
       fromMigrationCount: baselineHistory.length,
       toMigrationCount: upgradedHistory.length,
       planSha256: plan.inventory.planSha256,
@@ -810,13 +888,22 @@ export async function runUpgradeProbe(environment = process.env) {
       boundary:
         'Real pre-0012 schema with synthetic persisted data, not an old-binary feature-compatibility or production migration claim',
     };
+  } catch (error) {
+    throw safeProbeFailure(error, phase);
   } finally {
+    password = undefined;
     if (locked)
       await connection
         .query("SELECT RELEASE_LOCK('h5cs_schema_migration_v1')")
         .catch(() => undefined);
-    await connection.end().catch(() => undefined);
-    if (scratch) await scratch.cleanup();
+    if (connection) await connection.end().catch(() => undefined);
+    if (scratch) {
+      try {
+        await scratch.cleanup();
+      } catch (error) {
+        throw safeProbeFailure(error, 'cleanup_migration_scratch');
+      }
+    }
   }
 }
 
@@ -837,9 +924,7 @@ const invokedDirectly =
   process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invokedDirectly) {
   main().catch((error) => {
-    process.stderr.write(
-      `${error instanceof UpgradeProbeError ? error.message : 'CI upgrade probe failed; database details were not printed'}\n`,
-    );
+    process.stderr.write(`${safeProbeFailure(error, 'cli_preflight').message}\n`);
     process.exitCode = 1;
   });
 }

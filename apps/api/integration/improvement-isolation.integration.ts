@@ -1,5 +1,5 @@
 import { randomBytes, randomInt, randomUUID } from 'node:crypto';
-import type { Connection, RowDataPacket } from 'mysql2/promise';
+import type { Connection, ExecuteValues, RowDataPacket } from 'mysql2/promise';
 import { describe, expect, it } from 'vitest';
 import {
   loadDatabaseConfig,
@@ -473,10 +473,7 @@ describe('real MySQL improvement isolation and rollback invariants', () => {
       openConnection: async () => {
         const connection = await database.openConnection();
         const execute = connection.execute.bind(connection);
-        connection.execute = (async (
-          sql: string,
-          values?: Parameters<Connection['execute']>[1],
-        ) => {
+        connection.execute = (async (sql: string, values?: ExecuteValues) => {
           const result = await execute(sql, values);
           if (sql.trimStart().startsWith('UPDATE assistant_improvement')) {
             actualBindingExecuted = true;

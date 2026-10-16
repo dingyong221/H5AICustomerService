@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { migrationInventory } from '../scripts/migrate-managed.mjs';
 import {
   UpgradeProbeError,
+  acquireMigrationLock,
   assertEmptyCiDatabase,
   assertMigrationHistory,
   assertTemporaryTarget,
@@ -17,6 +18,7 @@ import {
   readMysqlVersion,
   reviewedUpgradePlan,
   runUpgradeProbe,
+  safeProbeFailure,
   storedRowsDigest,
   validateUpgradeTarget,
 } from '../scripts/verify-ci-upgrade.mjs';
@@ -174,6 +176,56 @@ describe('offline CI upgrade probe scope and argument safety', () => {
 });
 
 describe('offline upgrade migration and data-proof helpers', () => {
+  it('accepts advisory-lock success as numeric or mysql2 BIGINT string, without accepting falsy/coerced results', async () => {
+    for (const value of [1, '1']) {
+      const query = vi.fn(async () => [[{ acquired: value }], []]);
+      await expect(acquireMigrationLock({ query })).resolves.toEqual({
+        acquired: true,
+        driverValueType: typeof value,
+      });
+      expect(query).toHaveBeenCalledWith(
+        "SELECT GET_LOCK('h5cs_schema_migration_v1', 0) AS acquired",
+      );
+    }
+    for (const value of [0, '0', null, undefined, true, '01', '1.0', 1n]) {
+      const query = vi.fn(async () => [[{ acquired: value }], []]);
+      await expect(acquireMigrationLock({ query })).rejects.toBeInstanceOf(UpgradeProbeError);
+    }
+  });
+
+  it('reports only the safe execution phase and nested driver code/errno, never SQL/credentials/stack', () => {
+    const secret = 'do-not-print-test-secret';
+    const driver = Object.assign(new Error(`mysql://account:${secret}@server/db`), {
+      code: 'ER_BAD_FIELD_ERROR',
+      errno: 1054,
+      sql: `INSERT INTO secret_table VALUES ('${secret}')`,
+    });
+    const outer = new Error(`Failed query: ${driver.sql}`, { cause: driver });
+    const diagnostic = safeProbeFailure(outer, 'seed_baseline_data');
+    expect(diagnostic).toBeInstanceOf(UpgradeProbeError);
+    expect(diagnostic.message).toContain('phase=seed_baseline_data');
+    expect(diagnostic.message).toContain('driver_code=ER_BAD_FIELD_ERROR driver_errno=1054');
+    for (const omitted of [secret, 'mysql://', 'secret_table', 'INSERT INTO', 'Failed query'])
+      expect(diagnostic.message).not.toContain(omitted);
+    expect(safeProbeFailure(diagnostic, 'cli_preflight').message).toBe(diagnostic.message);
+    expect(
+      safeProbeFailure(new UpgradeProbeError(secret), 'verify_empty_database').message,
+    ).not.toContain(secret);
+    expect(
+      safeProbeFailure(
+        Object.assign(new Error(secret), { code: 'ECONNREFUSED', errno: -4078 }),
+        'connect_database',
+      ).message,
+    ).toContain('driver_code=ECONNREFUSED driver_errno=-4078');
+    const malformed = safeProbeFailure(
+      Object.assign(new Error(secret), { code: secret, errno: secret }),
+      `mysql://${secret}`,
+    );
+    expect(malformed.message).toContain('phase=unknown');
+    expect(malformed.message).toContain('driver_code=unavailable driver_errno=unavailable');
+    expect(malformed.message).not.toContain(secret);
+  });
+
   it('records the actual MySQL version returned by the server instead of a configured image tag', async () => {
     const query = vi.fn(async () => [[{ mysql_version: '8.4.11' }], []]);
     await expect(readMysqlVersion({ query })).resolves.toBe('8.4.11');
