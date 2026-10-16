@@ -107,3 +107,29 @@ Domain 28、Contracts 10、Database 138（另有既有一项跳过）、API 94�
 生产 Schema 只读核对 healthy、三十张表含一张迁移记录表、无宿主 3306。十三条迁移清单计划摘要为 `9893710d77929551c9cf361e3f9a69554f529b4536beb4ff5a8cf762d7b3e17f`，生产尚未应用新增迁移。
 
 当前仍需完成最终提交的 CI／制品门禁、预发布升级兼容与真实链路验收，以及可体验候选的交付。没有切换公网服务；生产高影响迁移和切换按[本轮变更方案](2026-10-17-r1-controlled-change-plan.md)另行确认。尤其不将旧版编辑器可能丢弃新字段的回退风险隐去。
+
+## CI 依赖修复
+
+首个统一候选 `059797c` 的 [CI 38951591779](https://github.com/dingyong221/H5AICustomerService/actions/runs/38951591779) 在依赖审计步骤失败；真实 MySQL 任务已通过，不能因此把整条流水线标绿。审计检出三项额外高危，没有增加豁免：
+
+| 依赖               | 原锁定 | 修复锁定 | 上游依据                                                                 |
+| ------------------ | ------ | -------- | ------------------------------------------------------------------------ |
+| source-map-js      | 1.2.1  | 1.2.2    | [GHSA-68fv-2mgg-jv7q](https://github.com/advisories/GHSA-68fv-2mgg-jv7q) |
+| sharp              | 0.35.4 | 0.35.5   | [GHSA-wq5f-xc86-pv6w](https://github.com/advisories/GHSA-wq5f-xc86-pv6w) |
+| MCP TypeScript SDK | 1.30.0 | 1.31.0   | [GHSA-6qxp-vccf-f47h](https://github.com/advisories/GHSA-6qxp-vccf-f47h) |
+
+source-map-js 和 sharp 使用精确 overrides 覆盖全部依赖路径；SDK 精确更新直接依赖。同步的平台图像二进制和 libvips 由 pnpm 生成锁定摘要，不手改完整性值。使用项目清单锁定的 pnpm 11.19.0 重新生成并完成 frozen-lockfile 安装，未执行安装脚本。
+
+本地高危审计现已通过；仍报告一项 moderate 与原先获批的一项 ignored high，不表述为零漏洞。原 braces 例外及 11 月 3 日到期日未改变。安装包扫描不等于认定生产发生攻击；本项目 SDK 的客户端仅用于协议测试，生产为服务端且 MCP 公网关闭，不使用该公告涉及的 OAuth client provider。
+
+上述本地完整功能结果来自安全依赖更新前的 `059797c`；业务源码和迁移未因依赖修复改变，但修复后的 Node 24／Linux 构建、原生模块和完整流程仍以新提交的 CI 为准，不能复用旧 SHA 的通过状态。
+
+修复依赖后已重新运行 API 全套单测，13 个文件、94 项通过；API 类型检查通过。直接从应用依赖路径核对 SDK 1.31.0、sharp 0.35.5、source-map-js 1.2.2，并用 sharp 生成一个合成一像素 PNG 成功。这证明本地依赖解析、协议回归和原生模块基本可运行，不替代 Linux 制品验收。
+
+## CI 临时磁盘修复
+
+同一首轮 CI 的数据库与浏览器闭环任务成功。容器任务的五个镜像及两个同域管理端变体已构建并完成基础 smoke，但随后拉取 MySQL 时出现 `failed to register layer` 和 `no space left on device`，尚未启动 MySQL；不能把此任务整体计为通过。
+
+修复只作用于 GitHub 临时 runner：最后一个镜像构建及 smoke 完成后、MySQL 拉取前，清理 builder cache，保留已标记的运行镜像、容器和数据卷；回读 API／Worker 镜像仍存在，并记录前后磁盘与 Docker 占用。该位置之后不再构建，后续运行探针使用保留的镜像。没有清理业务服务器，也没有执行 image／container／volume prune。
+
+实际释放量及容器数据库探针是否通过，以修复提交的新 CI 为准；不预先保证释放容量。独立候选镜像矩阵每个 runner 只构建一个目标，且 smoke 后还要构建推送，不在这些任务盲目套用缓存清理。

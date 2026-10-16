@@ -317,6 +317,19 @@ jobs:
             .
           H5CS_OPS_BASE_PATH=/ops bash scripts/quality/smoke-release-images.sh ops-web
 
+      - name: Reclaim temporary builder cache before database runtime probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          # All image builds are finished. Reclaim only this ephemeral runner's
+          # builder cache; retain the tagged runtime images, containers and volumes.
+          docker system df
+          df -h /
+          docker builder prune --all --force
+          docker image inspect h5cs-api:ci h5cs-worker:ci >/dev/null
+          docker system df
+          df -h /
+
       - name: Start isolated loopback MySQL for packaged runtime probes
         run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml up -d --wait mysql
 

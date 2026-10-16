@@ -175,7 +175,7 @@ pnpm --filter @h5cs/database exec vitest run test/identity-authorization-reposit
 
 先刷新 workspace contracts 构建产物，避免 API 测试加载旧 Schema。协议测试使用官方 TypeScript SDK 客户端完成初始化、`tools/list` 和 `tools/call`，并覆盖四工具发现、transport Bearer、严格参数、内部事件隔离以及鉴权/数据库未配置错误；OAuth/身份桥接测试覆盖 metadata、PKCE、RFC 9207 `iss`、固定 WorkBuddy 端点、state + session + 配置版本一次性消费、响应字段和 HMAC 主体派生；数据库测试覆盖身份正反向冲突、bridge state、consent grant、OAuth 原子轮换和 membership 0/1/多查询行为。它们仍不覆盖真实平台 session cookie、端到端显式 consent、在线撤销传播或真实 WorkBuddy 换票。
 
-服务端与协议测试当前固定使用官方 `@modelcontextprotocol/sdk` 1.30.0；升级协议或迁移到该 SDK 后续拆分包前，必须重新执行本节协议测试和目标 WorkBuddy 客户端验证。
+服务端与协议测试当前固定使用官方 `@modelcontextprotocol/sdk` 1.31.0；升级协议或迁移到该 SDK 后续拆分包前，必须重新执行本节协议测试和目标 WorkBuddy 客户端验证。
 
 本批验收包含官方文档/RFC 交叉审查、非秘密 Connector 元数据/Skill 静态核对、四工具本地协议测试、Connector OAuth 正负测试、OAuth/onboarding 数据仓储测试，以及第三方应用 authorize/换票/state/HMAC 身份桥接的本地测试材料核对；没有执行真实第三方应用换票、远程 OAuth、生产部署或真实 WorkBuddy 客户端测试。后续实机测试至少必须保存以下脱敏证据：
 
