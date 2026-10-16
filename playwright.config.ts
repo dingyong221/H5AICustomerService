@@ -56,7 +56,13 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   reporter: 'line',
-  use: { browserName: 'chromium', trace: 'off', screenshot: 'off', video: 'off' },
+  use: {
+    browserName: 'chromium',
+    trace: 'off',
+    screenshot: 'off',
+    video: 'off',
+    ...(process.env['H5CS_E2E_BROWSER_CHANNEL'] === 'chrome' ? { channel: 'chrome' } : {}),
+  },
   webServer: [
     {
       command: 'node tests/e2e/fake-model.mjs',
@@ -67,7 +73,7 @@ export default defineConfig({
     ...(!externalServices
       ? [
           {
-            command: 'pnpm --filter @h5cs/api start',
+            command: 'node apps/api/dist/main.js',
             url: 'http://127.0.0.1:4000/readyz',
             env: {
               ...common,
@@ -85,7 +91,7 @@ export default defineConfig({
     ...(!externalServices
       ? [
           {
-            command: 'pnpm --filter @h5cs/worker start',
+            command: 'node apps/worker/dist/main.js',
             url: 'http://127.0.0.1:3011/readyz',
             env: {
               ...common,
@@ -106,7 +112,7 @@ export default defineConfig({
     ...(!externalServices
       ? [
           {
-            command: 'pnpm --filter @h5cs/ops-web start',
+            command: 'node scripts/quality/run-next-app.mjs ops-web start 3002',
             url: `http://127.0.0.1:3002${opsBasePath}/login`,
             env: {
               ...common,
@@ -126,7 +132,7 @@ export default defineConfig({
     ...(!externalServices
       ? [
           {
-            command: 'pnpm --filter @h5cs/merchant-web start',
+            command: 'node scripts/quality/run-next-app.mjs merchant-web start 3000',
             url: `http://127.0.0.1:3000${merchantBasePath}/setup`,
             env: {
               ...common,
@@ -154,7 +160,7 @@ export default defineConfig({
     ...(!externalServices
       ? [
           {
-            command: 'pnpm --filter @h5cs/consumer-h5 exec next start --port 3003',
+            command: 'node scripts/quality/run-next-app.mjs consumer-h5 start 3003',
             url: 'http://127.0.0.1:3003/',
             env: {
               NODE_ENV: 'production',

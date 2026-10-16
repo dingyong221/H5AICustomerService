@@ -64,7 +64,7 @@ function parsePayload(value: unknown): {
   if (
     typeof input['question'] !== 'string' ||
     input['question'].trim().length < 1 ||
-    input['question'].length > 500 ||
+    input['question'].length > 2_000 ||
     controlCharacters.test(input['question'])
   ) {
     throw new PreviewError(400, 'Invalid preview question');
@@ -77,6 +77,15 @@ function parsePayload(value: unknown): {
     throw new PreviewError(400, 'Invalid preview facts');
   }
   const candidate = input['facts'] as Record<string, unknown>;
+  const humanContact = candidate['humanContact'];
+  if (
+    humanContact !== undefined &&
+    (typeof humanContact !== 'string' ||
+      humanContact.length > 500 ||
+      /[\u0000-\u0009\u000b-\u001f\u007f<>]/u.test(humanContact))
+  ) {
+    throw new PreviewError(400, 'Invalid human contact instructions');
+  }
   for (const [name, maximum] of fields) {
     const text = candidate[name];
     if (

@@ -5,6 +5,11 @@ export function safeMerchantReturnPath(merchantId: string, value: unknown): stri
     'u',
   );
   if (allowed.test(value)) return value;
+  const improvements = new RegExp(
+    `^/${merchantId}/improvements(?:/[0-9a-f]{32})?(?:\\?assistant=[0-9a-f]{32}(?:&session=[0-9a-f]{32}&message=[0-9a-f]{32})?)?(?:#create)?$`,
+    'u',
+  );
+  if (improvements.test(value)) return value;
   if (value === `/workspace/${merchantId}`) return `/${merchantId}`;
   const legacy = new RegExp(`^/workspace/${merchantId}/assistants/([0-9a-f]{32})$`, 'u').exec(
     value,

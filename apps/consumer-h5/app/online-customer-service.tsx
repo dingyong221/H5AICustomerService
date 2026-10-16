@@ -1,5 +1,7 @@
 'use client';
 
+import { HumanContactNotice } from './human-contact-notice';
+
 import { Button } from '@h5cs/ui';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -361,6 +363,8 @@ export function OnlineCustomerService({
           <strong>这是 AI 客服</strong>
           <span>{activeSnapshot.businessScope}</span>
         </aside>
+
+        <HumanContactNotice instructions={activeSnapshot.humanContact} />
 
         <div
           aria-busy={pending?.phase === 'sending' || pending?.phase === 'waiting'}

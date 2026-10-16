@@ -1,6 +1,10 @@
 # H5 AI客服生成与管理平台：设计索引
 
-## 当前实现与发布边界（2026-09-25）
+## 当前状态入口
+
+下方 2026 年 9 月 25 日章节是历史检查点，不是实时服务器状态。此后受控 Web 已启用 MySQL、TLS 和真实千问，业务及帮助／填写助手验收见[10 月 6 日记录](../operations/merchant-help-writing-release-2026-10-06.md)。R1 持续改善仍为未发布候选，见[本轮设计](21-merchant-improvement-loop.md)和[验收记录](../operations/2026-10-17-improvement-candidate-evidence.md)。WorkBuddy 真实接入仍未完成；早期 RAG 等目标不能当作已实现功能。
+
+## 历史实现与发布边界（2026-09-25）
 
 仓库已形成运营 Web 开通商家与生成领取/管理链接、商家 Web 领取并创建/确认/发布客服、MySQL 事实仓储、异步 Worker 回答和消费者 H5 咨询的本地闭环。CI 使用一次性 MySQL、受控测试模型与生产构建，在独立主机根路径及 `/ops`、`/console` 子路径变体下分别跑通浏览器场景；候选同域名网关也在隔离端口验收。这证明仓库中的流程，不证明正式模型或生产可用。最新提交的 CI 和仓库证据应以[草稿 PR](https://github.com/dingyong221/H5AICustomerService/pull/1)的精确 SHA 验证记录为准；候选镜像尚未推送。
 

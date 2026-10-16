@@ -43,6 +43,7 @@ export function CreateAssistantForm({
       preset?.insufficientInfoMessage ?? '这项信息尚未确认，请联系商家核实。',
   });
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [humanContact, setHumanContact] = useState('');
   const router = useRouter();
   const hydrated = useSyncExternalStore(subscribe, clientReady, serverReady);
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateId);
@@ -123,7 +124,8 @@ export function CreateAssistantForm({
     >
       <p>填好资料并创建后，页面会显示客服入口，可继续编辑、试聊和发布。</p>
       <p>
-        至少填写客服名称、细分行业、业务范围和商品或服务资料。创建只保存草稿，确认资料并发布后才能提供消费者链接。
+        请填写以下 8
+        项客服资料；没有价格或优惠时请明确写“需联系商家确认”或“暂无优惠”，不要编造。人工联系方式可选。创建只保存草稿，确认资料并发布后才能提供消费者链接。
       </p>
       <input name="merchantId" type="hidden" value={merchantId} />
       <input name="idempotencyKey" type="hidden" value={idempotencyKey} />
@@ -179,6 +181,21 @@ export function CreateAssistantForm({
         includeName
         onChange={(field, value) => setValues((previous) => ({ ...previous, [field]: value }))}
       />
+      <label>
+        人工联系说明（可选）
+        <textarea
+          name="humanContact"
+          maxLength={500}
+          rows={3}
+          value={humanContact}
+          onChange={(event) => setHumanContact(event.target.value)}
+          placeholder="例如：工作日 9:00—18:00，微信号 shop_service 或电话 010-12345678。请填写你真实可用的渠道。"
+        />
+      </label>
+      <p>
+        最多 500 字纯文本，不支持
+        HTML。发布后消费者可查看；本平台不会实时转接人工，不要填写密码或私人敏感资料。
+      </p>
       {validationError || state.error ? (
         <p role="alert">{validationError ?? state.error} 当前填写内容不会清空。</p>
       ) : null}

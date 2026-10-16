@@ -28,6 +28,7 @@ export function EditDraftForm({
     saved: false,
   });
   const [values, setValues] = useState<DraftFieldValues>({ displayName: '', ...draft });
+  const [humanContact, setHumanContact] = useState(draft.humanContact ?? '');
   return (
     <form action={action} className="assistant-edit-form">
       <input name="merchantId" type="hidden" value={merchantId} />
@@ -39,6 +40,21 @@ export function EditDraftForm({
         values={values}
         onChange={(field, value) => setValues((previous) => ({ ...previous, [field]: value }))}
       />
+      <label>
+        人工联系说明（可选）
+        <textarea
+          name="humanContact"
+          maxLength={500}
+          rows={3}
+          value={humanContact}
+          onChange={(event) => setHumanContact(event.target.value)}
+          placeholder="填写真实的人工联系方式、服务时间及必要说明"
+        />
+      </label>
+      <p>
+        最多 500 字纯文本，不支持
+        HTML。仅发布后的说明向消费者展示；此处不实时转接人工。留空表示尚未提供，保存失败会保留当前输入。
+      </p>
       {state.error ? <p role="alert">{state.error}</p> : null}
       {state.saved ? (
         <p role="status">

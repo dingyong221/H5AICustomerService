@@ -13,8 +13,10 @@ describe('consumer server-side public API fetch', () => {
 
   it('loads only the public assistant snapshot through the internal API service', async () => {
     const requestedUrls: string[] = [];
-    const fetchImpl: typeof fetch = async (input) => {
+    const requestedHeaders: (HeadersInit | undefined)[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
       requestedUrls.push(String(input));
+      requestedHeaders.push(init?.headers);
       return new Response(
         JSON.stringify({
           data: {
@@ -41,6 +43,7 @@ describe('consumer server-side public API fetch', () => {
 
     expect(result.status).toBe('online');
     expect(requestedUrls).toEqual(['http://api:4000/api/v1/public/assistants/test-assistant']);
+    expect(new Headers(requestedHeaders[0]).get('X-H5CS-Features')).toBe('human-contact');
   });
 
   it('rejects an arbitrary internal destination or unsafe public origin', () => {

@@ -4,8 +4,11 @@ import type { ReactNode } from 'react';
 
 import '@h5cs/ui/styles.css';
 import './styles.css';
+import './improvements/improvements.css';
 import { currentMerchant } from './account/merchant-actions';
 import { MerchantNavigation } from './navigation';
+import { readImprovements } from './improvements/improvement-data';
+import { actionableImprovementCount } from './improvements/improvement-model';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +29,9 @@ export const viewport: Viewport = {
 
 export default async function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   const merchant = await currentMerchant();
+  const improvements = merchant
+    ? await readImprovements(merchant.merchantId, merchant.merchantUserId)
+    : null;
   const workspaceHref = merchant ? `/${merchant.merchantId}` : '/console';
   return (
     <html lang="zh-CN">
@@ -44,7 +50,12 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
                 <small>商家工作台</small>
               </span>
             </Link>
-            <MerchantNavigation merchantId={merchant?.merchantId} />
+            <MerchantNavigation
+              merchantId={merchant?.merchantId}
+              improvementCount={
+                improvements ? actionableImprovementCount(improvements.counts) : null
+              }
+            />
             <div className="merchant-sidebar__footer">
               <span className="merchant-avatar" aria-hidden="true">
                 商

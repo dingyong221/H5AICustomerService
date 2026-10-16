@@ -97,8 +97,10 @@ jobs:
           NEXT_PUBLIC_OPS_BASE_PATH: /ops
         run: |
           set -euo pipefail
-          for spec in 'merchant-web /console 3133 /console/account/login /account/login' 'ops-web /ops 3134 /ops/login /login'; do
-            read -r app prefix port live_path absent_path <<< "$spec"
+          # Merchant tenant pages intentionally use root-level /{merchantId} routes.
+          # /console is an asset/compatibility prefix, unlike the Ops Next basePath.
+          for spec in 'merchant-web /console 3133 /console/account/login /account/login 200' 'ops-web /ops 3134 /ops/login /login 404'; do
+            read -r app prefix port live_path root_path root_status <<< "$spec"
             pnpm --filter "@h5cs/${app}" build
             (
               cd "apps/${app}"
@@ -110,7 +112,7 @@ jobs:
                 sleep 1
               done
               test "$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${port}${live_path}")" = 200
-              test "$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${port}${absent_path}")" = 404
+              test "$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${port}${root_path}")" = "$root_status"
               html="$(curl --silent "http://127.0.0.1:${port}${live_path}")"
               grep -Fq "src=\"${prefix}/_next/static/" <<< "$html"
             )

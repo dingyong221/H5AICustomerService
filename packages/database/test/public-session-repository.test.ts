@@ -189,6 +189,7 @@ describe('MySQL public visitor sessions', () => {
                     displayName: '售前助手',
                     businessScope: '空调清洗',
                     welcomeMessage: '你好',
+                    humanContact: '旧发布版本的人工说明：微信 old_support',
                   },
                 },
               ]
@@ -227,12 +228,19 @@ describe('MySQL public visitor sessions', () => {
     ).resolves.toMatchObject({
       sessionHandle: issued.sessionHandle,
       releaseRef: releaseId.toString('hex'),
-      snapshot: { publicAssistantId: publicSlug, assistantDisplayName: '售前助手' },
+      snapshot: {
+        publicAssistantId: publicSlug,
+        assistantDisplayName: '售前助手',
+        humanContact: '旧发布版本的人工说明：微信 old_support',
+      },
       messages: [{ role: 'visitor', clientMessageId: visitorMessageId }],
       activeTurn: { turnId: `t_${'88'.repeat(16)}`, clientMessageId: visitorMessageId },
       hasEarlierMessages: false,
     });
     const messageQueries = calls.filter((call) => call.statement.includes('FROM message')).length;
+    expect(calls.find((call) => call.statement.includes('r.config_snapshot'))?.statement).toContain(
+      'r.id = cs.release_id',
+    );
     await expect(
       repository.readHistory(issued.sessionHandle, randomBytes(32).toString('base64url'), now),
     ).resolves.toBeNull();

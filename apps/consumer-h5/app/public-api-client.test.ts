@@ -36,6 +36,7 @@ const snapshotData = {
   publicAssistantId: 'assistant_public_1',
   releaseRef: 'release_1234567890',
   welcomeMessage: '你好，请问想了解什么？',
+  humanContact: '',
 } as const;
 
 const snapshot: OnlinePublicAssistantSnapshot = snapshotData;
@@ -85,6 +86,27 @@ describe('public API response decoders', () => {
     expect(
       decodePublicAssistantSnapshot(envelope({ ...snapshotData, aiDisclosure: false })),
     ).toBeUndefined();
+  });
+
+  it('reads optional legacy or published contact text without accepting HTML or oversized instructions', () => {
+    const legacy = { ...snapshotData };
+    Reflect.deleteProperty(legacy, 'humanContact');
+    expect(decodePublicAssistantSnapshot(envelope(legacy))?.humanContact).toBe('');
+    expect(
+      decodePublicAssistantSnapshot(
+        envelope({ ...snapshotData, humanContact: '工作日9—18点\n微信 shop_service' }),
+      )?.humanContact,
+    ).toBe('工作日9—18点\n微信 shop_service');
+    for (const humanContact of [
+      '联'.repeat(501),
+      '<a href="https://evil.example">人工</a>',
+      '电话\u0000隐藏',
+      null,
+    ]) {
+      expect(
+        decodePublicAssistantSnapshot(envelope({ ...snapshotData, humanContact })),
+      ).toBeUndefined();
+    }
   });
 
   it('rejects cross-origin accepted-turn URLs', () => {
@@ -358,6 +380,27 @@ describe('public assistant API client', () => {
       expect.objectContaining({ method: 'GET', credentials: 'same-origin', cache: 'no-store' }),
       expect.objectContaining({ method: 'GET', credentials: 'same-origin', cache: 'no-store' }),
     ]);
+    expect(fetchImpl.mock.calls[1]?.[1]?.headers).toMatchObject({
+      'X-H5CS-Features': 'human-contact',
+    });
+  });
+
+  it('negotiates human contact on snapshot reads while accepting an older API without the field', async () => {
+    const legacySnapshot = { ...snapshotData };
+    Reflect.deleteProperty(legacySnapshot, 'humanContact');
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse(envelope(legacySnapshot)));
+    const client = createPublicAssistantApiClient({
+      apiBaseUrl: '/api/v1/public',
+      fetchImpl,
+      origin,
+    });
+    await expect(client.loadAssistant('shop-help')).resolves.toMatchObject({
+      status: 'online',
+      snapshot: { humanContact: '' },
+    });
+    expect(fetchImpl.mock.calls[0]?.[1]?.headers).toMatchObject({
+      'X-H5CS-Features': 'human-contact',
+    });
   });
 
   it('ends only the selected session with its visitor cookie and validates the confirmation', async () => {

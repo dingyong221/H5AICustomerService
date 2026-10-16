@@ -123,6 +123,8 @@ export async function publishAssistantAction(
     revalidatePath(`/${merchantId}/drafts`);
     revalidatePath(`/${merchantId}/knowledge`);
     revalidatePath(`/${merchantId}/publish`);
+    revalidatePath(`/${merchantId}/improvements`);
+    revalidatePath('/[merchantId]/improvements/[improvementId]', 'page');
     const publicSnapshot = await repository.findPublicSnapshot(assistant.publicSlug);
     const publicUrl =
       publicSnapshot?.releaseRef === release.releaseId

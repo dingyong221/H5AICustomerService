@@ -31,7 +31,7 @@ export function PreviewChatForm({
       <label>
         试聊问题
         <textarea
-          maxLength={500}
+          maxLength={2_000}
           name="question"
           placeholder="例如：你们提供哪些服务？价格怎么确定？"
           required

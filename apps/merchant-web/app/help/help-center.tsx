@@ -43,13 +43,15 @@ export function HelpCenter({ merchantId }: { merchantId: string }) {
         </ol>
         <p>“帮我写”只整理文案；创建只保存草稿。核对资料并发布后，才会开放消费者对话。</p>
         <Link href={merchantPath(merchantId, 'drafts')}>开始配置自己的客服</Link>
+        <p>用起来以后：从真实咨询标记问题，补充知识、复测并发布更新，让客服持续变好。</p>
+        <Link href={merchantPath(merchantId, 'improvements')}>进入问题与改进</Link>
       </section>
       <div className="help-tools">
         <label>
           查找操作或问题
           <input
             type="search"
-            placeholder="例如：价格、发布、二维码、登录、帮我写"
+            placeholder="例如：价格、复测、改进、二维码、登录、帮我写"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />

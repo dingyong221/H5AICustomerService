@@ -59,6 +59,13 @@ export async function requestWorkerPreview(
   environment: NodeJS.ProcessEnv = process.env,
   fetchImpl: typeof fetch = fetch,
 ): Promise<string> {
+  if (
+    input.question.trim().length < 1 ||
+    input.question.length > 2_000 ||
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(input.question)
+  ) {
+    throw new Error('Preview question must contain 1 to 2000 characters');
+  }
   const url = previewWorkerUrl(environment);
   const token = previewToken(environment);
   if (!url || !token) throw new Error('Preview is not configured');

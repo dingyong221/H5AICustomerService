@@ -3,7 +3,13 @@ import { useParams, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { merchantPath } from './tenant-paths';
 
-export function MerchantNavigation({ merchantId }: { merchantId?: string | undefined }) {
+export function MerchantNavigation({
+  merchantId,
+  improvementCount,
+}: {
+  merchantId?: string | undefined;
+  improvementCount?: number | null;
+}) {
   const pathname = usePathname();
   const params = useParams<{ merchantId?: string; assistantId?: string }>();
   const authorizedMerchant =
@@ -42,6 +48,11 @@ export function MerchantNavigation({ merchantId }: { merchantId?: string | undef
       short: '询',
     },
     {
+      href: authorizedMerchant ? merchantPath(authorizedMerchant, 'improvements') : login,
+      label: '问题与改进',
+      short: '改',
+    },
+    {
       href: authorizedMerchant ? merchantPath(authorizedMerchant, 'writing') : login,
       label: '资料填写助手',
       short: '写',
@@ -59,14 +70,33 @@ export function MerchantNavigation({ merchantId }: { merchantId?: string | undef
           key={item.label}
           href={item.href}
           title={item.label}
-          aria-label={item.label}
-          aria-current={item.href === pathname ? 'page' : undefined}
-          className={item.href === pathname ? 'merchant-nav__item is-active' : 'merchant-nav__item'}
+          aria-label={
+            item.label === '问题与改进' && improvementCount != null
+              ? `${item.label}，待推进 ${improvementCount} 项`
+              : item.label
+          }
+          aria-current={
+            item.href === pathname ||
+            (item.label === '问题与改进' && pathname.startsWith(`${item.href}/`))
+              ? 'page'
+              : undefined
+          }
+          className={
+            item.href === pathname ||
+            (item.label === '问题与改进' && pathname.startsWith(`${item.href}/`))
+              ? 'merchant-nav__item is-active'
+              : 'merchant-nav__item'
+          }
         >
           <span aria-hidden="true" className="merchant-nav__icon">
             {item.short}
           </span>
-          <span>{item.label}</span>
+          <span>
+            {item.label}
+            {item.label === '问题与改进' && authorizedMerchant && improvementCount != null ? (
+              <span className="improvement-nav-count">{improvementCount}</span>
+            ) : null}
+          </span>
         </Link>
       ))}
     </nav>

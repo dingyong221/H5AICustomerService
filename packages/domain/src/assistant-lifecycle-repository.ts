@@ -14,7 +14,18 @@ export type AssistantDraftConfig = Readonly<{
   promotionSummary: string;
   welcomeMessage: string;
   insufficientInfoMessage: string;
+  /** Published plain-text contact instructions, never a live transfer or HTML. */
+  humanContact?: string;
 }>;
+
+export function normalizeHumanContact(value: unknown): string | null {
+  if (value === undefined) return '';
+  if (typeof value !== 'string') return null;
+  const normalized = value.replace(/\r\n?/gu, '\n').trim();
+  return normalized.length <= 500 && !/[\u0000-\u0009\u000b-\u001f\u007f<>]/u.test(normalized)
+    ? normalized
+    : null;
+}
 
 export type AssistantLifecycleIdempotency = Readonly<{
   actorScopeDigest: Uint8Array;
@@ -56,6 +67,7 @@ export type PublicAssistantSnapshot = Readonly<{
   businessScope: string;
   welcomeMessage: string;
   insufficientInfoMessage: string;
+  humanContact?: string;
   availability: 'online';
 }>;
 

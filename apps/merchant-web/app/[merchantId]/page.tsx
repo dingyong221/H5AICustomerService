@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { PageShell, StatusBadge } from '@h5cs/ui';
-import { merchantAssistants } from '../tenant-data';
+import { merchantAssistants, requireMerchant } from '../tenant-data';
 import { merchantPath } from '../tenant-paths';
+import { ImprovementSummaryPanel } from '../improvements/improvement-summary';
 
 export default async function MerchantDashboard({
   params,
@@ -9,6 +10,7 @@ export default async function MerchantDashboard({
   params: Promise<{ merchantId: string }>;
 }) {
   const { merchantId } = await params;
+  const member = await requireMerchant(merchantId);
   const assistants = await merchantAssistants(merchantId);
   return (
     <PageShell
@@ -44,6 +46,7 @@ export default async function MerchantDashboard({
           <p>商家已开通。下一步请点击“客服草稿”，填写业务资料并创建第一个客服。</p>
         ) : null}
       </section>
+      <ImprovementSummaryPanel merchantId={merchantId} merchantUserId={member.merchantUserId} />
     </PageShell>
   );
 }

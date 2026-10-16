@@ -29,6 +29,7 @@ export class PublicAssistantService {
     aiDisclosure: true;
     businessScope: string;
     welcomeMessage: string;
+    humanContact: string;
     availability: 'online';
     releaseRef: string;
   }> {
@@ -48,6 +49,7 @@ export class PublicAssistantService {
       aiDisclosure: true,
       businessScope: snapshot.businessScope,
       welcomeMessage: snapshot.welcomeMessage,
+      humanContact: snapshot.humanContact ?? '',
       availability: 'online',
       releaseRef: snapshot.releaseRef,
     };

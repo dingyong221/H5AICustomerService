@@ -833,6 +833,123 @@ export const messages = mysqlTable(
   ],
 );
 
+export const assistantImprovements = mysqlTable(
+  'assistant_improvement',
+  {
+    id: id('id').notNull(),
+    merchantId: id('merchant_id').notNull(),
+    assistantId: id('assistant_id').notNull(),
+    version: int('version', { unsigned: true }).notNull().default(1),
+    sourceSessionId: id('source_session_id'),
+    sourceMessageId: id('source_message_id'),
+    sourceReleaseId: id('source_release_id'),
+    reason: varchar('reason', { length: 32 }).notNull(),
+    question: text('question').notNull(),
+    expectedAnswer: text('expected_answer').notNull(),
+    notes: text('notes').notNull(),
+    originalAnswer: mediumtext('original_answer'),
+    appliedBlock: text('applied_block'),
+    appliedDraftRevision: int('applied_draft_revision', { unsigned: true }),
+    publishedReleaseId: id('published_release_id'),
+    publishedTaskVersion: int('published_task_version', { unsigned: true }),
+    createdBy: id('created_by').notNull(),
+    updatedBy: id('updated_by').notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id], name: 'pk_assistant_improvement' }),
+    uniqueIndex('uq_improvement_scope').on(table.merchantId, table.assistantId, table.id),
+    uniqueIndex('uq_improvement_source').on(
+      table.merchantId,
+      table.assistantId,
+      table.sourceMessageId,
+    ),
+    index('idx_improvement_recent').on(
+      table.merchantId,
+      table.assistantId,
+      table.updatedAt,
+      table.id,
+    ),
+    foreignKey({
+      columns: [table.merchantId, table.assistantId],
+      foreignColumns: [assistants.merchantId, assistants.id],
+      name: 'fk_improvement_assistant',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.merchantId, table.assistantId, table.sourceSessionId],
+      foreignColumns: [sessions.merchantId, sessions.assistantId, sessions.id],
+      name: 'fk_improvement_session',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.merchantId, table.assistantId, table.sourceMessageId],
+      foreignColumns: [messages.merchantId, messages.assistantId, messages.id],
+      name: 'fk_improvement_message',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.merchantId, table.assistantId, table.sourceReleaseId],
+      foreignColumns: [releases.merchantId, releases.assistantId, releases.id],
+      name: 'fk_improvement_source_release',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.merchantId, table.assistantId, table.publishedReleaseId],
+      foreignColumns: [releases.merchantId, releases.assistantId, releases.id],
+      name: 'fk_improvement_published_release',
+    }).onDelete('restrict'),
+  ],
+);
+
+export const assistantEvaluationRuns = mysqlTable(
+  'assistant_evaluation_run',
+  {
+    id: id('id').notNull(),
+    merchantId: id('merchant_id').notNull(),
+    assistantId: id('assistant_id').notNull(),
+    improvementId: id('improvement_id').notNull(),
+    taskVersion: int('task_version', { unsigned: true }).notNull(),
+    draftRevision: int('draft_revision', { unsigned: true }).notNull(),
+    factsHash: digest('facts_hash').notNull(),
+    question: text('question').notNull(),
+    expectedAnswer: text('expected_answer').notNull(),
+    answer: mediumtext('answer'),
+    state: varchar('state', { length: 24 }).notNull(),
+    errorCode: varchar('error_code', { length: 64 }),
+    verdict: varchar('verdict', { length: 16 }),
+    promptTemplateVersion: varchar('prompt_template_version', { length: 64 }).notNull(),
+    modelPolicyVersion: varchar('model_policy_version', { length: 64 }).notNull(),
+    createdBy: id('created_by').notNull(),
+    reviewedBy: id('reviewed_by'),
+    createdAt: createdAt(),
+    completedAt: utcDateTime('completed_at'),
+    reviewedAt: utcDateTime('reviewed_at'),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id], name: 'pk_assistant_evaluation_run' }),
+    uniqueIndex('uq_evaluation_scope').on(
+      table.merchantId,
+      table.assistantId,
+      table.improvementId,
+      table.id,
+    ),
+    index('idx_evaluation_latest').on(
+      table.merchantId,
+      table.assistantId,
+      table.improvementId,
+      table.createdAt,
+      table.id,
+    ),
+    foreignKey({
+      columns: [table.merchantId, table.assistantId, table.improvementId],
+      foreignColumns: [
+        assistantImprovements.merchantId,
+        assistantImprovements.assistantId,
+        assistantImprovements.id,
+      ],
+      name: 'fk_evaluation_improvement',
+    }).onDelete('restrict'),
+  ],
+);
+
 export const idempotencyRecords = mysqlTable(
   'idempotency_record',
   {

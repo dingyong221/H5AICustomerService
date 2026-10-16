@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   AssistantIdempotencyConflictError,
+  AssistantLifecyclePersistenceError,
   AssistantPublishValidationError,
   AssistantRevisionConflictError,
   toAssistantId,
@@ -456,8 +457,21 @@ describe('MySQL assistant lifecycle repository', () => {
     expect(calls[5]?.statement).toMatch(/INSERT INTO assistant_release/u);
     expect(calls[6]?.statement).toMatch(/INSERT INTO assistant_active_release/u);
     expect(calls[7]?.statement).toMatch(/SET active_release_id = \?, status = 'active'/u);
-    expect(calls[8]?.statement).toMatch(/state = 'succeeded'/u);
-    expect(calls[9]?.statement).toMatch(/INSERT INTO outbox_event/u);
+    expect(calls[8]?.statement).toContain('UPDATE assistant_improvement');
+    expect(calls[8]?.statement).toContain('r.task_version = i.version');
+    expect(calls[8]?.statement).toContain('r.facts_hash = ?');
+    expect(calls[8]?.values).toEqual([
+      Buffer.from(releaseId, 'hex'),
+      now,
+      Buffer.from(merchantId, 'hex'),
+      Buffer.from(assistantId, 'hex'),
+      1,
+      Buffer.from(sampleContentHash, 'hex'),
+      'prompt-v1',
+      'model-v1',
+    ]);
+    expect(calls[9]?.statement).toMatch(/state = 'succeeded'/u);
+    expect(calls[10]?.statement).toMatch(/INSERT INTO outbox_event/u);
     expect(commit).toHaveBeenCalledOnce();
   });
 
@@ -523,6 +537,12 @@ describe('MySQL assistant lifecycle repository', () => {
     const duplicate = Object.assign(new Error('duplicate'), { code: 'ER_DUP_ENTRY' });
     const { repository, calls, rollback } = repositoryWith(async (statement) => {
       if (statement.includes('INSERT INTO idempotency_record')) throw duplicate;
+      if (statement.includes('FROM assistant a') && statement.includes('FOR UPDATE')) {
+        return [
+          [managementRow({ status: 'active', active_release_id: Buffer.from(releaseId, 'hex') })],
+          [],
+        ];
+      }
       if (statement.includes('SELECT request_hash')) {
         return [
           [
@@ -572,6 +592,87 @@ describe('MySQL assistant lifecycle repository', () => {
       false,
     );
     expect(rollback).toHaveBeenCalledOnce();
+    const authorization = calls.findIndex(
+      (call) =>
+        call.statement.includes('merchant_membership') && call.statement.includes('FOR UPDATE'),
+    );
+    const cachedSuccess = calls.findIndex((call) => call.statement.includes('SELECT request_hash'));
+    expect(authorization).toBeGreaterThan(0);
+    expect(cachedSuccess).toBeGreaterThan(authorization);
+    expect(calls[authorization]?.values).toEqual([
+      Buffer.from(merchantUserId, 'hex'),
+      Buffer.from(merchantId, 'hex'),
+      Buffer.from(assistantId, 'hex'),
+    ]);
+  });
+
+  it('rejects duplicate publish recovery before reading cached success when membership or merchant authorization is no longer active', async () => {
+    const duplicate = Object.assign(new Error('duplicate'), { code: 'ER_DUP_ENTRY' });
+    const { repository, calls, rollback } = repositoryWith(async (statement) => {
+      if (statement.includes('INSERT INTO idempotency_record')) throw duplicate;
+      if (statement.includes('FROM assistant a') && statement.includes('FOR UPDATE'))
+        return [[], []];
+      throw new Error('Cached release must not be read after failed current authorization');
+    });
+    await expect(
+      repository.publish({
+        merchantUserId,
+        merchantId,
+        assistantId,
+        expectedDraftRevision: 1,
+        promptTemplateVersion: 'prompt-v1',
+        retrievalPolicyVersion: 'retrieval-v1',
+        modelPolicyVersion: 'model-v1',
+        idempotency: idem,
+        now,
+      }),
+    ).rejects.toBeInstanceOf(AssistantPublishValidationError);
+    expect(calls[1]?.statement).toContain("u.status = 'active'");
+    expect(calls[1]?.statement).toContain("mm.status = 'active'");
+    expect(calls[1]?.statement).toContain("m.status = 'active'");
+    expect(
+      calls.some(
+        (call) =>
+          call.statement.includes('SELECT request_hash') ||
+          call.statement.includes('FROM assistant_release'),
+      ),
+    ).toBe(false);
+    expect(rollback).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not return a created assistant snapshot through duplicate generation recovery after revocation', async () => {
+    const duplicate = Object.assign(new Error('duplicate'), { code: 'ER_DUP_ENTRY' });
+    const { repository, calls, rollback } = repositoryWith(async (statement) => {
+      if (statement.includes('INSERT INTO idempotency_record')) throw duplicate;
+      if (statement.includes('SELECT request_hash'))
+        return [
+          [
+            {
+              request_hash: Buffer.from(idem.requestHash),
+              state: 'succeeded',
+              resource_id: Buffer.from(assistantId, 'hex'),
+              response_body: { assistantId },
+            },
+          ],
+          [],
+        ];
+      if (statement.includes('FROM assistant a') && statement.includes('FOR UPDATE'))
+        return [[], []];
+      throw new Error('Unauthorized management snapshot must not be read');
+    });
+    await expect(
+      repository.generateDraftFromOnboarding({
+        merchantUserId,
+        merchantId,
+        onboardingSessionId,
+        idempotency: idem,
+        now,
+      }),
+    ).rejects.toBeInstanceOf(AssistantLifecyclePersistenceError);
+    expect(calls.filter((call) => call.statement.includes('SELECT request_hash'))).toHaveLength(1);
+    expect(calls.at(-1)?.statement).toContain('merchant_membership');
+    expect(calls.at(-1)?.statement).toContain('FOR UPDATE');
+    expect(rollback).toHaveBeenCalledTimes(2);
   });
 
   it('returns only an active published public snapshot and unifies negative lookups as null', async () => {
@@ -607,6 +708,7 @@ describe('MySQL assistant lifecycle repository', () => {
       publicAssistantId: publicSlug,
       releaseRef: releaseId,
       merchantName: '蓝天服务',
+      humanContact: '',
       availability: 'online',
     });
     returnPublic = false;

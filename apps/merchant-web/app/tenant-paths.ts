@@ -1,5 +1,5 @@
 export type MerchantSection =
-  'drafts' | 'knowledge' | 'publish' | 'conversations' | 'writing' | 'help';
+  'drafts' | 'knowledge' | 'publish' | 'conversations' | 'writing' | 'help' | 'improvements';
 
 export function merchantPath(
   merchantId: string,

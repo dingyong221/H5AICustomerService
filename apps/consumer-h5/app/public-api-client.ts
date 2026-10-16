@@ -10,6 +10,7 @@ export type OnlinePublicAssistantSnapshot = Readonly<{
   publicAssistantId: string;
   releaseRef: string;
   welcomeMessage: string;
+  humanContact?: string;
 }>;
 
 export type PublicAssistantLoadResult =
@@ -262,20 +263,25 @@ function decodePublicAssistantSnapshotData(data: unknown):
       publicAssistantId: string;
       releaseRef: string;
       welcomeMessage: string;
+      humanContact: string;
     }>
   | undefined {
   if (
     !isRecord(data) ||
-    !hasExactKeys(data, [
-      'publicAssistantId',
-      'merchantDisplayName',
-      'assistantDisplayName',
-      'aiDisclosure',
-      'businessScope',
-      'welcomeMessage',
-      'availability',
-      'releaseRef',
-    ]) ||
+    !hasExactKeys(
+      data,
+      [
+        'publicAssistantId',
+        'merchantDisplayName',
+        'assistantDisplayName',
+        'aiDisclosure',
+        'businessScope',
+        'welcomeMessage',
+        'availability',
+        'releaseRef',
+      ],
+      ['humanContact'],
+    ) ||
     data['aiDisclosure'] !== true ||
     (data['availability'] !== 'online' && data['availability'] !== 'paused')
   ) {
@@ -286,6 +292,12 @@ function decodePublicAssistantSnapshotData(data: unknown):
   const assistantDisplayName = boundedText(data['assistantDisplayName'], 200);
   const businessScope = boundedParagraph(data['businessScope'], 2_000);
   const welcomeMessage = boundedParagraph(data['welcomeMessage'], 2_000);
+  const humanContact =
+    data['humanContact'] === undefined
+      ? ''
+      : typeof data['humanContact'] === 'string' && data['humanContact'].trim() === ''
+        ? ''
+        : boundedParagraph(data['humanContact'], 500);
   const releaseRef = opaqueRef(data['releaseRef']);
   if (
     publicAssistantId === undefined ||
@@ -293,7 +305,9 @@ function decodePublicAssistantSnapshotData(data: unknown):
     assistantDisplayName === undefined ||
     businessScope === undefined ||
     welcomeMessage === undefined ||
-    releaseRef === undefined
+    releaseRef === undefined ||
+    humanContact === undefined ||
+    /[<>]/u.test(humanContact)
   ) {
     return undefined;
   }
@@ -306,6 +320,7 @@ function decodePublicAssistantSnapshotData(data: unknown):
     publicAssistantId,
     releaseRef,
     welcomeMessage,
+    humanContact,
   };
 }
 
@@ -720,7 +735,7 @@ export function createPublicAssistantApiClient(
         response = await fetchImpl(endpointFor(`assistants/${encodeURIComponent(publicSlug)}`), {
           cache: 'no-store',
           credentials: 'same-origin',
-          headers: { Accept: 'application/json' },
+          headers: { Accept: 'application/json', 'X-H5CS-Features': 'human-contact' },
           method: 'GET',
           redirect: 'error',
           ...(signal === undefined ? {} : { signal }),
@@ -820,7 +835,7 @@ export function createPublicAssistantApiClient(
           {
             cache: 'no-store',
             credentials: 'same-origin',
-            headers: { Accept: 'application/json' },
+            headers: { Accept: 'application/json', 'X-H5CS-Features': 'human-contact' },
             method: 'GET',
             redirect: 'error',
             ...(signal === undefined ? {} : { signal }),

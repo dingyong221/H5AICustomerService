@@ -35,10 +35,10 @@ export async function previewChatAction(
     typeof csrfToken !== 'string' ||
     typeof rawQuestion !== 'string' ||
     rawQuestion.trim().length < 1 ||
-    rawQuestion.length > 500 ||
+    rawQuestion.length > 2_000 ||
     /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(rawQuestion)
   ) {
-    return failed('请输入 1 至 500 字的测试问题。');
+    return failed('请输入 1 至 2000 字的测试问题。');
   }
   const session = await currentMerchantForWrite(merchantId, csrfToken);
   if (!session) return failed('登录已失效或无权试聊此商家。');

@@ -112,4 +112,31 @@ describe('merchant draft preview', () => {
       ),
     ).rejects.toMatchObject({ statusCode: 400 });
   });
+
+  it('passes the full 2000-character question and optional contact data as facts, never as transfer authority', async () => {
+    const { service, fetchImpl } = fixture();
+    const question = '问'.repeat(2_000);
+    await service.reply(
+      {
+        ...payload,
+        question,
+        facts: { ...payload.facts, humanContact: '微信 shop_service，工作日9—18点' },
+      },
+      new AbortController().signal,
+    );
+    const body = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body));
+    expect(body.messages[2].content).toBe(question);
+    expect(body.messages[1].content).toContain('shop_service');
+    expect(body.messages[0].content).toContain('不实时转接');
+    await expect(
+      service.reply({ ...payload, question: `${question}问` }, new AbortController().signal),
+    ).rejects.toMatchObject({ statusCode: 400 });
+    await expect(
+      service.reply(
+        { ...payload, facts: { ...payload.facts, humanContact: '<a>联系</a>' } },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
 });

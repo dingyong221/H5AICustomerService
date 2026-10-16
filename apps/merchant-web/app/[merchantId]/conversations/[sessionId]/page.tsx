@@ -7,6 +7,7 @@ import { PageShell, StatusBadge } from '@h5cs/ui';
 import { currentMerchant, currentMerchantCsrfToken } from '../../../account/merchant-actions';
 import { FollowUpForm } from '../../../workspace/follow-up-form';
 import { followUpLabel } from '../../../workspace/follow-up-status';
+import { improvementSourcePath } from '../../../improvements/improvement-model';
 
 export const dynamic = 'force-dynamic';
 
@@ -78,12 +79,27 @@ export default async function MerchantConversationDetailPage({
                   第 {message.sequence} 条 · {message.state}
                 </small>
                 <p>{message.content}</p>
+                {message.role === 'visitor' ? (
+                  <Link
+                    href={improvementSourcePath({
+                      merchantId,
+                      assistantId: detail.conversation.assistantId,
+                      sessionId,
+                      messageId: message.id,
+                    })}
+                  >
+                    改进这条回答
+                  </Link>
+                ) : null}
                 {message.errorCode ? <small>失败原因：{message.errorCode}</small> : null}
               </li>
             ))}
           </ol>
         )}
       </section>
+      <p>
+        建立改进任务只用于修正客服知识和验证回答，不代表投诉已处理、已转人工或已联系消费者；请另外记录原咨询的跟进状态。
+      </p>
     </PageShell>
   );
 }

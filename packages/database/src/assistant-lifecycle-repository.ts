@@ -19,6 +19,7 @@ import {
   AssistantLifecyclePersistenceError,
   AssistantPublishValidationError,
   AssistantRevisionConflictError,
+  normalizeHumanContact,
   toAssistantId,
   toMerchantId,
   toReleaseId,
@@ -27,6 +28,7 @@ import type { Connection, ResultSetHeader, RowDataPacket } from 'mysql2/promise'
 
 import type { DatabaseConnectionConfig } from './config.js';
 import { probeDatabase } from './config.js';
+import { bindVerifiedImprovementsToRelease } from './assistant-improvement-release.js';
 
 type OnboardingGenerationRow = RowDataPacket & {
   answers: string | Record<string, unknown>;
@@ -77,6 +79,8 @@ type PublicRow = RowDataPacket & {
   display_name: string;
   config_snapshot: string | Record<string, unknown>;
 };
+
+export { parseDraft as parseAssistantDraft, validateDraft as validateAssistantDraft };
 
 const OPERATION_GENERATE = 'assistant.generate';
 const OPERATION_CREATE_MANUAL = 'assistant.create_manual';
@@ -174,15 +178,22 @@ const paragraphText = (value: unknown, field: string, maximum: number): string =
   return normalized;
 };
 
-const validateDraft = (draft: AssistantDraftConfig): AssistantDraftConfig => ({
-  industry: text(draft.industry, 'industry', 128),
-  businessScope: paragraphText(draft.businessScope, 'businessScope', 2_000),
-  materialsSummary: paragraphText(draft.materialsSummary, 'materialsSummary', 4_000),
-  pricingSummary: paragraphText(draft.pricingSummary, 'pricingSummary', 4_000),
-  promotionSummary: paragraphText(draft.promotionSummary, 'promotionSummary', 4_000),
-  welcomeMessage: text(draft.welcomeMessage, 'welcomeMessage', 500),
-  insufficientInfoMessage: text(draft.insufficientInfoMessage, 'insufficientInfoMessage', 500),
-});
+const validateDraft = (draft: AssistantDraftConfig): AssistantDraftConfig => {
+  const humanContact = normalizeHumanContact(draft.humanContact);
+  if (humanContact === null)
+    throw new AssistantLifecyclePersistenceError('humanContact is invalid');
+  return {
+    industry: text(draft.industry, 'industry', 128),
+    businessScope: paragraphText(draft.businessScope, 'businessScope', 2_000),
+    materialsSummary: paragraphText(draft.materialsSummary, 'materialsSummary', 4_000),
+    pricingSummary: paragraphText(draft.pricingSummary, 'pricingSummary', 4_000),
+    promotionSummary: paragraphText(draft.promotionSummary, 'promotionSummary', 4_000),
+    welcomeMessage: text(draft.welcomeMessage, 'welcomeMessage', 500),
+    insufficientInfoMessage: text(draft.insufficientInfoMessage, 'insufficientInfoMessage', 500),
+    // Omit an empty new field to preserve hashes of already-confirmed legacy drafts.
+    ...(humanContact ? { humanContact } : {}),
+  };
+};
 
 const parseDraft = (value: string | Record<string, unknown>): AssistantDraftConfig => {
   const object = parseObject(value, 'draft config');
@@ -198,6 +209,9 @@ const parseDraft = (value: string | Record<string, unknown>): AssistantDraftConf
       'insufficientInfoMessage',
       500,
     ),
+    ...(object['humanContact'] === undefined
+      ? {}
+      : { humanContact: object['humanContact'] as string }),
   });
 };
 
@@ -924,6 +938,16 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
           [releaseId, input.now, merchantId, assistantId, input.expectedDraftRevision],
         );
         if (assistantResult.affectedRows !== 1) throw new AssistantRevisionConflictError();
+        await bindVerifiedImprovementsToRelease(connection, {
+          merchantId,
+          assistantId,
+          releaseId,
+          draftRevision: input.expectedDraftRevision,
+          factsHash: contentHash,
+          promptTemplateVersion: versions.prompt,
+          modelPolicyVersion: versions.model,
+          now: input.now,
+        });
         const response = {
           releaseId: releaseId.toString('hex'),
           assistantId: input.assistantId,
@@ -1001,6 +1025,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
         businessScope: draft.businessScope,
         welcomeMessage: draft.welcomeMessage,
         insufficientInfoMessage: draft.insufficientInfoMessage,
+        humanContact: draft.humanContact ?? '',
         availability: 'online',
       };
     });
@@ -1100,6 +1125,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
   async #recoverCreated(
     operation: string,
     input: {
+      merchantUserId: MerchantUserId;
       merchantId: MerchantId;
       idempotency: AssistantLifecycleIdempotency;
     },
@@ -1107,22 +1133,44 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
   ): Promise<AssistantManagementSnapshot> {
     const idempotency = await this.#readIdempotency(operation, idem);
     if (idempotency.resource_id === null) throw new AssistantLifecyclePersistenceError();
-    const snapshot = await this.findManagementSnapshot(
-      input.merchantId,
-      toAssistantId(idString(idempotency.resource_id, 'assistantId')),
-    );
-    if (snapshot === null) throw new AssistantLifecyclePersistenceError();
-    return snapshot;
+    // The unlocked lookup above only discovers the created assistant ID. Recovery is still
+    // a currently authorized operation: acquire the assistant/member locks before returning
+    // any cached success, and recheck the immutable idempotency record in that transaction.
+    const assistantId = idempotency.resource_id;
+    return this.#withTransaction(async (connection) => {
+      const current = await this.#lockManagement(
+        connection,
+        idBuffer(input.merchantUserId, 'merchantUserId'),
+        idBuffer(input.merchantId, 'merchantId'),
+        assistantId,
+      );
+      if (current === null) throw new AssistantLifecyclePersistenceError();
+      const verified = await this.#readIdempotency(operation, idem, connection);
+      if (verified.resource_id === null || !verified.resource_id.equals(assistantId)) {
+        throw new AssistantLifecyclePersistenceError();
+      }
+      return this.#managementFromRow(current);
+    });
   }
 
   async #recoverPublished(
-    input: { merchantId: MerchantId; assistantId: AssistantId },
+    input: { merchantUserId: MerchantUserId; merchantId: MerchantId; assistantId: AssistantId },
     idem: Readonly<{ actorScopeDigest: Buffer; keyDigest: Buffer; requestHash: Buffer }>,
   ): Promise<AssistantReleaseRecord> {
-    const idempotency = await this.#readIdempotency(OPERATION_PUBLISH, idem);
-    if (idempotency.resource_id === null) throw new AssistantLifecyclePersistenceError();
-    const releaseId = idempotency.resource_id;
-    return this.#withConnection(async (connection) => {
+    return this.#withTransaction(async (connection) => {
+      // Duplicate-key recovery must not bypass revocation or a paused merchant. The normal
+      // publish path checks these under #lockManagement; recovery uses that same lock first.
+      const current = await this.#lockManagement(
+        connection,
+        idBuffer(input.merchantUserId, 'merchantUserId'),
+        idBuffer(input.merchantId, 'merchantId'),
+        idBuffer(input.assistantId, 'assistantId'),
+      );
+      if (current === null || current.status === 'paused')
+        throw new AssistantPublishValidationError();
+      const idempotency = await this.#readIdempotency(OPERATION_PUBLISH, idem, connection);
+      if (idempotency.resource_id === null) throw new AssistantLifecyclePersistenceError();
+      const releaseId = idempotency.resource_id;
       const [rows] = await connection.execute<ReleaseRow[]>(
         `SELECT id AS release_id, merchant_id, assistant_id, release_no, draft_revision,
                 created_at, activated_at
@@ -1153,8 +1201,9 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
   async #readIdempotency(
     operation: string,
     idem: Readonly<{ actorScopeDigest: Buffer; keyDigest: Buffer; requestHash: Buffer }>,
+    existingConnection?: Connection,
   ): Promise<IdempotencyRow> {
-    return this.#withConnection(async (connection) => {
+    const read = async (connection: Connection): Promise<IdempotencyRow> => {
       const [rows] = await connection.execute<IdempotencyRow[]>(
         `SELECT request_hash, state, resource_id, response_body
            FROM idempotency_record
@@ -1171,7 +1220,8 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
         throw new AssistantLifecyclePersistenceError();
       }
       return row;
-    });
+    };
+    return existingConnection ? read(existingConnection) : this.#withConnection(read);
   }
 
   async #insertIdempotency(

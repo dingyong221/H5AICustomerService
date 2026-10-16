@@ -3,6 +3,7 @@ import { Controller, Get, Headers, Param, Post, Res } from '@nestjs/common';
 import type { ResponseLike } from '../http-types.js';
 import { PublicAssistantService } from './public-assistant.service.js';
 import { PublicSessionService } from './public-session.service.js';
+import { publicSnapshotForClient } from './public-client-features.js';
 
 @Controller('/api/v1/public/assistants')
 export class PublicAssistantController {
@@ -15,9 +16,11 @@ export class PublicAssistantController {
   public async load(
     @Param('publicSlug') publicSlug: string,
     @Res({ passthrough: true }) response: ResponseLike,
+    @Headers('x-h5cs-features') features?: string,
   ) {
     response.setHeader('Cache-Control', 'no-store');
-    return this.service.load(publicSlug);
+    response.setHeader('Vary', 'X-H5CS-Features');
+    return publicSnapshotForClient(await this.service.load(publicSlug), features);
   }
 
   @Post('/:publicSlug/sessions')

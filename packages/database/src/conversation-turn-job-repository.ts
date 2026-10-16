@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { normalizeHumanContact } from '@h5cs/domain';
 
 import type { Connection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
@@ -42,6 +43,7 @@ export type ConversationFacts = Readonly<{
   pricingSummary: string;
   promotionSummary: string;
   insufficientInfoMessage: string;
+  humanContact?: string;
 }>;
 
 export type ConversationTurnClaim = Readonly<{
@@ -121,7 +123,12 @@ const factsFrom = (value: string | Record<string, unknown>): ConversationFacts =
       throw new ConversationTurnJobError();
     }
   }
-  return Object.fromEntries(fields.map((field) => [field, snapshot[field]])) as ConversationFacts;
+  const humanContact = normalizeHumanContact(snapshot['humanContact']);
+  if (humanContact === null) throw new ConversationTurnJobError();
+  return {
+    ...Object.fromEntries(fields.map((field) => [field, snapshot[field]])),
+    humanContact,
+  } as ConversationFacts;
 };
 
 export class MySqlConversationTurnJobRepository {

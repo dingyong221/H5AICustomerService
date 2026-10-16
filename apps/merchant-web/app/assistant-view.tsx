@@ -14,10 +14,13 @@ import { currentMerchant, currentMerchantCsrfToken } from './account/merchant-ac
 import { publicApiReady } from './workspace/api-readiness';
 import { ConfirmKnowledgeForm } from './workspace/confirm-knowledge-form';
 import { EditDraftForm } from './workspace/edit-draft-form';
+import { DraftReadinessPanel } from './workspace/draft-readiness-panel';
+import { DraftRevisionNotice } from './workspace/draft-revision-notice';
 import { PreviewChatForm } from './workspace/preview-chat-form';
 import { PublishAssistantForm } from './workspace/publish-assistant-form';
 import { publicationPolicy, publicAssistantUrl } from './workspace/publication-policy';
 import { workerReady } from './workspace/worker-readiness';
+import { ImprovementSummaryPanel } from './improvements/improvement-summary';
 
 export const dynamic = 'force-dynamic';
 
@@ -97,6 +100,7 @@ export async function AssistantView({
     ['优惠与售卖策略', assistant.draft.promotionSummary],
     ['欢迎语', assistant.draft.welcomeMessage],
     ['资料不足时的回复', assistant.draft.insufficientInfoMessage],
+    ['人工联系说明', assistant.draft.humanContact || '尚未提供。此处不实时转接人工。'],
   ] as const;
   return (
     <PageShell
@@ -129,6 +133,11 @@ export async function AssistantView({
             {assistant.knowledgeConfirmed ? '资料已确认' : '资料待确认'}
           </StatusBadge>
         </div>
+        <DraftRevisionNotice
+          key={assistantId}
+          revision={assistant.draftRevision}
+          knowledgeConfirmed={assistant.knowledgeConfirmed}
+        />
         <dl className="assistant-facts">
           {facts.map(([label, value]) => (
             <div key={label}>
@@ -138,6 +147,7 @@ export async function AssistantView({
           ))}
         </dl>
       </section>
+      <DraftReadinessPanel draft={assistant.draft} />
       {section !== 'publish' && (
         <section className="merchant-account-card assistant-detail-card">
           <h2>修订草稿</h2>
@@ -158,6 +168,7 @@ export async function AssistantView({
           <h2>商家确认</h2>
           <p>只有经你确认的资料才会进入正式版本。价格、优惠、库存与承诺不得由模型自行补造。</p>
           <ConfirmKnowledgeForm
+            key={`${assistantId}:${assistant.draftRevision}`}
             merchantId={merchantId}
             assistantId={assistantId}
             draftRevision={assistant.draftRevision}
@@ -209,6 +220,11 @@ export async function AssistantView({
           />
         </section>
       )}
+      <ImprovementSummaryPanel
+        merchantId={merchantId}
+        merchantUserId={session.merchantUserId}
+        assistantId={assistantId}
+      />
     </PageShell>
   );
 }

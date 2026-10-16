@@ -1,4 +1,4 @@
-import type { AssistantDraftConfig } from '@h5cs/domain';
+import { normalizeHumanContact, type AssistantDraftConfig } from '@h5cs/domain';
 
 export function parseAssistantDraftForm(formData: FormData): AssistantDraftConfig | null {
   const field = (name: string, maximum: number, multiline = false): string | null => {
@@ -22,6 +22,9 @@ export function parseAssistantDraftForm(formData: FormData): AssistantDraftConfi
   const promotionSummary = field('promotionSummary', 4_000, true);
   const welcomeMessage = field('welcomeMessage', 500);
   const insufficientInfoMessage = field('insufficientInfoMessage', 500);
+  const humanContact = normalizeHumanContact(
+    formData.has('humanContact') ? formData.get('humanContact') : undefined,
+  );
   if (
     !industry ||
     !businessScope ||
@@ -29,7 +32,8 @@ export function parseAssistantDraftForm(formData: FormData): AssistantDraftConfi
     !pricingSummary ||
     !promotionSummary ||
     !welcomeMessage ||
-    !insufficientInfoMessage
+    !insufficientInfoMessage ||
+    humanContact === null
   )
     return null;
   return {
@@ -40,5 +44,6 @@ export function parseAssistantDraftForm(formData: FormData): AssistantDraftConfi
     promotionSummary,
     welcomeMessage,
     insufficientInfoMessage,
+    ...(humanContact ? { humanContact } : {}),
   };
 }
