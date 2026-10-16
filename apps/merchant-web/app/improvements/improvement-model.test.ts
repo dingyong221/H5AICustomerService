@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AssistantEvaluationRun } from '@h5cs/domain';
-import { helpTopics, manualMarkdown, searchHelp } from '../help/manual';
+import { helpTopics, manualMarkdown, manualText, searchHelp } from '../help/manual';
 import { safeMerchantReturnPath } from '../account/merchant-return-path';
 import { merchantPath } from '../tenant-paths';
 import {
@@ -137,5 +137,23 @@ describe('merchant improvement view contracts', () => {
     expect(manual).toContain('不代表投诉已解决');
     expect(manual).toContain('旧复测和通过判定会过期');
     expect(manual).toContain('上限为 4000 字');
+  });
+
+  it('documents the actual create/detail controls and guarded FAQ recovery in both help formats', () => {
+    for (const manual of [manualMarkdown(), manualText()]) {
+      expect(manual).toContain('点击“建立改进任务”。建立成功后进入该任务详情');
+      expect(manual).toContain('点击“保存改进任务”');
+      expect(manual).toContain('先备份当前草稿全文和有价值的手动补充');
+      expect(manual).toContain('本任务旧 FAQ 完整原文');
+      expect(manual).toContain('无需剪贴板授权');
+      expect(manual).toContain('仅在能唯一定位本任务区块时');
+      expect(manual).toContain('保留其余资料并点击“保存草稿修订”');
+      expect(manual).toContain('回任务详情刷新，重新核对新补丁');
+      expect(manual).toContain('恢复旧原文不等于应用新答案');
+      expect(manual).toContain('不要盲目删除、追加或覆盖，请联系平台管理员核对');
+      expect(manual).toContain('仅整理草稿不能保证解除 FAQ 冲突');
+      expect(manual).toContain('复测通过不是普通发布的强制门槛');
+      expect(manual).toContain('也不代表本任务已验证');
+    }
   });
 });

@@ -84,6 +84,7 @@ export default async function ImprovementDetailPage({
   };
   let patch: { materials: string; block: string } | null = null;
   let patchError: string | null = null;
+  let managedBlockChanged = false;
   if (task.expectedAnswer.trim()) {
     try {
       patch = applyImprovementFaq({
@@ -94,10 +95,14 @@ export default async function ImprovementDetailPage({
         previousBlock: task.appliedBlock,
       });
     } catch (error) {
+      managedBlockChanged =
+        error instanceof ImprovementConflictError && error.code === 'managed_block_changed';
       patchError =
         error instanceof ImprovementConflictError && error.code === 'too_long'
           ? '合并后的商品或服务资料超过 4000 字，不能直接应用。请先整理草稿，保留真实事实后再试。'
-          : '已有 FAQ 区块被手动调整或内容不符合要求。请先人工核对草稿，不会自动覆盖。';
+          : managedBlockChanged
+            ? '本任务的旧 FAQ 原文已被手动调整、移除或出现重复，不能自动覆盖。请按下方步骤核对恢复。'
+            : '修正内容不符合要求，请核对已保存的问题与期望答案，不要包含 FAQ 管理标记。';
     }
   }
   const latest = detail.runs[0];
@@ -195,16 +200,18 @@ export default async function ImprovementDetailPage({
           修正回答依据，不会代你查订单、退款或处理投诉。这些问题需在期望答案里给出真实的人工处理渠道。
         </p>
         <p>下方使用的是已保存的期望答案。如果你刚在上方编辑，请先保存任务再核对。</p>
+        {task.appliedBlock ? (
+          <details open={managedBlockChanged}>
+            <summary>查看并复制本任务旧 FAQ 原文</summary>
+            <p>可直接选择下方完整原文并复制，须包括首尾管理标记。此处不需要剪贴板授权。</p>
+            <pre className="improvement-patch" tabIndex={0} aria-label="本任务旧 FAQ 原文">
+              {task.appliedBlock}
+            </pre>
+          </details>
+        ) : null}
         {patch ? (
           <>
-            {task.appliedBlock ? (
-              <details>
-                <summary>查看将被替换的旧 FAQ 区块</summary>
-                <pre className="improvement-patch">{task.appliedBlock}</pre>
-              </details>
-            ) : (
-              <p>此次将追加一个 FAQ 区块，其他资料保留。</p>
-            )}
+            {!task.appliedBlock ? <p>此次将追加一个 FAQ 区块，其他资料保留。</p> : null}
             <pre className="improvement-patch" aria-label="拟写入草稿的 FAQ">
               {patch.block}
             </pre>
@@ -218,6 +225,29 @@ export default async function ImprovementDetailPage({
             {patchError ?? '请先保存真实有效的期望答案，之后才能应用。'}
           </p>
         )}
+        {managedBlockChanged ? (
+          <div className="improvement-detail">
+            <h3>手动调整过 FAQ，怎样安全恢复？</h3>
+            <ol>
+              <li>
+                先复制保存当前草稿全文和有价值的手动补充。把仍应保留的真实事实写入上方“商家期望答案”，点击“保存改进任务”。
+              </li>
+              <li>
+                复制本任务旧 FAQ 完整原文，再到
+                <Link href={`/${merchantId}/drafts/${assistantId}`}>当前客服草稿</Link>
+                。仅在能唯一定位本任务区块时，把该区块恢复为旧原文（包括首尾标记）；保留本任务之外的其余资料。
+              </li>
+              <li>
+                点击“保存草稿修订”，回到本页刷新，重新核对新 FAQ
+                补丁，再勾选真实事实确认并明确点击“应用修正到草稿
+                FAQ”。恢复旧原文不会自动应用新答案。
+              </li>
+              <li>
+                如果区块缺失、重复或无法确定哪一段属于本任务，不要盲目删除、追加或覆盖，请联系平台管理员核对。
+              </li>
+            </ol>
+          </div>
+        ) : null}
         <ImprovementApplyForm
           {...identity}
           requestKey={randomUUID()}
@@ -300,6 +330,9 @@ export default async function ImprovementDetailPage({
             本条场景尚未在当前草稿上通过验证。建议先完成修正与复测；其他发布条件仍以发布页为准。
           </p>
         )}
+        <p>
+          复测通过不是普通发布的强制门槛，发布页仍检查当前资料确认、客服状态和服务条件。即使允许发布，也不代表本任务已经验证；只有有效通过记录与发布修订一致时，才会关联本任务的上线版本。
+        </p>
         <div className="tenant-feature-grid">
           <Link className="tenant-feature-link" href={`/${merchantId}/knowledge/${assistantId}`}>
             核对并确认知识资料

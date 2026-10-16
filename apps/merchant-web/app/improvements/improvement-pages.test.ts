@@ -163,6 +163,7 @@ describe('merchant improvement page rendering', () => {
     expect(html).toContain(`/${merchantId}/improvements/${improvementId}?assistant=${assistantId}`);
     expect(html).toContain('不是 AI 自动推定的解决率');
     expect(html).toContain('手工新增测试或改进场景');
+    expect(html).toContain('建立改进任务');
   });
 
   it('supports the all-assistant filter and a useful empty state instead of a 404', async () => {
@@ -206,6 +207,56 @@ describe('merchant improvement page rendering', () => {
     expect(html).toContain('不符合预期，继续改进');
     expect(html).toContain('确认资料，再发布更新');
     expect(html).toContain('不会代你查订单、退款或处理投诉');
+    expect(html).toContain('复测通过不是普通发布的强制门槛');
+    expect(html).toContain('即使允许发布，也不代表本任务已经验证');
+  });
+
+  it('keeps the exact old FAQ selectable and explains safe recovery after a manual edit', async () => {
+    mocks.snapshot.mockResolvedValue({
+      assistantId,
+      merchantId,
+      displayName: '家居零售客服',
+      status: 'active',
+      draftRevision: 4,
+      activeReleaseId: '11'.repeat(16),
+      draft: {
+        materialsSummary: `毛巾纯棉。\n\n${block.replace(task.expectedAnswer, '手工补充：运费需按地址确认。')}`,
+      },
+    });
+    const html = renderToStaticMarkup(await DetailPage(detailProps()));
+    expect(html).toContain('<details open=""><summary>查看并复制本任务旧 FAQ 原文</summary>');
+    expect(html).toContain('aria-label="本任务旧 FAQ 原文"');
+    expect(html).toContain(block);
+    expect(html).toContain('不需要剪贴板授权');
+    expect(html).toContain('先复制保存当前草稿全文和有价值的手动补充');
+    expect(html).toContain('点击“保存改进任务”');
+    expect(html).toContain(`href="/${merchantId}/drafts/${assistantId}"`);
+    expect(html).toContain('仅在能唯一定位本任务区块时');
+    expect(html).toContain('保留本任务之外的其余资料');
+    expect(html).toContain('点击“保存草稿修订”，回到本页刷新');
+    expect(html).toContain('恢复旧原文不会自动应用新答案');
+    expect(html).toContain('不要盲目删除、追加或覆盖，请联系平台管理员核对');
+    expect(html).not.toContain('aria-label="拟写入草稿的 FAQ"');
+    expect(html).toMatch(/<fieldset disabled=""><legend>应用这条 FAQ 修正/u);
+    expect(html).toContain('请先把已核对的答案应用到当前草稿');
+  });
+
+  it('also retains the old FAQ when the new patch exceeds the material limit', async () => {
+    mocks.snapshot.mockResolvedValue({
+      assistantId,
+      merchantId,
+      displayName: '家居零售客服',
+      status: 'active',
+      draftRevision: 4,
+      activeReleaseId: '11'.repeat(16),
+      draft: { materialsSummary: `${'原资料'.repeat(1400)}\n\n${block}` },
+    });
+    const html = renderToStaticMarkup(await DetailPage(detailProps()));
+    expect(html).toContain('合并后的商品或服务资料超过 4000 字');
+    expect(html).toContain('查看并复制本任务旧 FAQ 原文');
+    expect(html).toContain(block);
+    expect(html).not.toContain('aria-label="拟写入草稿的 FAQ"');
+    expect(html).not.toContain('手动调整过 FAQ，怎样安全恢复');
   });
 
   it('renders stale completed runs as expired and disables human approval', async () => {
