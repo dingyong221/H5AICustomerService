@@ -66,7 +66,17 @@ export async function createAssistantDraft(
       },
       now,
     });
-    revalidatePath(`/workspace/${merchantId}`);
+    const persisted = await repository.findManagementSnapshot(
+      toMerchantId(merchantId),
+      created.assistantId,
+    );
+    if (!persisted || persisted.displayName !== created.displayName) {
+      return { error: '后台未能核验保存结果，请保留当前资料并使用相同表单重试。', created: null };
+    }
+    revalidatePath(`/${merchantId}`);
+    revalidatePath(`/${merchantId}/drafts`);
+    revalidatePath(`/${merchantId}/knowledge`);
+    revalidatePath(`/${merchantId}/publish`);
     return {
       error: null,
       created: { assistantId: created.assistantId, displayName: created.displayName },

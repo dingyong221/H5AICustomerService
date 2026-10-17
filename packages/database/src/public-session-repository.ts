@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
+import { normalizeHumanContact } from '@h5cs/domain';
 
 import type { Connection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
@@ -126,6 +127,7 @@ export type PublicSessionHistory = Readonly<{
     aiDisclosure: true;
     businessScope: string;
     welcomeMessage: string;
+    humanContact: string;
     availability: 'online';
     releaseRef: string;
   }>;
@@ -441,6 +443,8 @@ export class MySqlPublicSessionRepository {
       const session = sessions[0];
       if (!session) return null;
       const config = parseConfig(session.config_snapshot);
+      const humanContact = normalizeHumanContact(config['humanContact']);
+      if (humanContact === null) throw new PublicSessionUnavailableError();
       const releaseRef = binaryId(session.release_id);
       const snapshot = {
         publicAssistantId: publicText(session.public_slug, 128),
@@ -449,6 +453,7 @@ export class MySqlPublicSessionRepository {
         aiDisclosure: true as const,
         businessScope: publicParagraph(config['businessScope'], 2_000),
         welcomeMessage: publicParagraph(config['welcomeMessage'], 2_000),
+        humanContact,
         availability: 'online' as const,
         releaseRef,
       };

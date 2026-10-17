@@ -46,8 +46,14 @@ export async function saveAssistantDraftAction(
       draft,
       now: new Date(),
     });
-    revalidatePath(`/workspace/${merchantId}/assistants/${assistantId}`);
-    revalidatePath(`/workspace/${merchantId}`);
+    for (const section of ['drafts', 'knowledge', 'publish'])
+      revalidatePath(`/${merchantId}/${section}/${assistantId}`);
+    revalidatePath(`/${merchantId}`);
+    revalidatePath(`/${merchantId}/drafts`);
+    revalidatePath(`/${merchantId}/knowledge`);
+    revalidatePath(`/${merchantId}/publish`);
+    revalidatePath(`/${merchantId}/improvements`);
+    revalidatePath('/[merchantId]/improvements/[improvementId]', 'page');
     return { error: null, saved: true };
   } catch {
     return { error: '保存失败，草稿可能已由其他页面更新。请刷新后重试。', saved: false };
@@ -87,8 +93,14 @@ export async function confirmKnowledgeAction(
       expectedDraftRevision: Number(revisionValue),
       now: new Date(),
     });
-    revalidatePath(`/workspace/${merchantId}/assistants/${assistantId}`);
-    revalidatePath(`/workspace/${merchantId}`);
+    for (const section of ['drafts', 'knowledge', 'publish'])
+      revalidatePath(`/${merchantId}/${section}/${assistantId}`);
+    revalidatePath(`/${merchantId}`);
+    revalidatePath(`/${merchantId}/drafts`);
+    revalidatePath(`/${merchantId}/knowledge`);
+    revalidatePath(`/${merchantId}/publish`);
+    revalidatePath(`/${merchantId}/improvements`);
+    revalidatePath('/[merchantId]/improvements/[improvementId]', 'page');
     return { error: null, confirmed: true };
   } catch {
     return { error: '资料确认失败，草稿可能已变更。请刷新页面后重试。', confirmed: false };

@@ -1,8 +1,12 @@
-import Link from 'next/link';
+/* eslint-disable @next/next/no-html-link-for-pages -- The console login is a reverse-proxy entry and needs full-page navigation. */
+import { redirect } from 'next/navigation';
 
 import { PageShell, StatusBadge } from '@h5cs/ui';
+import { currentMerchant } from './account/merchant-actions';
 
-export default function MerchantDashboardPage() {
+export default async function MerchantDashboardPage() {
+  const merchant = await currentMerchant();
+  if (merchant) redirect(`/${merchant.merchantId}`);
   return (
     <PageShell
       description={
@@ -29,9 +33,9 @@ export default function MerchantDashboardPage() {
             <h2>登录后继续配置</h2>
             <p>创建客服草稿、确认资料、发布版本，并获取固定的消费者 H5 链接。</p>
           </div>
-          <Link className="workbuddy-action" href="/account/login">
+          <a className="tenant-feature-link" href="/console/account/login">
             登录商家后台
-          </Link>
+          </a>
         </article>
         <article>
           <div>

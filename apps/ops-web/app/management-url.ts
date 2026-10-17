@@ -29,5 +29,5 @@ export const merchantSetupUrl = (base: URL, token: string): string =>
 
 export const merchantWorkspaceUrl = (base: URL, merchantId: string): string => {
   if (!/^[0-9a-f]{32}$/u.test(merchantId)) throw new Error('Merchant ID is invalid');
-  return managementPath(base, `/workspace/${merchantId}`);
+  return `${base.origin}/${merchantId}`;
 };

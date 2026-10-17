@@ -1,10 +1,12 @@
-import type { AssistantDraftConfig } from '@h5cs/domain';
+import { normalizeHumanContact, type AssistantDraftConfig } from '@h5cs/domain';
 
 export function parseAssistantDraftForm(formData: FormData): AssistantDraftConfig | null {
   const field = (name: string, maximum: number, multiline = false): string | null => {
     const value = formData.get(name);
     if (typeof value !== 'string') return null;
-    const normalized = (multiline ? value.replace(/\r\n?/gu, '\n') : value).trim();
+    const normalized = (
+      multiline ? value.replace(/\r\n?/gu, '\n').replace(/\t/gu, ' ') : value
+    ).trim();
     return normalized.length > 0 &&
       normalized.length <= maximum &&
       !(multiline
@@ -20,6 +22,9 @@ export function parseAssistantDraftForm(formData: FormData): AssistantDraftConfi
   const promotionSummary = field('promotionSummary', 4_000, true);
   const welcomeMessage = field('welcomeMessage', 500);
   const insufficientInfoMessage = field('insufficientInfoMessage', 500);
+  const humanContact = normalizeHumanContact(
+    formData.has('humanContact') ? formData.get('humanContact') : undefined,
+  );
   if (
     !industry ||
     !businessScope ||
@@ -27,7 +32,8 @@ export function parseAssistantDraftForm(formData: FormData): AssistantDraftConfi
     !pricingSummary ||
     !promotionSummary ||
     !welcomeMessage ||
-    !insufficientInfoMessage
+    !insufficientInfoMessage ||
+    humanContact === null
   )
     return null;
   return {
@@ -38,5 +44,6 @@ export function parseAssistantDraftForm(formData: FormData): AssistantDraftConfi
     promotionSummary,
     welcomeMessage,
     insufficientInfoMessage,
+    ...(humanContact ? { humanContact } : {}),
   };
 }

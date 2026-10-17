@@ -532,6 +532,27 @@ textarea:focus-visible {
   text-align: center;
 }
 
+.human-contact-notice {
+  border-bottom: 1px solid #dfe7e1;
+  color: #254b3a;
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  max-height: 28vh;
+  overflow: auto;
+  padding: 0.65rem 1rem;
+}
+
+.human-contact-notice summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.human-contact-notice p {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .visually-hidden {
   height: 1px;
   margin: -1px;

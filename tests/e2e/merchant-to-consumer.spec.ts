@@ -1,10 +1,12 @@
 import { randomBytes, randomInt } from 'node:crypto';
+import { mkdir } from 'node:fs/promises';
 
 import { expect, test } from '@playwright/test';
 
 test('operator provisions a merchant, merchant previews and publishes, consumer receives an AI reply', async ({
   browser,
 }) => {
+  test.setTimeout(240_000);
   const operatorPassword = process.env['H5CS_E2E_OPERATOR_PASSWORD'];
   if (!operatorPassword) throw new Error('Browser-test operator credential is unavailable');
 
@@ -28,7 +30,17 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await expect(operatorPage).toHaveURL(`${operatorBase}/login`);
   await operatorPage.getByLabel('运营账号').fill('browser_test_operator');
   await operatorPage.getByLabel('密码').fill(operatorPassword);
+  const loginStartedAt = Date.now();
+  const loginResponsePromise = operatorPage.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname === `${prefixed ? '/ops' : ''}/login`,
+    { timeout: 60_000 },
+  );
   await operatorPage.getByRole('button', { name: '登录运营后台' }).click();
+  const loginResponse = await loginResponsePromise;
+  if (loginResponse.status() >= 400)
+    throw new Error(`Operator login request returned HTTP ${loginResponse.status()}`);
   try {
     await expect(operatorPage).toHaveURL(
       sameOrigin
@@ -36,7 +48,7 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
         : prefixed
           ? /^http:\/\/127\.0\.0\.1:3002\/ops\/?$/u
           : 'http://127.0.0.1:3002/',
-      { timeout: 10_000 },
+      { timeout: 30_000 },
     );
   } catch {
     const error = await operatorPage
@@ -47,6 +59,7 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
       `Operator login did not complete at ${operatorPage.url()}: ${error ?? 'no page error was shown'}`,
     );
   }
+  process.stdout.write(`Operator login completed in ${Date.now() - loginStartedAt} ms.\n`);
   await expect(operatorPage.getByRole('heading', { name: '生成商家后台领取链接' })).toBeVisible();
   await operatorPage.getByLabel('行业代码').fill(industryCode);
   await operatorPage.getByLabel('行业名称').fill('本地生活服务');
@@ -75,13 +88,23 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await merchantPage.getByLabel('负责人手机号').fill(merchantPhone);
   await merchantPage.getByLabel('平台登录密码（至少 12 位）').fill(merchantPassword);
   await merchantPage.getByRole('button', { name: '领取商家后台' }).click();
-  await expect(merchantPage).toHaveURL(/\/workspace\/[0-9a-f]{32}$/u);
-  await expect(merchantPage.getByRole('link', { name: '登录管理后台' })).toHaveAttribute(
-    'href',
-    `${prefixed ? '/console' : ''}/account/login`,
-  );
-  await expect(merchantPage.getByRole('link', { name: 'HTTPS 安全绑定' })).toHaveCount(0);
+  await expect(merchantPage).toHaveURL(/\/[0-9a-f]{32}$/u);
   const managementUrl = merchantPage.url();
+  await expect(
+    merchantPage.getByRole('link', { name: '进入商家工作台', exact: true }),
+  ).toHaveAttribute('href', new URL(managementUrl).pathname);
+  await expect(merchantPage.getByRole('link', { name: 'HTTPS 安全绑定' })).toHaveCount(0);
+  const merchantNavigation = merchantPage.getByRole('navigation', { name: '商家后台主导航' });
+  for (const [name, section] of [
+    ['客服草稿', 'drafts'],
+    ['知识库', 'knowledge'],
+    ['测试与发布', 'publish'],
+  ] as const) {
+    await merchantNavigation.getByRole('link', { name, exact: true }).click();
+    await expect(merchantPage).toHaveURL(managementUrl + '/' + section);
+    await expect(merchantPage.getByRole('heading', { name, exact: true })).toBeVisible();
+  }
+  await merchantNavigation.getByRole('link', { name: '客服草稿', exact: true }).click();
   await operatorPage.reload();
   await expect(operatorPage.getByRole('link', { name: managementUrl })).toHaveAttribute(
     'href',
@@ -118,8 +141,15 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await merchantPage.getByLabel('优惠与售卖策略').fill('目前无已确认优惠');
   await merchantPage.getByLabel('欢迎语').fill('您好，我是 AI 客服。');
   await merchantPage.getByLabel('资料不足时的回复').fill('资料不足，请联系商家核实。');
+  await merchantPage
+    .getByLabel('人工联系说明（可选）')
+    .fill('工作日9:00至18:00，请通过测试店铺订单页联系人工。');
   await merchantPage.getByRole('button', { name: '创建客服草稿' }).click();
   await expect(merchantPage.getByText(`已创建客服草稿「${assistantName}」`)).toBeVisible();
+  await expect(merchantPage.getByRole('link', { name: '进入客服配置、试聊和发布' })).toBeVisible();
+  await expect(
+    merchantPage.locator('.assistant-workspace-list').getByRole('link', { name: assistantName }),
+  ).toBeVisible();
   await operatorPage.reload();
   const industryTemplate = operatorPage.locator('.ops-template-list li').filter({
     hasText: industryCode,
@@ -134,11 +164,16 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await expect(merchantPage.getByRole('option', { name: '本地生活服务 · v1' })).toHaveCount(0);
   await merchantPage.getByRole('link', { name: assistantName }).click();
   await expect(merchantPage.getByRole('heading', { name: assistantName })).toBeVisible();
+  const assistantUrl = merchantPage.url();
+  const assistantId = new URL(assistantUrl).pathname.split('/').at(-1)!;
+  await merchantNavigation.getByRole('link', { name: '知识库', exact: true }).click();
+  await expect(merchantPage).toHaveURL(managementUrl + '/knowledge/' + assistantId);
+  await expect(merchantPage.getByRole('heading', { name: '知识库', exact: true })).toBeVisible();
   await expect(merchantPage.getByText(referenceNotes)).toHaveCount(0);
   await merchantPage.getByLabel(/我已逐项核对以上资料/u).check();
   await merchantPage.getByRole('button', { name: '确认当前草稿资料' }).click();
   await expect(merchantPage.getByText('当前草稿资料已确认')).toBeVisible();
-  await merchantPage.reload();
+  await merchantNavigation.getByRole('link', { name: '测试与发布', exact: true }).click();
   await expect(merchantPage.getByRole('button', { name: '确认发布 AI 客服' })).toBeEnabled();
   await expect(merchantPage.getByRole('img', { name: '扫码打开消费者 AI 客服' })).toHaveCount(0);
   await expect(merchantPage.locator('a[href^="http://127.0.0.1:3001/a/"]')).toHaveCount(0);
@@ -173,6 +208,11 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   const consumerPage = sharedContext ? await sharedContext.newPage() : await browser.newPage();
   await consumerPage.goto(publicUrl!);
   await expect(consumerPage.getByRole('heading', { name: assistantName })).toBeVisible();
+  await consumerPage.getByText('联系商家 / 人工服务', { exact: true }).click();
+  await expect(
+    consumerPage.getByText('工作日9:00至18:00，请通过测试店铺订单页联系人工。', { exact: true }),
+  ).toBeVisible();
+  await expect(consumerPage.getByText(/此处不实时转接/u)).toBeVisible();
   await consumerPage.getByRole('textbox', { name: '输入想咨询的问题' }).fill('你们提供什么服务？');
   const firstSessionResponse = consumerPage.waitForResponse(
     (response) =>
@@ -190,11 +230,9 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
     '我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。',
   );
   await expect(answer).toBeVisible({ timeout: 60_000 });
-  const merchantId = /\/workspace\/([0-9a-f]{32})(?:\/|$)/u.exec(
-    new URL(managementUrl).pathname,
-  )?.[1];
+  const merchantId = new URL(managementUrl).pathname.slice(1);
   expect(merchantId).toMatch(/^[0-9a-f]{32}$/u);
-  await merchantPage.goto(`${merchantBase}/workspace/${merchantId}/conversations`);
+  await merchantPage.goto(`${merchantOrigin}/${merchantId}/conversations`);
   await expect(merchantPage.getByRole('heading', { name: '咨询管理' })).toBeVisible();
   await merchantPage.locator('.merchant-conversation-list a').first().click();
   await expect(merchantPage.getByText('你们提供什么服务？')).toBeVisible();
@@ -208,22 +246,96 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await expect(
     merchantPage.locator('.ui-status-badge').filter({ hasText: '处理中' }),
   ).toBeVisible();
+  // This fake-model path proves persistence and merchant workflow only. Qwen quality
+  // is evaluated separately using the synthetic retail scenario pack.
+  const sourceConversationUrl = merchantPage.url();
+  await merchantPage.getByRole('link', { name: '改进这条回答', exact: true }).first().click();
+  await expect(merchantPage.getByLabel('消费者问题或测试问题')).toHaveValue('你们提供什么服务？');
+  await merchantPage
+    .getByLabel('商家期望答案（真实有效的事实和处理方式）')
+    .fill('我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。');
+  await merchantPage.getByRole('button', { name: '建立改进任务', exact: true }).click();
+  await expect(merchantPage).toHaveURL(/\/improvements\/[0-9a-f]{32}\?assistant=[0-9a-f]{32}$/u);
+  const improvementUrl = merchantPage.url();
+  await expect(
+    merchantPage.getByRole('heading', { name: '改进这条回答', exact: true }),
+  ).toBeVisible();
+  await merchantPage.getByLabel(/已核对真实事实和适用条件/u).check();
+  await merchantPage.getByRole('button', { name: '应用修正到草稿 FAQ', exact: true }).click();
+  await expect(merchantPage.getByText(/修正已写入草稿修订/u)).toBeVisible();
+  await merchantPage.reload();
+  await expect(merchantPage.locator('pre[aria-label="拟写入草稿的 FAQ"]')).toContainText(
+    '你们提供什么服务？',
+  );
+  await merchantPage.getByLabel(/同意将当前草稿的业务资料和本条问题/u).check();
+  await merchantPage.getByRole('button', { name: '发送问题并记录复测', exact: true }).click();
+  await expect(
+    merchantPage.getByRole('button', { name: '符合预期，判定通过', exact: true }),
+  ).toBeEnabled({ timeout: 60_000 });
+  await merchantPage.getByRole('button', { name: '符合预期，判定通过', exact: true }).click();
+  await expect(merchantPage.getByText('商家已判定通过。', { exact: true })).toBeVisible();
+  await merchantPage.getByRole('link', { name: '核对并确认知识资料', exact: true }).click();
+  await merchantPage.getByLabel(/我已逐项核对以上资料/u).check();
+  await merchantPage.getByRole('button', { name: '确认当前草稿资料', exact: true }).click();
+  await expect(merchantPage.getByText('当前草稿资料已确认')).toBeVisible();
+  await merchantNavigation.getByRole('link', { name: '测试与发布', exact: true }).click();
+  await merchantPage.getByLabel(/我确认发布当前修订/u).check();
+  await merchantPage.getByRole('button', { name: '确认发布 AI 客服', exact: true }).click();
+  await expect(merchantPage.getByText('Release #2 已发布。')).toBeVisible();
+  await merchantPage.goto(improvementUrl);
+  await expect(
+    merchantPage.getByText('本条改进已关联当前线上版本。', { exact: false }),
+  ).toBeVisible();
+  await merchantPage.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await merchantPage.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+    ),
+  ).toBe(true);
+  await mkdir('artifacts/improvement-r1', { recursive: true });
+  await merchantPage.screenshot({
+    path: 'artifacts/improvement-r1/merchant-mobile.png',
+    fullPage: true,
+  });
+  await merchantPage.setViewportSize({ width: 1280, height: 720 });
+  await merchantPage.screenshot({
+    path: 'artifacts/improvement-r1/merchant-desktop.png',
+    fullPage: true,
+  });
+  await merchantPage.goto(sourceConversationUrl);
+  await expect(merchantPage.getByText('你们提供什么服务？', { exact: true })).toBeVisible();
   await merchantPage.getByRole('link', { name: '编辑对应客服的资料' }).click();
   await expect(merchantPage.getByRole('heading', { name: assistantName })).toBeVisible();
   await merchantPage
     .getByLabel('商品或服务资料')
     .fill('提供上门空调清洗服务，也提供洗衣机清洁咨询');
   await merchantPage.getByRole('button', { name: '保存草稿修订' }).click();
-  await expect(merchantPage.getByText(/草稿已保存，原有资料确认已失效/u)).toBeVisible();
+  await expect(
+    merchantPage.getByText('草稿已保存至修订 3，原有资料确认已失效。请核对新内容后重新确认。'),
+  ).toBeVisible();
   await merchantPage.reload();
   await expect(merchantPage.getByText('资料待确认')).toBeVisible();
+  await merchantNavigation.getByRole('link', { name: '知识库', exact: true }).click();
+  await merchantPage.getByLabel(/我已逐项核对以上资料/u).check();
+  await merchantPage.getByRole('button', { name: '确认当前草稿资料' }).click();
+  await expect(merchantPage.getByText('当前草稿资料已确认')).toBeVisible();
+  // Confirming and editing again without leaving this page must not carry an old
+  // client-side confirmation into the new server revision.
+  await merchantPage.getByLabel('价格与条件').fill('具体价格按服务范围由商家核实确认。');
+  await merchantPage.getByRole('button', { name: '保存草稿修订' }).click();
+  await expect(
+    merchantPage.getByText('草稿已保存至修订 4，原有资料确认已失效。请核对新内容后重新确认。'),
+  ).toBeVisible();
+  await expect(merchantPage.getByLabel(/我已逐项核对以上资料/u)).not.toBeChecked();
+  await expect(merchantPage.getByRole('button', { name: '确认当前草稿资料' })).toBeEnabled();
   await merchantPage.getByLabel(/我已逐项核对以上资料/u).check();
   await merchantPage.getByRole('button', { name: '确认当前草稿资料' }).click();
   await expect(merchantPage.getByText('当前草稿资料已确认')).toBeVisible();
   await merchantPage.reload();
+  await merchantNavigation.getByRole('link', { name: '测试与发布', exact: true }).click();
   await merchantPage.getByLabel(/我确认发布当前修订/u).check();
   await merchantPage.getByRole('button', { name: '确认发布 AI 客服' }).click();
-  await expect(merchantPage.getByText('Release #2 已发布。')).toBeVisible();
+  await expect(merchantPage.getByText('Release #3 已发布。')).toBeVisible();
   await expect(merchantPage.locator('a[href^="http://127.0.0.1:3001/a/"]').first()).toHaveAttribute(
     'href',
     publicUrl!,

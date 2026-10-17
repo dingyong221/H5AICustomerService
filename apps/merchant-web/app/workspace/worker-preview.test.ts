@@ -69,4 +69,41 @@ describe('merchant preview Worker boundary', () => {
       ).rejects.toThrow();
     }
   });
+
+  it('forwards the full 2000-character question and rejects overflow before any request', async () => {
+    const environment = {
+      NODE_ENV: 'test',
+      WORKER_READINESS_URL: 'http://127.0.0.1:3011/readyz',
+      PREVIEW_AUTH_TOKEN: randomBytes(32).toString('base64url'),
+    } satisfies NodeJS.ProcessEnv;
+    const input = {
+      merchantId: 'aa'.repeat(16),
+      assistantName: '测试客服',
+      question: '问'.repeat(2_000),
+      draft: {
+        industry: '零售',
+        businessScope: '保温杯',
+        materialsSummary: 'M1',
+        pricingSummary: '89元/件',
+        promotionSummary: '暂无优惠',
+        welcomeMessage: '您好',
+        insufficientInfoMessage: '请确认',
+        humanContact: '微信 shop_service，工作日9—18点',
+      },
+    };
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify({ data: { answer: '需要确认。' } }), {
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    );
+    await requestWorkerPreview(input, environment, fetchImpl);
+    const payload = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body));
+    expect(payload.question).toBe(input.question);
+    expect(payload.facts.humanContact).toBe(input.draft.humanContact);
+    await expect(
+      requestWorkerPreview({ ...input, question: `${input.question}问` }, environment, fetchImpl),
+    ).rejects.toThrow();
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
 });

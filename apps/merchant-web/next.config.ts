@@ -7,7 +7,18 @@ if (merchantBasePath !== '' && merchantBasePath !== '/console') {
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  ...(merchantBasePath ? { basePath: merchantBasePath } : {}),
+  ...(merchantBasePath === '/console' ||
+  process.env['NEXT_PUBLIC_MERCHANT_ASSET_PREFIX'] === '/console'
+    ? { assetPrefix: '/console' }
+    : {}),
+  async rewrites() {
+    return {
+      beforeFiles: [
+        { source: '/console', destination: '/' },
+        { source: '/console/:path*', destination: '/:path*' },
+      ],
+    };
+  },
   transpilePackages: ['@h5cs/contracts', '@h5cs/database', '@h5cs/domain', '@h5cs/ui'],
   allowedDevOrigins: process.env.NODE_ENV === 'production' ? [] : ['127.0.0.1'],
 };

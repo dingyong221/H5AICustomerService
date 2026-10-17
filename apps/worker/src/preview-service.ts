@@ -1,5 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
+import { parseWritingInput, parseWritingResult, type WritingResult } from '@h5cs/contracts';
+import { buildWritingPrompt, preservesProvidedNumbers } from './writing-prompt.js';
 
 import {
   ChatCompletionsGenerator,
@@ -62,7 +64,7 @@ function parsePayload(value: unknown): {
   if (
     typeof input['question'] !== 'string' ||
     input['question'].trim().length < 1 ||
-    input['question'].length > 500 ||
+    input['question'].length > 2_000 ||
     controlCharacters.test(input['question'])
   ) {
     throw new PreviewError(400, 'Invalid preview question');
@@ -75,6 +77,15 @@ function parsePayload(value: unknown): {
     throw new PreviewError(400, 'Invalid preview facts');
   }
   const candidate = input['facts'] as Record<string, unknown>;
+  const humanContact = candidate['humanContact'];
+  if (
+    humanContact !== undefined &&
+    (typeof humanContact !== 'string' ||
+      humanContact.length > 500 ||
+      /[\u0000-\u0009\u000b-\u001f\u007f<>]/u.test(humanContact))
+  ) {
+    throw new PreviewError(400, 'Invalid human contact instructions');
+  }
   for (const [name, maximum] of fields) {
     const text = candidate[name];
     if (
@@ -97,6 +108,7 @@ export class PreviewService {
   readonly #token: Buffer;
   readonly #generator: ChatCompletionsGenerator;
   readonly #requests = new Map<string, number[]>();
+  readonly #writingBusy = new Set<string>();
 
   public constructor(token: string, generator: ChatCompletionsGenerator) {
     if (!tokenPattern.test(token)) throw new Error('Preview token is invalid');
@@ -111,6 +123,11 @@ export class PreviewService {
 
   public async reply(payload: unknown, signal: AbortSignal): Promise<string> {
     const { merchantId, facts, question } = parsePayload(payload);
+    this.limit(merchantId);
+    return this.#generator.generate(buildPreviewPrompt(facts, question), signal);
+  }
+
+  private limit(merchantId: string): void {
     const now = Date.now();
     const recent = (this.#requests.get(merchantId) ?? []).filter((time) => now - time < 60_000);
     if (recent.length >= 5) throw new PreviewError(429, 'Preview rate limit reached');
@@ -121,7 +138,43 @@ export class PreviewService {
     }
     recent.push(now);
     this.#requests.set(merchantId, recent);
-    return this.#generator.generate(buildPreviewPrompt(facts, question), signal);
+  }
+
+  public async write(payload: unknown, signal: AbortSignal): Promise<WritingResult> {
+    const candidate =
+      typeof payload === 'object' && payload !== null && !Array.isArray(payload)
+        ? (payload as Record<string, unknown>)
+        : null;
+    const merchantId = candidate?.['merchantId'];
+    const input = parseWritingInput(candidate);
+    if (typeof merchantId !== 'string' || !idPattern.test(merchantId) || !input)
+      throw new PreviewError(400, 'Invalid writing request');
+    if (this.#writingBusy.has(merchantId) || this.#writingBusy.size >= 3)
+      throw new PreviewError(429, 'Writing capacity reached');
+    this.limit(merchantId);
+    this.#writingBusy.add(merchantId);
+    try {
+      const answer = await this.#generator.generate(buildWritingPrompt(input), signal);
+      const result = parseWritingResult(JSON.parse(answer), input.field);
+      if (!result || !preservesProvidedNumbers(input, result))
+        throw new Error('Invalid writing answer');
+      const labeled =
+        input.field === 'welcomeMessage'
+          ? parseWritingResult(
+              {
+                ...result,
+                options: result.options.map((text) =>
+                  /\bAI\b|人工智能/iu.test(text) ? text : `您好，我是 AI 客服。${text}`,
+                ),
+              },
+              input.field,
+            )
+          : result;
+      if (!labeled) throw new Error('Invalid labeled writing answer');
+      return labeled;
+    } finally {
+      this.#writingBusy.delete(merchantId);
+    }
   }
 }
 

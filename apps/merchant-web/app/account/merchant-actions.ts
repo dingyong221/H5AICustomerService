@@ -72,7 +72,7 @@ const setSession = async (session: { sessionToken: string; csrfToken: string }):
   });
 };
 
-export async function currentMerchant(merchantId: string) {
+export async function currentMerchant(merchantId?: string) {
   const repository = getRepository();
   const origin = merchantOrigin();
   if (!repository || !origin) return null;
@@ -138,7 +138,7 @@ export async function claimMerchant(
       error: error instanceof MerchantAccessError ? error.message : '领取失败，请稍后重试。',
     };
   }
-  redirect(`/workspace/${merchantId}`);
+  redirect(`/${merchantId}`);
 }
 
 export async function loginMerchant(
@@ -172,7 +172,7 @@ export async function loginMerchant(
       error: error instanceof MerchantAccessError ? error.message : '登录失败，请稍后重试。',
     };
   }
-  redirect(safeMerchantReturnPath(merchantId, nextPathInput) ?? `/workspace/${merchantId}`);
+  redirect(safeMerchantReturnPath(merchantId, nextPathInput) ?? `/${merchantId}`);
 }
 
 export async function logoutMerchant(
@@ -212,5 +212,5 @@ export async function logoutMerchant(
   }
   store.delete(sessionCookieName(secure));
   store.delete(csrfCookieName(secure));
-  redirect('/account/login');
+  redirect('/console/account/login');
 }

@@ -84,6 +84,7 @@ describe('public visitor session issuance', () => {
         aiDisclosure: true as const,
         businessScope: '空调清洗',
         welcomeMessage: '你好',
+        humanContact: '',
         availability: 'online' as const,
         releaseRef: session.releaseRef,
       },

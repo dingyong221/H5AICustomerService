@@ -3,6 +3,7 @@ import { isAbsolute } from 'node:path';
 
 import type { ConversationPrompt } from './conversation-prompt.js';
 import type { ConversationTurnGenerator } from './conversation-turn-processor.js';
+import { controlledServiceReply } from './service-reply-boundary.js';
 
 export type ChatCompletionsConfig = Readonly<{
   endpoint: string;
@@ -119,6 +120,9 @@ export class ChatCompletionsGenerator implements ConversationTurnGenerator {
   }
 
   public async generate(prompt: ConversationPrompt, signal: AbortSignal): Promise<string> {
+    signal.throwIfAborted();
+    const controlled = controlledServiceReply(prompt);
+    if (controlled !== null) return controlled.answer;
     const response = await this.#fetchImpl(this.#config.endpoint, {
       method: 'POST',
       redirect: 'error',

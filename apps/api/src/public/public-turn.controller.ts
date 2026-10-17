@@ -3,6 +3,7 @@ import { Body, Controller, Get, Headers, HttpCode, Param, Post, Res } from '@nes
 import type { EventStreamResponseLike, ResponseLike } from '../http-types.js';
 import { PublicSessionService } from './public-session.service.js';
 import { PublicTurnService } from './public-turn.service.js';
+import { publicSnapshotForClient } from './public-client-features.js';
 
 @Controller('/api/v1/public/sessions')
 export class PublicTurnController {
@@ -16,9 +17,12 @@ export class PublicTurnController {
     @Param('sessionHandle') sessionHandle: string,
     @Headers('cookie') cookieHeader: string | undefined,
     @Res({ passthrough: true }) response: ResponseLike,
+    @Headers('x-h5cs-features') features?: string,
   ) {
     response.setHeader('Cache-Control', 'no-store');
-    return this.sessions.history(sessionHandle, cookieHeader);
+    response.setHeader('Vary', 'X-H5CS-Features');
+    const history = await this.sessions.history(sessionHandle, cookieHeader);
+    return { ...history, snapshot: publicSnapshotForClient(history.snapshot, features) };
   }
 
   @Post('/:sessionHandle/end')

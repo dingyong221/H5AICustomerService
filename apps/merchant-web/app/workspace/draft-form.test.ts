@@ -23,6 +23,10 @@ describe('merchant assistant draft form', () => {
     const multiline = completeForm();
     multiline.set('materialsSummary', '服务 A\r\n服务 B');
     expect(parseAssistantDraftForm(multiline)?.materialsSummary).toBe('服务 A\n服务 B');
+    multiline.set('materialsSummary', '问：服务范围？\t答：需向商家确认。');
+    expect(parseAssistantDraftForm(multiline)?.materialsSummary).toBe(
+      '问：服务范围？ 答：需向商家确认。',
+    );
   });
 
   it('rejects missing, oversized, and control-character facts', () => {
@@ -35,5 +39,20 @@ describe('merchant assistant draft form', () => {
     const control = completeForm();
     control.set('pricingSummary', '100 元\u0000');
     expect(parseAssistantDraftForm(control)).toBeNull();
+  });
+
+  it('keeps the legacy draft shape without contact and accepts only bounded plain contact instructions', () => {
+    expect(parseAssistantDraftForm(completeForm())).not.toHaveProperty('humanContact');
+    const data = completeForm();
+    data.set('humanContact', ' 工作日 9:00—18:00\r\n微信：shop_service ');
+    expect(parseAssistantDraftForm(data)?.humanContact).toBe(
+      '工作日 9:00—18:00\n微信：shop_service',
+    );
+    data.set('humanContact', '');
+    expect(parseAssistantDraftForm(data)).not.toHaveProperty('humanContact');
+    for (const invalid of ['联'.repeat(501), '<b>假转接</b>', '联系\u0000商家']) {
+      data.set('humanContact', invalid);
+      expect(parseAssistantDraftForm(data)).toBeNull();
+    }
   });
 });

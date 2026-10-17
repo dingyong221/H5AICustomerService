@@ -28,9 +28,22 @@ describe('public assistant snapshot', () => {
       aiDisclosure: true,
       businessScope: snapshot.businessScope,
       welcomeMessage: snapshot.welcomeMessage,
+      humanContact: '',
       availability: 'online',
     });
     expect(findPublicSnapshot).toHaveBeenCalledWith(snapshot.publicAssistantId);
+  });
+
+  it('exposes only the contact instructions returned by the published snapshot reader', async () => {
+    const service = new PublicAssistantService({
+      findPublicSnapshot: async () => ({
+        ...snapshot,
+        humanContact: '微信 shop_service，工作日9—18点',
+      }),
+    });
+    await expect(service.load(snapshot.publicAssistantId)).resolves.toMatchObject({
+      humanContact: '微信 shop_service，工作日9—18点',
+    });
   });
 
   it('does not expose invalid or unpublished assistant identifiers', async () => {

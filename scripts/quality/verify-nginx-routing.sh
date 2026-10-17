@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
+trap 'printf "Nginx routing check failed at line %s\n" "$LINENO" >&2' ERR
 
 if [[ ${CI:-} != true || ${GITHUB_ACTIONS:-} != true ]]; then
   echo 'This isolated Nginx route check runs only in CI.' >&2
@@ -93,16 +94,17 @@ test "$(curl "${resolve_http[@]}" "$http/.well-known/acme-challenge/ping")" = ac
 test "$(curl "${resolve_http[@]}" --output /dev/null --write-out '%{http_code}' "$http/gateway-health")" = 200
 test "$(curl "${resolve_http[@]}" --output /dev/null --write-out '%{http_code}|%{redirect_url}' "$http/ops/login")" = '308|https://h5cs.1rying.com/ops/login'
 test "$(curl "${resolve_https[@]}" "$https/ops/login")" = 'ops|/ops/login|h5cs.1rying.com|https'
-test "$(curl "${resolve_https[@]}" "$https/console/account/login")" = 'merchant|/console/account/login|h5cs.1rying.com|https'
+test "$(curl "${resolve_https[@]}" "$https/console/account/login")" = 'merchant|/account/login|h5cs.1rying.com|https'
+test "$(curl "${resolve_https[@]}" "$https/22222222222222222222222222222222/drafts")" = 'merchant|/22222222222222222222222222222222/drafts|h5cs.1rying.com|https'
 test "$(curl "${resolve_https[@]}" "$https/a/probe")" = 'consumer|/a/probe|h5cs.1rying.com|https'
 test "$(curl "${resolve_https[@]}" "$https/api/v1/probe")" = 'api|/api/v1/probe|h5cs.1rying.com|https'
 for blocked_path in /mcp /mcp/probe /oauth/probe /.well-known/oauth-authorization-server /api/v1/skill /api/v1/skill/probe /console/login /console/onboarding /console/onboarding/probe /console/auth/workbuddy/bind; do
   test "$(curl "${resolve_https[@]}" --output /dev/null --write-out '%{http_code}' "$https$blocked_path")" = 404
 done
 test "$(curl "${resolve_https[@]}" "$https/ops")" = 'ops|/ops|h5cs.1rying.com|https'
-test "$(curl "${resolve_https[@]}" "$https/console")" = 'merchant|/console|h5cs.1rying.com|https'
+test "$(curl "${resolve_https[@]}" "$https/console")" = 'merchant|/|h5cs.1rying.com|https'
 test "$(curl "${resolve_https[@]}" --location --max-redirs 3 "$https/ops/")" = 'ops|/ops|h5cs.1rying.com|https'
-test "$(curl "${resolve_https[@]}" --location --max-redirs 3 "$https/console/")" = 'merchant|/console|h5cs.1rying.com|https'
+test "$(curl "${resolve_https[@]}" --location --max-redirs 3 "$https/console/")" = 'merchant|/|h5cs.1rying.com|https'
 test "$(curl --noproxy '*' --silent --insecure --output /dev/null --write-out '%{http_code}' https://127.0.0.1:18443/a/probe || true)" = 000
 test "$(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18080/ops/login || true)" = 000
 

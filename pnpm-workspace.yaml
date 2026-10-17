@@ -8,6 +8,8 @@ allowBuilds:
 
 overrides:
   tsx: 4.23.13
+  sharp: 0.35.5
+  source-map-js: 1.2.2
 
 catalog:
   '@eslint/js': 9.39.5

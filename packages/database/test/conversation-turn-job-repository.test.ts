@@ -91,7 +91,7 @@ describe('MySQL conversation turn jobs', () => {
               expires_at: new Date(now.getTime() + 60_000),
               merchant_status: 'active',
               assistant_status: 'active',
-              config_snapshot: facts,
+              config_snapshot: { ...facts, humanContact: '已发布人工说明：微信 old_support' },
             },
           ],
           [],
@@ -118,6 +118,7 @@ describe('MySQL conversation turn jobs', () => {
     expect(claim).toMatchObject({
       jobId: jobId.toString('hex'),
       releaseId: releaseId.toString('hex'),
+      facts: { humanContact: '已发布人工说明：微信 old_support' },
       question: '清洗多少钱？',
       context: [
         { role: 'visitor', content: '你好' },

@@ -1,6 +1,7 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 import { confirmKnowledgeAction } from './knowledge-actions';
 
@@ -19,6 +20,10 @@ export function ConfirmKnowledgeForm({
     error: null,
     confirmed: false,
   });
+  const router = useRouter();
+  useEffect(() => {
+    if (state.confirmed) router.refresh();
+  }, [state.confirmed, router]);
   const confirmed = alreadyConfirmed || state.confirmed;
   return (
     <form action={action} className="assistant-confirm-form">
