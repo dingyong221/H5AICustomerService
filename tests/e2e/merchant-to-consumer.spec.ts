@@ -461,11 +461,19 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   // report query. Visible filters and exported data must describe the same range.
   await operatorPage.getByLabel('开始日期', { exact: true }).fill('2000-01-01');
   await operatorPage.getByRole('link', { name: '今天', exact: true }).click();
-  await expect(operatorPage.getByLabel('开始日期', { exact: true })).not.toHaveValue('2000-01-01');
-  const todayValue = await operatorPage.getByLabel('开始日期', { exact: true }).inputValue();
+  await expect(operatorPage).toHaveURL(/(?:\?|&)days=1(?:&|$)/u);
+  const todayValue = await operatorPage.getByLabel('开始日期', { exact: true }).getAttribute('max');
+  if (!todayValue || !/^\d{4}-\d{2}-\d{2}$/u.test(todayValue))
+    throw new Error('Expected the server-defined Beijing day');
+  await expect(operatorPage.getByLabel('开始日期', { exact: true })).toHaveValue(todayValue);
   await expect(operatorPage.getByLabel('结束日期', { exact: true })).toHaveValue(todayValue);
   await operatorPage.getByRole('link', { name: '近 7 天', exact: true }).click();
-  await expect(operatorPage.getByLabel('开始日期', { exact: true })).not.toHaveValue(todayValue);
+  await expect(operatorPage).toHaveURL(/(?:\?|&)days=7(?:&|$)/u);
+  const sevenDayStart = new Date(Date.parse(`${todayValue}T00:00:00.000Z`) - 6 * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+  await expect(operatorPage.getByLabel('开始日期', { exact: true })).toHaveValue(sevenDayStart);
+  await expect(operatorPage.getByLabel('结束日期', { exact: true })).toHaveValue(todayValue);
   for (const [label, kind, expectedColumn] of [
     ['每日使用', 'daily', '消费者问句'],
     ['商家使用', 'merchants', '商家名称'],
