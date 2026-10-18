@@ -581,8 +581,16 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   });
   // Native section links must retain /ops when deployed under the same domain.
   await opsNavigation.getByRole('button', { name: '运行管理', exact: true }).click();
+  await expect(opsNavigation.getByRole('link', { name: '审计记录', exact: true })).toHaveAttribute(
+    'href',
+    `${prefixed ? '/ops' : ''}/#audit-log`,
+  );
   await opsNavigation.getByRole('link', { name: '审计记录', exact: true }).click();
-  await expect(operatorPage).toHaveURL(`${operatorBase}/#audit-log`);
+  // Next canonicalizes the prefixed homepage /ops/ to /ops; root remains /.
+  await expect(operatorPage).toHaveURL(`${operatorBase}${prefixed ? '' : '/'}#audit-log`);
+  await expect(
+    operatorPage.getByRole('heading', { name: '最近审计记录', exact: true }),
+  ).toBeVisible();
   await expect(
     opsNavigation.getByRole('button', { name: '运行管理', exact: true }),
   ).toHaveAttribute('aria-expanded', 'true');
