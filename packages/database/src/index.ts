@@ -11,5 +11,6 @@ export * from './operator-login-throttle-repository.js';
 export * from './oauth-repository.js';
 export * from './platform-login-session-repository.js';
 export * from './platform-provisioning-repository.js';
+export * from './platform-analytics-repository.js';
 export * from './public-session-repository.js';
 export * from './schema/index.js';

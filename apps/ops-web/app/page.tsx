@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { AnalyticsOverview } from './analytics-overview';
+import type { AnalyticsParams } from './analytics-query';
 
 import { Button, EmptyState, PageShell, StatusBadge } from '@h5cs/ui';
 import {
@@ -98,7 +100,7 @@ const assistantStateLabel = (status: string, activeReleaseId: string | null): st
 export default async function OperationsDashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ merchantSearch?: string | string[] }>;
+  searchParams: Promise<AnalyticsParams>;
 }) {
   const operator = await currentOperator();
   if (!operator) redirect('/login');
@@ -189,8 +191,9 @@ export default async function OperationsDashboardPage({
           </span>
         </div>
       }
-      title="平台运行态，一眼看清"
+      title="运营总览"
     >
+      <AnalyticsOverview params={await searchParams} />
       <section aria-label="运营数据概况" className="ops-overview" id="overview">
         <div className="ops-overview__lead">
           <p>系统概况</p>
@@ -199,7 +202,7 @@ export default async function OperationsDashboardPage({
         </div>
         <div className="ops-metrics">
           <article>
-            <span>活跃商家</span>
+            <span>最近列表中的已启用商家</span>
             <strong>
               {databaseReady
                 ? merchants.filter((merchant) => merchant.status === 'active').length

@@ -1,12 +1,12 @@
 import { randomBytes, randomInt } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 
 import { expect, test } from '@playwright/test';
 
 test('operator provisions a merchant, merchant previews and publishes, consumer receives an AI reply', async ({
   browser,
 }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(300_000);
   const operatorPassword = process.env['H5CS_E2E_OPERATOR_PASSWORD'];
   if (!operatorPassword) throw new Error('Browser-test operator credential is unavailable');
 
@@ -399,4 +399,127 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
     publicSlug,
   );
   expect(resumedStatus).toBe(200);
+
+  // The same genuine consumer records must appear once in operator reports.
+  // This does not send any additional messages or model requests.
+  const opsNavigation = operatorPage.getByRole('navigation', { name: '运营后台主导航' });
+  await opsNavigation.getByRole('link', { name: '商家管理', exact: true }).click();
+  await expect(operatorPage).toHaveURL(`${operatorBase}/merchants`);
+  await operatorPage.getByLabel('商家名称或完整 ID', { exact: true }).fill(merchantName);
+  await operatorPage.getByRole('button', { name: '应用筛选', exact: true }).click();
+  const usageRow = operatorPage
+    .locator('.ops-data-table tbody tr')
+    .filter({ hasText: merchantName });
+  await expect(usageRow).toHaveCount(1);
+  await usageRow.getByRole('link', { name: '查看详情', exact: true }).click();
+  await expect(operatorPage).toHaveURL(new RegExp(`/${merchantId}\\?`, 'u'));
+  await expect(
+    operatorPage.getByRole('heading', { name: merchantName, exact: true }),
+  ).toBeVisible();
+  await expect(
+    operatorPage.locator('.ops-stat-card').filter({ hasText: '消费者问句' }).locator('strong'),
+  ).toHaveText('2');
+  await expect(
+    operatorPage.locator('.ops-stat-card').filter({ hasText: '新建消费者会话' }).locator('strong'),
+  ).toHaveText('2');
+  await expect(operatorPage.getByRole('table').filter({ hasText: assistantName })).toBeVisible();
+
+  // The detail management controls retain the existing confirmation/audit and
+  // public-service behavior, not merely a client-only status toggle.
+  const statusPanel = operatorPage.getByRole('region', { name: '商家状态管理' });
+  await statusPanel.getByText('暂停此商家', { exact: true }).click();
+  await statusPanel.getByLabel('操作原因（写入审计）').fill('运营增强合成验收：详情页暂停');
+  await statusPanel.getByLabel('我已核对商家编号和操作影响').check();
+  await statusPanel.getByRole('button', { name: '确认暂停商家' }).click();
+  await expect(statusPanel.getByText('恢复此商家', { exact: true })).toBeVisible();
+  expect(
+    await consumerPage.evaluate(
+      async (slug) => (await fetch(`/api/v1/public/assistants/${slug}`)).status,
+      publicSlug,
+    ),
+  ).toBe(404);
+  await expect(
+    operatorPage.locator('.ops-stat-card').filter({ hasText: '消费者问句' }).locator('strong'),
+  ).toHaveText('2');
+  await statusPanel.getByText('恢复此商家', { exact: true }).click();
+  await statusPanel.getByLabel('操作原因（写入审计）').fill('运营增强合成验收：详情页恢复');
+  await statusPanel.getByLabel('我已核对商家编号和操作影响').check();
+  await statusPanel.getByRole('button', { name: '确认恢复商家' }).click();
+  await expect(statusPanel.getByText('暂停此商家', { exact: true })).toBeVisible();
+  expect(
+    await consumerPage.evaluate(
+      async (slug) => (await fetch(`/api/v1/public/assistants/${slug}`)).status,
+      publicSlug,
+    ),
+  ).toBe(200);
+
+  await operatorPage.getByRole('link', { name: '查看此商家报表与导出', exact: true }).click();
+  const reportTypes = operatorPage.getByRole('navigation', { name: '报表类型' });
+  for (const [label, kind, expectedColumn] of [
+    ['每日使用', 'daily', '消费者问句'],
+    ['商家使用', 'merchants', '商家名称'],
+    ['客服使用', 'assistants', '客服名称'],
+    ['改进与复测', 'quality', '复测运行次数'],
+    ['异常分布', 'errors', '当前失败记录数'],
+  ] as const) {
+    await reportTypes.getByRole('link', { name: label, exact: true }).click();
+    await expect(operatorPage.getByRole('heading', { name: label, exact: true })).toBeVisible();
+    const downloadPromise = operatorPage.waitForEvent('download');
+    await operatorPage.getByRole('button', { name: '导出本报表 CSV', exact: true }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toMatch(
+      new RegExp(`^h5cs-${kind}-\\d{4}-\\d{2}-\\d{2}-\\d{4}-\\d{2}-\\d{2}\\.csv$`, 'u'),
+    );
+    const path = await download.path();
+    if (!path) throw new Error('Expected an actual downloaded CSV');
+    const csv = await readFile(path, 'utf8');
+    expect(csv.startsWith('\ufeff')).toBe(true);
+    expect(csv).toContain(expectedColumn);
+    expect(csv).not.toContain(merchantPhone);
+    expect(csv).not.toContain(merchantPassword);
+    expect(csv).not.toContain('你们提供什么服务？');
+    expect(csv).not.toContain('洗衣机清洁可以咨询吗？');
+    if (kind === 'daily') expect(csv.split('\r\n').filter(Boolean)).toHaveLength(8);
+    await download.delete();
+  }
+  await operatorPage.setViewportSize({ width: 390, height: 844 });
+  for (const path of ['/merchants', '/reports']) {
+    await operatorPage.goto(operatorBase + path);
+    await expect(operatorPage.locator('.ops-analytics')).toBeVisible();
+    expect(
+      await operatorPage.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+      ),
+    ).toBe(true);
+  }
+  await mkdir('artifacts/ops-enhancement', { recursive: true });
+  await operatorPage.screenshot({
+    path: `artifacts/ops-enhancement/reports-mobile-${process.env['H5CS_E2E_PATH_MODE'] ?? 'root'}.png`,
+    fullPage: true,
+  });
+  await operatorPage.setViewportSize({ width: 1440, height: 1000 });
+  await operatorPage.screenshot({
+    path: `artifacts/ops-enhancement/reports-desktop-${process.env['H5CS_E2E_PATH_MODE'] ?? 'root'}.png`,
+    fullPage: true,
+  });
+
+  // A genuine merchant session is not an operator session, even on one domain.
+  const merchantOnlyContext = await browser.newContext();
+  try {
+    const onlyMerchantCookies = (await merchantPage.context().cookies()).filter((cookie) =>
+      ['h5cs_session', 'h5cs_csrf'].includes(cookie.name),
+    );
+    expect(onlyMerchantCookies.some((cookie) => cookie.name === 'h5cs_session')).toBe(true);
+    await merchantOnlyContext.addCookies(onlyMerchantCookies);
+    const merchantOnlyPage = await merchantOnlyContext.newPage();
+    await merchantOnlyPage.goto(managementUrl);
+    await expect(merchantOnlyPage).toHaveURL(managementUrl);
+    await merchantOnlyPage.goto(operatorBase + '/merchants');
+    await expect(merchantOnlyPage).toHaveURL(operatorBase + '/login');
+    expect((await merchantOnlyContext.request.get(operatorBase + '/reports/export')).status()).toBe(
+      401,
+    );
+  } finally {
+    await merchantOnlyContext.close();
+  }
 });

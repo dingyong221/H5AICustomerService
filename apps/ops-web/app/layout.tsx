@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 
 import '@h5cs/ui/styles.css';
 import './styles.css';
+import Link from 'next/link';
+import { OpsNavigation } from './ops-navigation';
 
 export const metadata: Metadata = {
   description: '管理商家、运行任务和审计记录的运营工作台。',
@@ -27,18 +29,11 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
           跳到主要内容
         </a>
         <header className="ops-topbar">
-          <a aria-label="H5 AI 客服运营中心" className="ops-brand" href="#overview">
+          <Link aria-label="H5 AI 客服运营中心" className="ops-brand" href="/">
             <span aria-hidden="true">H5</span>
             <strong>运营中心</strong>
-          </a>
-          <nav aria-label="运营后台主导航" className="ops-nav">
-            <a aria-current="page" href="#overview">
-              总览
-            </a>
-            <a href="#provision">商家开通</a>
-            <a href="#tasks">任务</a>
-            <a href="#audit">审计</a>
-          </nav>
+          </Link>
+          <OpsNavigation />
           <div className="ops-identity">
             <span aria-hidden="true">运</span>
             <div>

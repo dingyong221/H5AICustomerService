@@ -50,6 +50,8 @@ export async function setMerchantPaused(
       operatorId: operator,
     });
     revalidatePath('/');
+    revalidatePath('/merchants');
+    revalidatePath(`/merchants/${merchantId}`);
     return { error: null, done };
   } catch (error) {
     return {
