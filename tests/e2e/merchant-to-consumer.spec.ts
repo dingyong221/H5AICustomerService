@@ -405,8 +405,21 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   process.stdout.write('[ops-e2e] verifying merchant usage and detail controls\n');
   operatorPage.setDefaultTimeout(30_000);
   const opsNavigation = operatorPage.getByRole('navigation', { name: '运营后台主导航' });
+  const merchantMenu = opsNavigation.getByRole('button', { name: '商家运营', exact: true });
+  // A two-level menu must be operable by keyboard, and collapsed children must
+  // not remain clickable or focusable. Keep the browser's actual button state.
+  if ((await merchantMenu.getAttribute('aria-expanded')) === 'true') await merchantMenu.click();
+  await expect(opsNavigation.getByRole('link', { name: '商家管理', exact: true })).toBeHidden();
+  await merchantMenu.focus();
+  await merchantMenu.press('Enter');
+  await expect(merchantMenu).toHaveAttribute('aria-expanded', 'true');
   await opsNavigation.getByRole('link', { name: '商家管理', exact: true }).click();
   await expect(operatorPage).toHaveURL(`${operatorBase}/merchants`);
+  await expect(merchantMenu).toHaveAttribute('aria-expanded', 'true');
+  await expect(opsNavigation.getByRole('link', { name: '商家管理', exact: true })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
   await operatorPage.getByLabel('商家名称或完整 ID', { exact: true }).fill(merchantName);
   await operatorPage.getByRole('button', { name: '应用筛选', exact: true }).click();
   const usageRow = operatorPage
@@ -483,6 +496,13 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   ] as const) {
     await reportTypes.getByRole('link', { name: label, exact: true }).click();
     await expect(operatorPage.getByRole('heading', { name: label, exact: true })).toBeVisible();
+    await expect(
+      opsNavigation.getByRole('button', { name: '数据报表', exact: true }),
+    ).toHaveAttribute('aria-expanded', 'true');
+    await expect(opsNavigation.getByRole('link', { name: label, exact: true })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
     const downloadPromise = operatorPage.waitForEvent('download', { timeout: 30_000 });
     await operatorPage.getByRole('button', { name: '导出本报表 CSV', exact: true }).click();
     const download = await downloadPromise;
@@ -517,11 +537,59 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
     path: `artifacts/ops-enhancement/reports-mobile-${process.env['H5CS_E2E_PATH_MODE'] ?? 'root'}.png`,
     fullPage: true,
   });
+  const mobileToggle = operatorPage.getByRole('button', { name: '展开菜单', exact: true });
+  await expect(opsNavigation).toBeHidden();
+  await mobileToggle.click();
+  await expect(opsNavigation).toBeVisible();
+  await expect(
+    opsNavigation.getByRole('button', { name: '数据报表', exact: true }),
+  ).toHaveAttribute('aria-expanded', 'true');
+  await operatorPage.screenshot({
+    path: `artifacts/ops-enhancement/menu-mobile-${process.env['H5CS_E2E_PATH_MODE'] ?? 'root'}.png`,
+    fullPage: true,
+  });
+  await operatorPage.keyboard.press('Escape');
+  await expect(opsNavigation).toBeHidden();
+  await expect(mobileToggle).toBeFocused();
+  await mobileToggle.click();
+  await opsNavigation.getByRole('link', { name: '商家使用', exact: true }).click();
+  await expect(operatorPage).toHaveURL(`${operatorBase}/reports?report=merchants`);
+  await expect(opsNavigation).toBeHidden();
+  await mobileToggle.click();
+  await expect(opsNavigation.getByRole('link', { name: '商家使用', exact: true })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+  await expect(
+    opsNavigation.getByRole('button', { name: '数据报表', exact: true }),
+  ).toHaveAttribute('aria-expanded', 'true');
+  await operatorPage.getByRole('button', { name: '收起菜单', exact: true }).click();
   await operatorPage.setViewportSize({ width: 1440, height: 1000 });
+  await expect(opsNavigation).toBeVisible();
+  const sidebarBox = await operatorPage
+    .getByRole('complementary', { name: '平台运营导航' })
+    .boundingBox();
+  const contentBox = await operatorPage.getByRole('main').boundingBox();
+  expect(sidebarBox).not.toBeNull();
+  expect(contentBox).not.toBeNull();
+  expect(sidebarBox!.x).toBe(0);
+  expect(sidebarBox!.width).toBeGreaterThan(200);
+  expect(contentBox!.x).toBeGreaterThanOrEqual(sidebarBox!.x + sidebarBox!.width);
   await operatorPage.screenshot({
     path: `artifacts/ops-enhancement/reports-desktop-${process.env['H5CS_E2E_PATH_MODE'] ?? 'root'}.png`,
     fullPage: true,
   });
+  // Native section links must retain /ops when deployed under the same domain.
+  await opsNavigation.getByRole('button', { name: '运行管理', exact: true }).click();
+  await opsNavigation.getByRole('link', { name: '审计记录', exact: true }).click();
+  await expect(operatorPage).toHaveURL(`${operatorBase}/#audit-log`);
+  await expect(
+    opsNavigation.getByRole('button', { name: '运行管理', exact: true }),
+  ).toHaveAttribute('aria-expanded', 'true');
+  await expect(opsNavigation.getByRole('link', { name: '审计记录', exact: true })).toHaveAttribute(
+    'aria-current',
+    'location',
+  );
 
   // A genuine merchant session is not an operator session, even on one domain.
   const merchantOnlyContext = await browser.newContext();

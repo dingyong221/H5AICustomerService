@@ -119,8 +119,7 @@ export const merchantStatusLabel = (status: string): string => {
   };
   return Object.hasOwn(labels, status) ? labels[status]! : '其他状态';
 };
-export const opsHref = (path: string): string =>
-  `${process.env['NEXT_PUBLIC_OPS_BASE_PATH'] ?? ''}${path}`;
+export { opsHref } from './ops-path';
 export const responseDuration = (ms: number | null): string =>
   ms === null ? '—' : `${(ms / 1000).toFixed(2)} 秒`;
 export const completionRate = (completed: number, failed: number): string =>
