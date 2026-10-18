@@ -402,6 +402,8 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
 
   // The same genuine consumer records must appear once in operator reports.
   // This does not send any additional messages or model requests.
+  process.stdout.write('[ops-e2e] verifying merchant usage and detail controls\n');
+  operatorPage.setDefaultTimeout(30_000);
   const opsNavigation = operatorPage.getByRole('navigation', { name: '运营后台主导航' });
   await opsNavigation.getByRole('link', { name: '商家管理', exact: true }).click();
   await expect(operatorPage).toHaveURL(`${operatorBase}/merchants`);
@@ -464,7 +466,7 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   ] as const) {
     await reportTypes.getByRole('link', { name: label, exact: true }).click();
     await expect(operatorPage.getByRole('heading', { name: label, exact: true })).toBeVisible();
-    const downloadPromise = operatorPage.waitForEvent('download');
+    const downloadPromise = operatorPage.waitForEvent('download', { timeout: 30_000 });
     await operatorPage.getByRole('button', { name: '导出本报表 CSV', exact: true }).click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toMatch(
@@ -481,6 +483,7 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
     expect(csv).not.toContain('洗衣机清洁可以咨询吗？');
     if (kind === 'daily') expect(csv.split('\r\n').filter(Boolean)).toHaveLength(8);
     await download.delete();
+    process.stdout.write(`[ops-e2e] ${kind} CSV verified\n`);
   }
   await operatorPage.setViewportSize({ width: 390, height: 844 });
   for (const path of ['/merchants', '/reports']) {
@@ -522,4 +525,5 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   } finally {
     await merchantOnlyContext.close();
   }
+  process.stdout.write('[ops-e2e] responsive layout and merchant/operator separation verified\n');
 });

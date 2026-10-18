@@ -59,4 +59,86 @@ describe('report exports use the same filters as the screen', () => {
     expect(result.csv).not.toContain('null');
     expect(result.csv).not.toContain('undefined');
   });
+
+  it('exports scoped assistant statistics with protected spreadsheet text', async () => {
+    const id = 'ab'.repeat(16);
+    const assistants = vi.fn(async () => ({
+      total: 1,
+      generatedAt: now.toISOString(),
+      items: [
+        {
+          id: 'cd'.repeat(16),
+          merchantId: id,
+          merchantName: '=HYPERLINK("x")',
+          displayName: '合成客服',
+          status: 'active',
+          releaseId: null,
+          sessions: 1,
+          questions: 2,
+          completed: 1,
+          failed: 1,
+          pending: 0,
+          meanResponseMs: 1200,
+        },
+      ],
+    }));
+    const query = parseAnalyticsQuery({ report: 'assistants', merchantId: id, page: '4' }, now);
+    const result = await prepareReportExport(query, {
+      assistants,
+    } as unknown as MySqlPlatformAnalyticsRepository);
+    expect(assistants).toHaveBeenCalledWith(query.range, id, 1, 5001);
+    expect(result.csv).toContain('"\'=HYPERLINK(""x"")"');
+    expect(result.csv).toContain('"平均处理毫秒"');
+  });
+
+  it('exports run counts and merchant verdicts, not an invented model accuracy', async () => {
+    const analytics = vi.fn(async () => ({
+      generatedAt: now.toISOString(),
+      quality: {
+        improvements: 2,
+        publishedImprovements: 1,
+        evaluations: 5,
+        evaluationCompleted: 3,
+        evaluationFailed: 1,
+        evaluationPending: 1,
+        verdictPass: 1,
+        verdictFail: 1,
+        unreviewed: 1,
+      },
+    }));
+    const result = await prepareReportExport(parseAnalyticsQuery({ report: 'quality' }, now), {
+      analytics,
+    } as unknown as MySqlPlatformAnalyticsRepository);
+    expect(result.csv).toContain('"商家评审通过"');
+    expect(result.csv).not.toContain('准确率');
+    expect(result.csv.split('\r\n').filter(Boolean)).toHaveLength(2);
+  });
+
+  it('keeps error sources separate and refuses more than 5,000 error groups', async () => {
+    const analytics = vi.fn(async () => ({
+      generatedAt: now.toISOString(),
+      errors: [
+        { source: 'conversation', type: 'consumer_question', code: 'synthetic_failure', total: 1 },
+        { source: 'job', type: 'conversation.turn', code: 'synthetic_failure', total: 1 },
+      ],
+    }));
+    const query = parseAnalyticsQuery({ report: 'errors' }, now);
+    const result = await prepareReportExport(query, {
+      analytics,
+    } as unknown as MySqlPlatformAnalyticsRepository);
+    expect(result.csv).toContain('"消费者问句"');
+    expect(result.csv).toContain('"后台任务"');
+    analytics.mockResolvedValueOnce({
+      generatedAt: now.toISOString(),
+      errors: Array.from({ length: 5001 }, () => ({
+        source: 'job',
+        type: 'test',
+        code: 'test',
+        total: 1,
+      })),
+    });
+    await expect(
+      prepareReportExport(query, { analytics } as unknown as MySqlPlatformAnalyticsRepository),
+    ).rejects.toThrow(ReportExportTooLargeError);
+  });
 });

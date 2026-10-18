@@ -1,6 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
+
+const subscribe = () => () => undefined;
+const clientReady = () => true;
+const serverReady = () => false;
 
 export function ReportDownloadButton({
   href,
@@ -12,6 +16,7 @@ export function ReportDownloadButton({
   secondary?: boolean;
 }) {
   const [pending, setPending] = useState(false);
+  const hydrated = useSyncExternalStore(subscribe, clientReady, serverReady);
   const [error, setError] = useState<string | null>(null);
   const download = async () => {
     if (pending) return;
@@ -24,6 +29,7 @@ export function ReportDownloadButton({
         credentials: 'same-origin',
         cache: 'no-store',
         redirect: 'error',
+        signal: AbortSignal.timeout(60_000),
       });
       if (!result.ok) {
         const body: unknown = await result.json();
@@ -55,7 +61,15 @@ export function ReportDownloadButton({
         window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       }
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : '网络暂不可用，请稍后重试。');
+      setError(
+        failure instanceof Error && ['AbortError', 'TimeoutError'].includes(failure.name)
+          ? '报表生成超时，请缩小范围后重试。'
+          : failure instanceof TypeError
+            ? '网络暂不可用，请稍后重试。'
+            : failure instanceof Error
+              ? failure.message
+              : '网络暂不可用，请稍后重试。',
+      );
     } finally {
       setPending(false);
     }
@@ -65,12 +79,15 @@ export function ReportDownloadButton({
       <button
         type="button"
         className={secondary ? 'ops-secondary-link' : 'ops-primary-link'}
-        disabled={pending}
+        disabled={!hydrated || pending}
         onClick={() => void download()}
       >
-        {pending ? '正在生成报表…' : children}
+        {!hydrated ? '正在准备导出…' : pending ? '正在生成报表…' : children}
       </button>
       {error ? <p role="alert">{error}</p> : null}
+      <noscript>
+        <a href={href}>下载 CSV（浏览器未启用脚本，错误将单独显示）</a>
+      </noscript>
     </div>
   );
 }

@@ -58,4 +58,11 @@ describe('authenticated report download boundary', () => {
     expect(result.status).toBe(413);
     expect(result.headers.has('content-disposition')).toBe(false);
   });
+
+  it('returns unavailable instead of a blank CSV if no database is configured', async () => {
+    mocks.repository.mockReturnValue(null);
+    const result = await GET(new Request('https://test.invalid/ops/reports/export'));
+    expect(result.status).toBe(503);
+    expect(mocks.export).not.toHaveBeenCalled();
+  });
 });

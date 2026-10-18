@@ -42,7 +42,7 @@ async function assistant(connection: Connection, merchantId: Buffer) {
     [id, merchantId, slug, createHash('sha256').update(slug).digest()],
   );
   await connection.execute(
-    `INSERT INTO assistant_release (id, merchant_id, assistant_id, release_no, status, config_snapshot, prompt_template_version, retrieval_policy_version, model_policy_version, created_at) VALUES (?, ?, ?, 1, 'published', '{}', 'synthetic', 'synthetic', 'synthetic', '2026-10-16 00:00:00')`,
+    `INSERT INTO assistant_release (id, merchant_id, assistant_id, release_no, draft_revision, status, config_snapshot, prompt_template_version, retrieval_policy_version, model_policy_version, created_at) VALUES (?, ?, ?, 1, 1, 'published', '{}', 'synthetic', 'synthetic', 'synthetic', '2026-10-16 00:00:00')`,
     [release, merchantId, id],
   );
   await connection.execute(

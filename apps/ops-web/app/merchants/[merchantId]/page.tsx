@@ -134,7 +134,7 @@ export default async function MerchantUsageDetail({
             </>
           ) : null}
           {merchant.status === 'active' || merchant.status === 'paused' ? (
-            <details>
+            <details key={merchant.status}>
               <summary>{merchant.status === 'active' ? '暂停此商家' : '恢复此商家'}</summary>
               <MerchantStatusForm
                 key={merchant.status}
