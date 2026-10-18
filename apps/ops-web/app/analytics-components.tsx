@@ -54,7 +54,7 @@ export function PeriodFilter({
         ))}
         <span>北京时间 · 今天为截至查询时的部分数据</span>
       </div>
-      <form className="ops-analytics-filter" method="get">
+      <form key={analyticsHref(path, query)} className="ops-analytics-filter" method="get">
         <label>
           开始日期
           <input

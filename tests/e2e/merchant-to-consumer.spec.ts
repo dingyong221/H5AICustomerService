@@ -457,6 +457,15 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
 
   await operatorPage.getByRole('link', { name: '查看此商家报表与导出', exact: true }).click();
   const reportTypes = operatorPage.getByRole('navigation', { name: '报表类型' });
+  // A preset must reset an edited-but-unsubmitted date field as well as the
+  // report query. Visible filters and exported data must describe the same range.
+  await operatorPage.getByLabel('开始日期', { exact: true }).fill('2000-01-01');
+  await operatorPage.getByRole('link', { name: '今天', exact: true }).click();
+  await expect(operatorPage.getByLabel('开始日期', { exact: true })).not.toHaveValue('2000-01-01');
+  const todayValue = await operatorPage.getByLabel('开始日期', { exact: true }).inputValue();
+  await expect(operatorPage.getByLabel('结束日期', { exact: true })).toHaveValue(todayValue);
+  await operatorPage.getByRole('link', { name: '近 7 天', exact: true }).click();
+  await expect(operatorPage.getByLabel('开始日期', { exact: true })).not.toHaveValue(todayValue);
   for (const [label, kind, expectedColumn] of [
     ['每日使用', 'daily', '消费者问句'],
     ['商家使用', 'merchants', '商家名称'],

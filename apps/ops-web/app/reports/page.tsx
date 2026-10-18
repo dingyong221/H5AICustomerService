@@ -110,7 +110,10 @@ export default async function PlatformReportsPage({
             </p>
           </div>
           {generatedAt ? (
-            <ReportDownloadButton href={opsHref(analyticsHref('/reports/export', query))}>
+            <ReportDownloadButton
+              key={opsHref(analyticsHref('/reports/export', query))}
+              href={opsHref(analyticsHref('/reports/export', query))}
+            >
               导出本报表 CSV
             </ReportDownloadButton>
           ) : null}

@@ -82,6 +82,7 @@ export default async function MerchantManagementPage({
                 {beijingTime(result.generatedAt)}
               </p>
               <ReportDownloadButton
+                key={opsHref(analyticsHref('/reports/export', query, { report: 'merchants' }))}
                 secondary
                 href={opsHref(analyticsHref('/reports/export', query, { report: 'merchants' }))}
               >
