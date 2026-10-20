@@ -192,6 +192,22 @@ export async function AssistantView({
       {section === 'publish' && (
         <section className="merchant-account-card assistant-detail-card">
           <h2>发布与消费者链接</h2>
+          {!assistant.knowledgeConfirmed ? (
+            <div className="assistant-detail-card" id="knowledge-confirmation">
+              <h3>先确认当前修订的业务资料</h3>
+              <p>
+                发布前请逐项核对上方草稿修订 {assistant.draftRevision}{' '}
+                的资料。确认后会更新本页的发布条件， 不会自动向消费者开放客服。
+              </p>
+              <ConfirmKnowledgeForm
+                key={`${assistantId}:${assistant.draftRevision}`}
+                merchantId={merchantId}
+                assistantId={assistantId}
+                draftRevision={assistant.draftRevision}
+                alreadyConfirmed={false}
+              />
+            </div>
+          ) : null}
           {assistant.activeReleaseId ? (
             <div>
               <p>
