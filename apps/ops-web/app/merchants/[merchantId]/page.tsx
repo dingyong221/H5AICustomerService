@@ -24,6 +24,7 @@ import { ManagementLink } from '../../management-link';
 import { MerchantStatusForm } from '../../merchant-status-form';
 import { currentOperator } from '../../operator-actions';
 import { ReissueInvitationForm } from '../../reissue-invitation-form';
+import { MerchantAccounts } from '../../merchant-accounts';
 
 export const dynamic = 'force-dynamic';
 
@@ -147,6 +148,7 @@ export default async function MerchantUsageDetail({
             暂停／恢复沿用现有服务端权限、事务与审计，不删除商家、客服和历史记录。
           </p>
         </section>
+        <MerchantAccounts merchantId={merchantId} />
         <MetricNotes />
       </section>
     </PageShell>

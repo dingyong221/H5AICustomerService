@@ -17,7 +17,7 @@ export default async function MerchantPasswordLoginPage({
   if (session) redirect(nextPath ?? `/${session.merchantId}`);
   return (
     <PageShell
-      description={<p>使用领取商家后台时填写的手机号和密码登录。</p>}
+      description={<p>使用领取时的手机号，或运营提供的 m_ 开头账号及密码登录。</p>}
       eyebrow="Merchant Account"
       title="登录商家管理后台"
     >

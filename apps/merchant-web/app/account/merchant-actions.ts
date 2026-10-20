@@ -154,7 +154,7 @@ export async function loginMerchant(
   const merchantIdInput = formData.get('merchantId');
   const nextPathInput = formData.get('nextPath');
   if (typeof phone !== 'string' || typeof password !== 'string') {
-    return { error: '请输入手机号和密码。' };
+    return { error: '请输入账号或手机号及密码。' };
   }
   let merchantId: string;
   try {

@@ -48,6 +48,13 @@ RUN pnpm exec turbo run build --filter="./apps/${APP_NAME}" \
        && printf '%s' "$inventory" | node -e 'const value = JSON.parse(require("node:fs").readFileSync(0, "utf8")); if (value.dialect !== "mysql" || !Array.isArray(value.entries) || value.entries.length === 0 || !/^[0-9a-f]{64}$/.test(value.planSha256)) process.exit(1);'; \
      fi
 
+# Pre-extract bundled PDFium to retain a non-root/read-only/noexec-temp runtime.
+RUN if [ "${APP_NAME}" = merchant-web ]; then \
+      mkdir -p /opt/deployed-app/parser-runtime \
+      && TMPDIR=/opt/deployed-app/parser-runtime node /opt/deployed-app/scripts/warm-material-parser.mjs \
+      && test -s /opt/deployed-app/parser-runtime/kreuzberg-pdfium/libpdfium.so; \
+    fi
+
 FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS runtime-base
 
 ENV NODE_ENV=production
@@ -56,6 +63,10 @@ LABEL org.opencontainers.image.source="https://github.com/dingyong221/H5AICustom
 WORKDIR /app
 
 COPY --from=build --chown=node:node /opt/deployed-app/ ./
+
+RUN if [ -d /app/parser-runtime ]; then \
+      chown -R root:root /app/parser-runtime && chmod -R a-w /app/parser-runtime; \
+    fi
 
 USER node
 

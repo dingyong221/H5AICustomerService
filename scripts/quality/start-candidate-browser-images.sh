@@ -85,7 +85,7 @@ docker run "${runtime[@]}" --name h5cs-artifact-e2e-ops \
   --env MANAGEMENT_CONSOLE_URL=http://127.0.0.1:3001/console \
   "${images[ops-web]}" >/dev/null
 
-docker run "${runtime[@]}" --name h5cs-artifact-e2e-merchant \
+docker run "${runtime[@]}" --name h5cs-artifact-e2e-merchant --memory 1024m --pids-limit 128 --cpus 0.6 \
   --env NODE_ENV=test --env HOSTNAME=127.0.0.1 --env PORT=3000 \
   --env "MYSQL_DATABASE_URL=$database_url" --env MERCHANT_PUBLIC_ORIGIN=http://127.0.0.1:3001 \
   --env "MERCHANT_PHONE_LOOKUP_KEY=$phone_key" --env CONSUMER_H5_ORIGIN=http://127.0.0.1:3001 \

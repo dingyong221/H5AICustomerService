@@ -67,6 +67,7 @@ const repositoryWith = (
           [],
         ];
       }
+      if (sql.includes('SELECT mm.merchant_id')) return [[{ merchant_id: merchantId }], []];
       if (sql.includes('UPDATE platform_login_session')) {
         return [{ affectedRows: revokedRows } as ResultSetHeader, []];
       }
@@ -91,6 +92,43 @@ const repositoryWith = (
 };
 
 describe('merchant invitation and scoped session', () => {
+  it('accepts fixed account IDs while locking the same credential row used by password resets', async () => {
+    const salt = randomBytes(16);
+    const f = repositoryWith(false, 1, { salt, hash: scryptSync(password, salt, 64) });
+    const session = await f.repository.login({
+      phone: `m_${merchantUserId.toString('hex')}`,
+      password,
+      merchantId: merchantId.toString('hex'),
+    });
+    expect(session.merchantId).toBe(merchantId.toString('hex'));
+    const credential = f.calls.find((call) =>
+      call.sql.includes('FROM merchant_password_credential'),
+    );
+    expect(credential?.sql).toContain('c.merchant_user_id = ?');
+    expect(credential?.sql).toContain("u.status = 'active'");
+    expect(credential?.sql).toContain('FOR UPDATE');
+    expect(credential?.values).toEqual([merchantUserId]);
+    expect(f.commit).toHaveBeenCalledOnce();
+    expect(f.rollback).not.toHaveBeenCalled();
+  });
+
+  it('rolls back invalid-password logins without issuing a session', async () => {
+    const salt = randomBytes(16);
+    const f = repositoryWith(false, 1, { salt, hash: scryptSync(password, salt, 64) });
+    await expect(
+      f.repository.login({
+        phone: `m_${merchantUserId.toString('hex')}`,
+        password: 'SYNTHETIC-wrong-password',
+        merchantId: merchantId.toString('hex'),
+      }),
+    ).rejects.toThrow('账号、手机号或密码不正确');
+    expect(f.calls.some((call) => call.sql.includes('INSERT INTO platform_login_session'))).toBe(
+      false,
+    );
+    expect(f.commit).not.toHaveBeenCalled();
+    expect(f.rollback).toHaveBeenCalledOnce();
+  });
+
   it('requires an explicit target when one verified owner has multiple merchants', async () => {
     const merchants = [merchantId, Buffer.from('33'.repeat(16), 'hex')];
     const salt = randomBytes(16);
@@ -115,6 +153,9 @@ describe('merchant invitation and scoped session', () => {
         }
         return [resultHeader, []];
       },
+      beginTransaction: vi.fn(async () => undefined),
+      commit: vi.fn(async () => undefined),
+      rollback: vi.fn(async () => undefined),
       end: vi.fn(async () => undefined),
     } as unknown as Connection;
     const database = {

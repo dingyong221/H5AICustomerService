@@ -3,7 +3,12 @@ import { randomUUID } from 'node:crypto';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 
-import { loadDatabaseConfig, MySqlAssistantLifecycleRepository } from '@h5cs/database';
+import {
+  loadDatabaseConfig,
+  MySqlAssistantLifecycleRepository,
+  MySqlKnowledgeMaterialRepository,
+  type KnowledgeMaterial,
+} from '@h5cs/database';
 import { toAssistantId, toMerchantId } from '@h5cs/domain';
 import { PageShell, StatusBadge } from '@h5cs/ui';
 
@@ -21,6 +26,7 @@ import { PublishAssistantForm } from './workspace/publish-assistant-form';
 import { publicationPolicy, publicAssistantUrl } from './workspace/publication-policy';
 import { workerReady } from './workspace/worker-readiness';
 import { ImprovementSummaryPanel } from './improvements/improvement-summary';
+import { MaterialManager } from './knowledge/material-manager';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,6 +62,18 @@ export async function AssistantView({
     ? await Promise.all([workerReady(), publicApiReady()])
     : [false, false];
   const csrfToken = await currentMerchantCsrfToken();
+  let materials: readonly KnowledgeMaterial[] | null = null;
+  if (section === 'knowledge') {
+    try {
+      materials = await new MySqlKnowledgeMaterialRepository(database.config).list(
+        merchantId,
+        assistantId,
+        session.merchantUserId,
+      );
+    } catch {
+      /* Do not confuse unavailable with empty. */
+    }
+  }
   let verifiedPublicUrl: string | null = null;
   if (
     policy.ready &&
@@ -148,6 +166,15 @@ export async function AssistantView({
         </dl>
       </section>
       <DraftReadinessPanel draft={assistant.draft} />
+      {section === 'knowledge' ? (
+        <MaterialManager
+          merchantId={merchantId}
+          assistantId={assistantId}
+          csrfToken={csrfToken}
+          revision={assistant.draftRevision}
+          materials={materials}
+        />
+      ) : null}
       {section !== 'publish' && (
         <section className="merchant-account-card assistant-detail-card">
           <h2>修订草稿</h2>

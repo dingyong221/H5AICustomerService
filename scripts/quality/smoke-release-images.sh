@@ -39,6 +39,10 @@ probe() {
     status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
       --max-time 2 "http://127.0.0.1:${host_port}${path}" 2>/dev/null || true)"
     if [[ "$status" == '200' ]]; then
+      if [[ "$service" == merchant-web ]]; then
+        docker exec --env TMPDIR=/app/parser-runtime "$active_container" node scripts/warm-material-parser.mjs
+        test "$(printf 'H5CS text parser probe' | docker exec -i "$active_container" node scripts/extract-material.mjs text/plain)" = '{"text":"H5CS text parser probe"}'
+      fi
       printf '%s runtime smoke: HTTP 200 on %s\n' "$service" "$path"
       docker rm --force "$active_container" >/dev/null
       active_container=''
@@ -77,7 +81,7 @@ for service in "${services[@]}"; do
   case "$service" in
     api) probe api 14100 4000 /livez 1280m ;;
     worker) probe worker 13111 3011 /livez 1536m ;;
-    merchant-web) probe merchant-web 13100 3000 "${H5CS_MERCHANT_BASE_PATH:-}/account/login" 512m ;;
+    merchant-web) probe merchant-web 13100 3000 "${H5CS_MERCHANT_BASE_PATH:-}/account/login" 1024m ;;
     consumer-h5) probe consumer-h5 13101 3000 / 512m ;;
     ops-web) probe ops-web 13102 3000 "${H5CS_OPS_BASE_PATH:-}/login" 512m ;;
     *)

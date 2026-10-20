@@ -17,8 +17,8 @@ export function MerchantLoginForm({
       <input name="merchantId" type="hidden" value={merchantId ?? ''} />
       <input name="nextPath" type="hidden" value={nextPath ?? ''} />
       <label>
-        手机号
-        <input autoComplete="username" inputMode="tel" name="phone" required />
+        账号或手机号
+        <input autoComplete="username" name="phone" required maxLength={64} />
       </label>
       <label>
         密码
