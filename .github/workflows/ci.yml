@@ -253,6 +253,15 @@ jobs:
           NEXT_PUBLIC_OPS_BASE_PATH: /ops
         run: pnpm test:e2e
 
+      - name: Upload isolated operator reporting screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ops-reporting-browser-${{ github.sha }}
+          path: artifacts/ops-enhancement
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Stop disposable MySQL
         if: always()
         run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml down

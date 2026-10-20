@@ -127,6 +127,7 @@ export async function provisionMerchant(
       idempotencyKey,
     });
     revalidatePath('/');
+    revalidatePath('/merchants');
     return {
       error: null,
       created: {
