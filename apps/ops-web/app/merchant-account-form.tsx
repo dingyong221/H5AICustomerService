@@ -75,7 +75,7 @@ export function MerchantAccountForm({
             </label>
             <label>
               重置原因（写入审计）
-              <select name="reason" required defaultValue="">
+              <select aria-label="重置原因（写入审计）" name="reason" required defaultValue="">
                 <option value="" disabled>
                   请选择重置原因
                 </option>
