@@ -39,8 +39,10 @@ export class MySqlMerchantAccountAdminRepository {
     const merchant = id(merchantId);
     const connection = await this.config.openConnection();
     try {
-      await connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
-      await connection.execute('START TRANSACTION READ ONLY');
+      // Transaction-control SQL is not supported by MySQL's prepared-statement
+      // protocol. These fixed literals must use query(), unlike scoped SELECTs.
+      await connection.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+      await connection.query('START TRANSACTION READ ONLY');
       const [rows] = await connection.execute<AccountRow[]>(
         `SELECT u.id user_id, mm.role, u.status, c.password_salt
          FROM merchant_membership mm JOIN merchant_user u ON u.id = mm.merchant_user_id

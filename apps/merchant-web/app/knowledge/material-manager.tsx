@@ -206,6 +206,7 @@ export function MaterialManager({
         <label>
           知识整理稿
           <textarea
+            aria-label="知识整理稿"
             rows={12}
             value={summary}
             maxLength={4000}

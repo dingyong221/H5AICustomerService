@@ -32,6 +32,8 @@ MySQL 的 `knowledge_source` 使用 `uploaded_file` 类型，`knowledge_revision
 
 PDFium 在构建阶段预热到固定的只读 `parser-runtime` 目录，最终镜像保留原生库，解析子进程只使用该固定目录。镜像冒烟测试会在非 root、只读根目录及 `/tmp:noexec` 下实际解析合成 PDF 和文本，不通过放宽临时目录权限解决依赖加载问题。
 
+商家镜像使用固定摘要的 Node 24 Trixie slim，以满足解析器需要的 C++ ABI；其余四个应用保持原 Bookworm 基线，不混装跨发行版系统库。镜像摘要来自 [Docker 官方镜像清单](https://raw.githubusercontent.com/docker-library/repo-info/master/repos/node/remote/24-trixie-slim.md)，构建和运行阶段使用相同应用基线。
+
 单元测试覆盖格式、限额、作用域、来源和 CSRF、模型同意、数字护栏、修订并发、受控审计原因和密码不回显。隔离 MySQL 集成测试验证共享账号、全会话撤销、非目标账号保留以及登录与重置两种行锁竞态。浏览器测试运行根路径、管理子路径和单域名三种模式，验证上传到消费者回答使用新知识，以及旧密码拒绝、新账号与新密码登录。
 
 部署必须同时更新商家端与 Worker，核对原生解析依赖及脚本进入最终镜像、Nginx 请求大小和容器限额。保持公网仅有既有 Web 入口，不新增数据库或解析端口。无需数据迁移；回退代码不会删除已保存材料或恢复旧密码。重置是已生效的业务写入，不能通过回退镜像撤销。

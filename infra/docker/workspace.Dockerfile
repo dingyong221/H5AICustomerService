@@ -1,6 +1,18 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS toolchain
+ARG APP_NAME=api
+
+FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS bookworm-base
+
+# Only merchant-web needs GCC 13+ ABI support for native document parsing.
+# Pin from docker-library/repo-info's official node:24-trixie-slim manifest.
+FROM node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315 AS merchant-web-base
+FROM bookworm-base AS api-base
+FROM bookworm-base AS worker-base
+FROM bookworm-base AS consumer-h5-base
+FROM bookworm-base AS ops-web-base
+
+FROM ${APP_NAME}-base AS toolchain
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=${PNPM_HOME}:${PATH}
@@ -55,7 +67,7 @@ RUN if [ "${APP_NAME}" = merchant-web ]; then \
       && test -s /opt/deployed-app/parser-runtime/kreuzberg-pdfium/libpdfium.so; \
     fi
 
-FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS runtime-base
+FROM ${APP_NAME}-base AS runtime-base
 
 ENV NODE_ENV=production
 LABEL org.opencontainers.image.source="https://github.com/dingyong221/H5AICustomerService"

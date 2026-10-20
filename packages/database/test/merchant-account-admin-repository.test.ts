@@ -39,8 +39,11 @@ const fixture = (
     rollback = vi.fn(async () => undefined);
   const beginTransaction = vi.fn(async () => undefined),
     end = vi.fn(async () => undefined);
+  const query = vi.fn(async (_sql: string) => [{ affectedRows: 0 } as ResultSetHeader, []]);
   const connection = {
     execute: async (sql: string, values: readonly unknown[] = []) => {
+      if (/^(?:START|SET) TRANSACTION/u.test(sql))
+        throw new Error('ER_UNSUPPORTED_PS: transaction-control statements require query()');
       calls.push({ sql, values });
       if (
         sql.includes('SELECT u.id user_id') ||
@@ -71,6 +74,7 @@ const fixture = (
         throw new Error('synthetic failure');
       return [{ affectedRows: options.affectedRows ?? 1 } as ResultSetHeader, []];
     },
+    query,
     beginTransaction,
     commit,
     rollback,
@@ -85,6 +89,7 @@ const fixture = (
   return {
     repository: new MySqlMerchantAccountAdminRepository(database),
     calls,
+    query,
     openConnection,
     beginTransaction,
     commit,
@@ -113,13 +118,24 @@ describe('operator merchant account management', () => {
     expect(JSON.stringify(accounts)).not.toMatch(
       /password_hash|password_salt|phone_lookup_digest/u,
     );
-    expect(f.calls[0]?.sql).toBe('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
-    expect(f.calls[1]?.sql).toBe('START TRANSACTION READ ONLY');
     const lookup = f.calls.find((call) => call.sql.includes('SELECT u.id user_id'));
     expect(lookup?.values).toEqual([Buffer.from(merchant, 'hex')]);
     expect(lookup?.sql).toContain("mm.status = 'active'");
     expect(f.commit).toHaveBeenCalledOnce();
     expect(f.end).toHaveBeenCalledOnce();
+  });
+
+  it('sends read-only transaction setup through the text query protocol, never prepared execute', async () => {
+    const f = fixture();
+    await f.repository.list(merchant);
+    expect(f.query).toHaveBeenNthCalledWith(1, 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+    expect(f.query).toHaveBeenNthCalledWith(2, 'START TRANSACTION READ ONLY');
+    expect(f.calls).toHaveLength(2);
+    expect(f.calls.every((call) => call.sql.trimStart().startsWith('SELECT'))).toBe(true);
+    expect(f.calls[0]?.values).toEqual([Buffer.from(merchant, 'hex')]);
+    expect(f.calls[1]?.values).toEqual([Buffer.from(user, 'hex')]);
+    expect(f.commit).toHaveBeenCalledOnce();
+    expect(f.rollback).not.toHaveBeenCalled();
   });
 
   it('does not silently truncate account or related-merchant scope', async () => {
