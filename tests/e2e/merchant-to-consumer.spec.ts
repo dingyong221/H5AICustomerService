@@ -701,7 +701,9 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await merchantPage.getByLabel('账号或手机号', { exact: true }).fill(merchantPhone);
   await merchantPage.getByLabel('密码', { exact: true }).fill(merchantPassword);
   await merchantPage.getByRole('button', { name: '登录商家后台', exact: true }).click();
-  await expect(merchantPage.getByRole('alert')).toContainText('密码不正确');
+  await expect(merchantPage.locator('.merchant-account-form').getByRole('alert')).toContainText(
+    '密码不正确',
+  );
   await merchantPage.getByLabel('账号或手机号', { exact: true }).fill(managedAccount);
   await merchantPage.getByLabel('密码', { exact: true }).fill(replacementPassword);
   await merchantPage.getByRole('button', { name: '登录商家后台', exact: true }).click();
