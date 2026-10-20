@@ -17,6 +17,7 @@ concurrency:
 jobs:
   quality:
     name: Quality and build
+    if: ${{ github.event_name != 'workflow_dispatch' || github.ref_name != 'codex/materials-publish-merchant-delivery' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -134,6 +135,7 @@ jobs:
 
   mysql-integration:
     name: Real MySQL merchant-to-consumer flow
+    if: ${{ github.event_name != 'workflow_dispatch' || github.ref_name != 'codex/materials-publish-merchant-delivery' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -187,6 +189,7 @@ jobs:
 
   browser-e2e:
     name: Browser operator-to-consumer flow
+    if: ${{ github.event_name != 'workflow_dispatch' || github.ref_name != 'codex/materials-publish-merchant-delivery' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -268,6 +271,7 @@ jobs:
 
   image-packaging:
     name: Build five release container targets
+    if: ${{ github.event_name != 'workflow_dispatch' || github.ref_name != 'codex/materials-publish-merchant-delivery' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
@@ -361,3 +365,74 @@ jobs:
       - name: Stop isolated MySQL
         if: always()
         run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml down
+
+  offline-merchant:
+    name: Build only the reviewed integration merchant
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'codex/materials-publish-merchant-delivery' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out transport tooling only
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Set up Node.js 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Validate helper contracts without Docker or network
+        run: node --test scripts/quality/export-merchant-integration-offline.test.mjs
+      - name: Verify exact transport diff and prepare a non-sensitive proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/quality/export-merchant-integration-offline.mjs --prepare
+          install -m 0600 scripts/quality/export-merchant-integration-offline.mjs "${RUNNER_TEMP}/h5cs-merchant-export.mjs"
+      - name: Check out the exact CI-reviewed application source, not the transport tree
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: c2f9bd41f97a2da0b2f0d6f85ce245116ee0ad16
+          fetch-depth: 0
+      - name: Require this exact source CI and all four ordinary jobs to succeed
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node "${RUNNER_TEMP}/h5cs-merchant-export.mjs" --verify-source
+      - name: Build only merchant-web using the frozen source and pinned bases
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --file infra/docker/workspace.Dockerfile --target web --platform linux/amd64 \
+            --build-arg APP_KIND=web --build-arg APP_NAME=merchant-web \
+            --build-arg NEXT_PUBLIC_APP_ENV=production \
+            --build-arg NEXT_PUBLIC_API_BASE_URL=/api/v1 \
+            --build-arg NEXT_PUBLIC_MERCHANT_API_BASE_URL=/api/v1 \
+            --build-arg NEXT_PUBLIC_PUBLIC_API_BASE_URL=/api/v1/public \
+            --build-arg NEXT_PUBLIC_MERCHANT_BASE_PATH=/console \
+            --build-arg NEXT_PUBLIC_OPS_BASE_PATH=/ops \
+            --label org.opencontainers.image.source=https://github.com/dingyong221/H5AICustomerService \
+            --label org.opencontainers.image.revision=c2f9bd41f97a2da0b2f0d6f85ce245116ee0ad16 \
+            --label org.opencontainers.image.h5cs.web-path-mode=same_domain \
+            --tag h5cs-merchant-web:ci .
+      - name: Prove non-root read-only noexec startup and actual PDF extraction
+        env:
+          H5CS_MERCHANT_BASE_PATH: /console
+          H5CS_OPS_BASE_PATH: /ops
+        run: bash scripts/quality/smoke-release-images.sh merchant-web
+      - name: Export one bounded image, verify its graph and save-load roundtrip
+        id: export
+        run: node "${RUNNER_TEMP}/h5cs-merchant-export.mjs" --export
+      - name: Upload only this single-image bundle for one day
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: offline-merchant-c2f9bd41f97a2da0b2f0d6f85ce245116ee0ad16
+          path: ${{ steps.export.outputs.artifact_directory }}
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - name: Preserve boundaries
+        run: |
+          echo 'Only the exact reviewed merchant image was built and exported.'
+          echo 'No GHCR push, server credential, database write, deployment, or real-model claim.'
