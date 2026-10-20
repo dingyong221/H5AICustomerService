@@ -194,6 +194,21 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
     /预约需提前1天/u,
     { timeout: 30000 },
   );
+  await mkdir('artifacts/ops-enhancement', { recursive: true });
+  await materialPanel.screenshot({
+    path: `artifacts/ops-enhancement/materials-desktop-${pathMode ?? 'root'}.png`,
+  });
+  const materialViewport = merchantPage.viewportSize();
+  await merchantPage.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await merchantPage.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+    ),
+  ).toBe(true);
+  await materialPanel.screenshot({
+    path: `artifacts/ops-enhancement/materials-mobile-${pathMode ?? 'root'}.png`,
+  });
+  await merchantPage.setViewportSize(materialViewport ?? { width: 1280, height: 720 });
   await materialPanel.getByRole('checkbox', { name: /我已核对整理稿/u }).check();
   await materialPanel.getByRole('button', { name: '保存整理稿到客服草稿', exact: true }).click();
   await expect(materialPanel.getByRole('status')).toContainText('已保存到新的草稿修订');
@@ -338,12 +353,20 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await expect(merchantPage.getByText('你们提供什么服务？', { exact: true })).toBeVisible();
   await merchantPage.getByRole('link', { name: '编辑对应客服的资料' }).click();
   await expect(merchantPage.getByRole('heading', { name: assistantName })).toBeVisible();
+  const beforeManualEdit = Number(
+    (await merchantPage.getByRole('heading', { name: /^草稿修订 \d+$/u }).textContent())?.match(
+      /\d+$/u,
+    )?.[0],
+  );
+  expect(Number.isSafeInteger(beforeManualEdit) && beforeManualEdit > 0).toBe(true);
   await merchantPage
     .getByLabel('商品或服务资料')
     .fill('提供上门空调清洗服务，也提供洗衣机清洁咨询');
   await merchantPage.getByRole('button', { name: '保存草稿修订' }).click();
   await expect(
-    merchantPage.getByText('草稿已保存至修订 3，原有资料确认已失效。请核对新内容后重新确认。'),
+    merchantPage.getByText(
+      `草稿已保存至修订 ${beforeManualEdit + 1}，原有资料确认已失效。请核对新内容后重新确认。`,
+    ),
   ).toBeVisible();
   await merchantPage.reload();
   await expect(merchantPage.getByText('资料待确认')).toBeVisible();
@@ -356,7 +379,9 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await merchantPage.getByLabel('价格与条件').fill('具体价格按服务范围由商家核实确认。');
   await merchantPage.getByRole('button', { name: '保存草稿修订' }).click();
   await expect(
-    merchantPage.getByText('草稿已保存至修订 4，原有资料确认已失效。请核对新内容后重新确认。'),
+    merchantPage.getByText(
+      `草稿已保存至修订 ${beforeManualEdit + 2}，原有资料确认已失效。请核对新内容后重新确认。`,
+    ),
   ).toBeVisible();
   await expect(merchantPage.getByLabel(/我已逐项核对以上资料/u)).not.toBeChecked();
   await expect(merchantPage.getByRole('button', { name: '确认当前草稿资料' })).toBeEnabled();
@@ -657,6 +682,10 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   const managedAccount = (await accounts.locator('code').first().textContent())!;
   expect(managedAccount).toMatch(/^m_[0-9a-f]{32}$/u);
   await accounts.getByText('重置此账号密码', { exact: true }).click();
+  // Capture only the synthetic account panel before any password is entered.
+  await accounts.screenshot({
+    path: `artifacts/ops-enhancement/accounts-desktop-${pathMode ?? 'root'}.png`,
+  });
   const replacementPassword = randomBytes(24).toString('base64url');
   await accounts.getByLabel('新密码', { exact: true }).fill(replacementPassword);
   await accounts.getByLabel('确认新密码', { exact: true }).fill(replacementPassword);

@@ -85,7 +85,10 @@ export function MaterialManager({
     }
   }
   return (
-    <section className="merchant-account-card assistant-detail-card" aria-label="基础材料管理">
+    <section
+      className="merchant-account-card assistant-detail-card knowledge-manager"
+      aria-label="基础材料管理"
+    >
       <h2>上传基础材料并整理为知识</h2>
       <p>
         支持 PDF、DOC/DOCX、PPT/PPTX、XLS/XLSX、TXT、CSV、Markdown。每次最多 5 份，单份 10 MB、合计
@@ -161,6 +164,10 @@ export function MaterialManager({
             />
             我同意将所选材料的文字发送至阿里云千问整理，已检查其中不含不应发送的个人或机密资料。
           </label>
+          <p>
+            AI
+            可能遗漏或误解原文。请对照提取文字检查价格、适用条件和冲突事项；生成成功不等于资料已确认。
+          </p>
           <button
             disabled={!!busy || !consent || !selected.length || selected.length > 5}
             type="button"
