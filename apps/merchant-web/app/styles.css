@@ -1950,3 +1950,50 @@ a {
 .merchant-follow-up-form p {
   flex-basis: 100%;
 }
+/* Imported materials remain plain text until reviewed and saved to a revision. */
+.knowledge-material {
+  border: 1px solid #cfddd6;
+  border-radius: 10px;
+  padding: 1rem;
+  margin: 0.8rem 0;
+  overflow-wrap: anywhere;
+}
+.knowledge-material pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 20rem;
+  overflow: auto;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+.knowledge-consent {
+  display: block;
+  margin: 1rem 0;
+  line-height: 1.7;
+}
+.knowledge-error {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #8b3f18;
+}
+
+.knowledge-manager .merchant-account-form textarea,
+.knowledge-manager .merchant-account-form select,
+.knowledge-manager input[type='file'] {
+  border: 1px solid #aebeb4;
+  border-radius: 9px;
+  font: inherit;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0.75rem;
+  width: 100%;
+}
+.knowledge-manager .merchant-account-form textarea {
+  resize: vertical;
+}
+.knowledge-material > label {
+  align-items: flex-start;
+  display: flex;
+  gap: 0.6rem;
+}

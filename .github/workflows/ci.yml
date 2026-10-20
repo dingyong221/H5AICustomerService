@@ -306,6 +306,16 @@ jobs:
       - name: Smoke packaged runtime under release restrictions
         run: bash scripts/quality/smoke-release-images.sh
 
+      - name: Reclaim disposable builder cache before path variants
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only the disposable job's build cache. Preserve all tagged runtime
+          # images; do not prune containers, database volumes or host resources.
+          docker builder prune --all --force
+          docker image inspect h5cs-api:ci h5cs-worker:ci h5cs-merchant-web:ci h5cs-consumer-h5:ci h5cs-ops-web:ci >/dev/null
+          df -h /
+
       - name: Build and smoke same-domain management image variants without publishing
         shell: bash
         run: |

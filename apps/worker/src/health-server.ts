@@ -29,7 +29,7 @@ const readPreviewBody = async (request: import('node:http').IncomingMessage): Pr
   for await (const chunk of request) {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     length += bytes.byteLength;
-    if (length > 65_536) throw new PreviewError(400, 'Preview request is too large');
+    if (length > 131_072) throw new PreviewError(400, 'Preview request is too large');
     chunks.push(bytes);
   }
   try {
@@ -56,9 +56,11 @@ async function handlePreview(
   try {
     const payload = await readPreviewBody(request);
     const data =
-      request.url === '/internal/writing'
-        ? await service.write(payload, AbortSignal.timeout(20_000))
-        : { answer: await service.reply(payload, AbortSignal.timeout(20_000)) };
+      request.url === '/internal/knowledge'
+        ? await service.organize(payload, AbortSignal.timeout(20_000))
+        : request.url === '/internal/writing'
+          ? await service.write(payload, AbortSignal.timeout(20_000))
+          : { answer: await service.reply(payload, AbortSignal.timeout(20_000)) };
     writeJson(response, 200, { data, request_id: requestId }, requestId);
   } catch (error) {
     const status = error instanceof PreviewError ? error.statusCode : 503;
@@ -104,7 +106,7 @@ export const createHealthServer = (
 
     if (
       request.method === 'POST' &&
-      ['/internal/preview', '/internal/writing'].includes(request.url ?? '')
+      ['/internal/preview', '/internal/writing', '/internal/knowledge'].includes(request.url ?? '')
     ) {
       void handlePreview(request, response, preview, requestId);
       return;

@@ -6,3 +6,4 @@ export * from './skill-intent.js';
 export * from './tenant.js';
 export * from './workbuddy-authorization.js';
 export * from './writing.js';
+export * from './knowledge-material.js';

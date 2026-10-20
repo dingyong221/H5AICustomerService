@@ -206,20 +206,22 @@ export class MySqlMerchantAccessRepository {
     password: string;
     merchantId?: string;
   }): Promise<MerchantSessionIssued> {
-    const phoneDigest = this.#phoneDigest(input.phone);
+    const account = /^m_[0-9a-f]{32}$/u.test(input.phone) ? input.phone.slice(2) : null;
+    const lookup = account ? hexId(account) : this.#phoneDigest(input.phone);
     const password = passwordValue(input.password);
     const connection = await this.#database.openConnection();
     try {
+      await connection.beginTransaction();
       const [credentials] = await connection.execute<CredentialRow[]>(
         `SELECT c.merchant_user_id, c.password_salt, c.password_hash
            FROM merchant_password_credential c
            JOIN merchant_user u ON u.id = c.merchant_user_id
-          WHERE c.phone_lookup_digest = ? AND u.status = 'active' LIMIT 1`,
-        [phoneDigest],
+          WHERE ${account ? 'c.merchant_user_id' : 'c.phone_lookup_digest'} = ? AND u.status = 'active' LIMIT 1 FOR UPDATE`,
+        [lookup],
       );
       const credential = credentials[0];
       if (!credential || !(await comparePassword(password, credential))) {
-        throw new MerchantAccessError('手机号或密码不正确');
+        throw new MerchantAccessError('账号、手机号或密码不正确');
       }
       const parameters: Buffer[] = [credential.merchant_user_id];
       let merchantFilter = '';
@@ -237,11 +239,16 @@ export class MySqlMerchantAccessRepository {
       if (memberships.length !== 1) {
         throw new MerchantAccessError('请选择有权管理的商家');
       }
-      return this.#issueSession(
+      const session = await this.#issueSession(
         connection,
         credential.merchant_user_id,
         memberships[0]!.merchant_id,
       );
+      await connection.commit();
+      return session;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
     } finally {
       await connection.end();
     }

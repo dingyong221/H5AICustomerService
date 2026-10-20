@@ -16,6 +16,7 @@
     "@h5cs/database": "workspace:*",
     "@h5cs/domain": "workspace:*",
     "@h5cs/ui": "workspace:*",
+    "@kreuzberg/node": "4.10.2",
     "next": "catalog:",
     "qrcode": "catalog:",
     "react": "catalog:",
@@ -23,9 +24,9 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@types/qrcode": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
-    "@types/qrcode": "catalog:",
     "eslint": "catalog:",
     "eslint-config-next": "catalog:",
     "typescript": "catalog:",

@@ -176,6 +176,44 @@ export class PreviewService {
       this.#writingBusy.delete(merchantId);
     }
   }
+
+  public async organize(payload: unknown, signal: AbortSignal): Promise<MaterialOrganization> {
+    const data =
+      payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? (payload as Record<string, unknown>)
+        : null;
+    const merchantId = data?.['merchantId'],
+      text = data?.['text'];
+    if (
+      typeof merchantId !== 'string' ||
+      !idPattern.test(merchantId) ||
+      typeof text !== 'string' ||
+      !text.trim() ||
+      text.length > 24000 ||
+      controlCharacters.test(text)
+    )
+      throw new PreviewError(400, 'Invalid material request');
+    if (this.#writingBusy.has(merchantId) || this.#writingBusy.size >= 3)
+      throw new PreviewError(429, 'Material capacity reached');
+    this.limit(merchantId);
+    this.#writingBusy.add(merchantId);
+    try {
+      const output = await this.#generator.generate(buildKnowledgePrompt(text), signal);
+      const result = parseMaterialOrganization(JSON.parse(output));
+      if (!result) throw new Error('Invalid material organization');
+      const numbers = (value: string) => value.match(/[-+−]?\d+(?:[.,]\d+)*(?:[%％])?/gu) ?? [];
+      const allowed = new Set(numbers(text));
+      if (
+        [result.summary, ...result.warnings].some((value) =>
+          numbers(value).some((number) => !allowed.has(number)),
+        )
+      )
+        throw new Error('Invented number');
+      return result;
+    } finally {
+      this.#writingBusy.delete(merchantId);
+    }
+  }
 }
 
 export function createPreviewService(
@@ -192,3 +230,5 @@ export function createPreviewService(
   }
   return new PreviewService(token, new ChatCompletionsGenerator(model.config));
 }
+import { parseMaterialOrganization, type MaterialOrganization } from '@h5cs/contracts';
+import { buildKnowledgePrompt } from './knowledge-prompt.js';

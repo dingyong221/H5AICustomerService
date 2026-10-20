@@ -170,6 +170,52 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await expect(merchantPage).toHaveURL(managementUrl + '/knowledge/' + assistantId);
   await expect(merchantPage.getByRole('heading', { name: '知识库', exact: true })).toBeVisible();
   await expect(merchantPage.getByText(referenceNotes)).toHaveCount(0);
+  // Actual upload/extraction, consented organization and an explicit review.
+  const materialPanel = merchantPage.getByRole('region', { name: '基础材料管理' });
+  await materialPanel.getByLabel('选择基础材料').setInputFiles({
+    name: '空调清洗基础资料.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from(
+      '提供上门空调清洗咨询，预约需提前1天；不提供安装服务。价格和优惠需商家确认。',
+      'utf8',
+    ),
+  });
+  await materialPanel.getByRole('button', { name: '上传并提取文字', exact: true }).click();
+  await expect(materialPanel.getByRole('status')).toContainText('已保存 1 份', { timeout: 60000 });
+  await expect(
+    materialPanel.getByRole('checkbox', { name: /空调清洗基础资料\.txt/u }),
+  ).toBeChecked();
+  await expect(
+    materialPanel.getByRole('button', { name: 'AI 整理所选材料', exact: true }),
+  ).toBeDisabled();
+  await materialPanel.getByRole('checkbox', { name: /我同意将所选材料的文字/u }).check();
+  await materialPanel.getByRole('button', { name: 'AI 整理所选材料', exact: true }).click();
+  await expect(materialPanel.getByLabel('知识整理稿', { exact: true })).toHaveValue(
+    /预约需提前1天/u,
+    { timeout: 30000 },
+  );
+  await mkdir('artifacts/ops-enhancement', { recursive: true });
+  await materialPanel.screenshot({
+    path: `artifacts/ops-enhancement/materials-desktop-${pathMode ?? 'root'}.png`,
+  });
+  const materialViewport = merchantPage.viewportSize();
+  await merchantPage.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await merchantPage.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+    ),
+  ).toBe(true);
+  await materialPanel.screenshot({
+    path: `artifacts/ops-enhancement/materials-mobile-${pathMode ?? 'root'}.png`,
+  });
+  await merchantPage.setViewportSize(materialViewport ?? { width: 1280, height: 720 });
+  await materialPanel.getByRole('checkbox', { name: /我已核对整理稿/u }).check();
+  await materialPanel.getByRole('button', { name: '保存整理稿到客服草稿', exact: true }).click();
+  await expect(materialPanel.getByRole('status')).toContainText('已保存到新的草稿修订');
+  await expect(merchantPage.locator('.assistant-facts')).toContainText('预约需提前1天');
+  await expect(
+    merchantPage.getByRole('button', { name: '确认当前草稿资料', exact: true }),
+  ).toBeEnabled();
   await merchantPage.getByLabel(/我已逐项核对以上资料/u).check();
   await merchantPage.getByRole('button', { name: '确认当前草稿资料' }).click();
   await expect(merchantPage.getByText('当前草稿资料已确认')).toBeVisible();
@@ -230,6 +276,7 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
     '我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。',
   );
   await expect(answer).toBeVisible({ timeout: 60_000 });
+  await expect(answer).toContainText('预约需提前1天；不提供安装服务。');
   const merchantId = new URL(managementUrl).pathname.slice(1);
   expect(merchantId).toMatch(/^[0-9a-f]{32}$/u);
   await merchantPage.goto(`${merchantOrigin}/${merchantId}/conversations`);
@@ -306,12 +353,20 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await expect(merchantPage.getByText('你们提供什么服务？', { exact: true })).toBeVisible();
   await merchantPage.getByRole('link', { name: '编辑对应客服的资料' }).click();
   await expect(merchantPage.getByRole('heading', { name: assistantName })).toBeVisible();
+  const beforeManualEdit = Number(
+    (await merchantPage.getByRole('heading', { name: /^草稿修订 \d+$/u }).textContent())?.match(
+      /\d+$/u,
+    )?.[0],
+  );
+  expect(Number.isSafeInteger(beforeManualEdit) && beforeManualEdit > 0).toBe(true);
   await merchantPage
     .getByLabel('商品或服务资料')
     .fill('提供上门空调清洗服务，也提供洗衣机清洁咨询');
   await merchantPage.getByRole('button', { name: '保存草稿修订' }).click();
   await expect(
-    merchantPage.getByText('草稿已保存至修订 3，原有资料确认已失效。请核对新内容后重新确认。'),
+    merchantPage.getByText(
+      `草稿已保存至修订 ${beforeManualEdit + 1}，原有资料确认已失效。请核对新内容后重新确认。`,
+    ),
   ).toBeVisible();
   await merchantPage.reload();
   await expect(merchantPage.getByText('资料待确认')).toBeVisible();
@@ -324,7 +379,9 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await merchantPage.getByLabel('价格与条件').fill('具体价格按服务范围由商家核实确认。');
   await merchantPage.getByRole('button', { name: '保存草稿修订' }).click();
   await expect(
-    merchantPage.getByText('草稿已保存至修订 4，原有资料确认已失效。请核对新内容后重新确认。'),
+    merchantPage.getByText(
+      `草稿已保存至修订 ${beforeManualEdit + 2}，原有资料确认已失效。请核对新内容后重新确认。`,
+    ),
   ).toBeVisible();
   await expect(merchantPage.getByLabel(/我已逐项核对以上资料/u)).not.toBeChecked();
   await expect(merchantPage.getByRole('button', { name: '确认当前草稿资料' })).toBeEnabled();
@@ -618,5 +675,44 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   } finally {
     await merchantOnlyContext.close();
   }
+  // Administrative reset: read an actual login account, re-authenticate the
+  // operator, invalidate the old merchant session, then log in with new secret.
+  await operatorPage.goto(`${operatorBase}/merchants/${merchantId}`);
+  const accounts = operatorPage.getByRole('region', { name: '商家账号管理' });
+  const managedAccount = (await accounts.locator('code').first().textContent())!;
+  expect(managedAccount).toMatch(/^m_[0-9a-f]{32}$/u);
+  await accounts.getByText('重置此账号密码', { exact: true }).click();
+  // Capture only the synthetic account panel before any password is entered.
+  await accounts.screenshot({
+    path: `artifacts/ops-enhancement/accounts-desktop-${pathMode ?? 'root'}.png`,
+  });
+  const replacementPassword = randomBytes(24).toString('base64url');
+  await accounts.getByLabel('新密码', { exact: true }).fill(replacementPassword);
+  await accounts.getByLabel('确认新密码', { exact: true }).fill(replacementPassword);
+  await accounts
+    .getByLabel('重置原因（写入审计）', { exact: true })
+    .selectOption({ label: '忘记密码' });
+  await accounts.getByLabel('当前运营账号密码', { exact: true }).fill(operatorPassword);
+  await accounts.getByRole('checkbox', { name: /我已核对账号与全部关联商家/u }).check();
+  await accounts.getByRole('button', { name: '确认重置商家密码', exact: true }).click();
+  await expect(accounts.getByRole('status')).toContainText('密码已重置');
+  await merchantPage.goto(managementUrl);
+  await expect(merchantPage).toHaveURL(/\/account\/login\?/u);
+  await merchantPage.getByLabel('账号或手机号', { exact: true }).fill(merchantPhone);
+  await merchantPage.getByLabel('密码', { exact: true }).fill(merchantPassword);
+  await merchantPage.getByRole('button', { name: '登录商家后台', exact: true }).click();
+  await expect(merchantPage.locator('.merchant-account-form').getByRole('alert')).toContainText(
+    '密码不正确',
+  );
+  await merchantPage.getByLabel('账号或手机号', { exact: true }).fill(managedAccount);
+  await merchantPage.getByLabel('密码', { exact: true }).fill(replacementPassword);
+  await merchantPage.getByRole('button', { name: '登录商家后台', exact: true }).click();
+  await expect(merchantPage).toHaveURL(managementUrl);
+  expect(
+    await consumerPage.evaluate(
+      async (slug) => (await fetch(`/api/v1/public/assistants/${slug}`)).status,
+      publicSlug,
+    ),
+  ).toBe(200);
   process.stdout.write('[ops-e2e] responsive layout and merchant/operator separation verified\n');
 });

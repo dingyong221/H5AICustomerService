@@ -14,3 +14,7 @@
 docs
 infra
 scripts
+!apps/merchant-web/scripts/
+!apps/merchant-web/scripts/extract-material.mjs
+!apps/merchant-web/scripts/material-container-safety.mjs
+!apps/merchant-web/scripts/warm-material-parser.mjs

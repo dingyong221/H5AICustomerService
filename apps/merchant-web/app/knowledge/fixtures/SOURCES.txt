@@ -1,0 +1,72 @@
+Material parser fixture provenance (no customer files or credentials)
+
+The six Office files below are unmodified public synthetic test documents from
+Apache POI, pinned at commit d91a76448f0963a93b6cd95fb97fbe1d8bad82c6.
+Original repository: https://github.com/apache/poi
+License: Apache License, Version 2.0. Full upstream LICENSE and NOTICE are
+preserved alongside the files as LICENSE-APACHE-POI.txt and NOTICE-APACHE-POI.txt.
+Those notices retain all upstream attribution; no blanket new license is applied.
+
+simple.doc
+https://github.com/apache/poi/blob/d91a76448f0963a93b6cd95fb97fbe1d8bad82c6/test-data/document/simple.doc
+SHA-256 4876e828e62d490fa188c7c4e47013e2e0dfdf02f5903dfd374bc0d2b2049ca1
+Synthetic sentence: This is a simple file created with Word 97-SR2.
+
+SampleDoc.docx
+https://github.com/apache/poi/blob/d91a76448f0963a93b6cd95fb97fbe1d8bad82c6/test-data/document/SampleDoc.docx
+SHA-256 ea2c517bd7be4628887eb97f630334b93b894f4522d2c0adae263e602d76df92
+Synthetic two-page font-formatting test beginning I am a test document.
+
+basic_test_ppt_file.ppt
+https://github.com/apache/poi/blob/d91a76448f0963a93b6cd95fb97fbe1d8bad82c6/test-data/slideshow/basic_test_ppt_file.ppt
+SHA-256 e8fd4c38ad72ce3735acbca0b60dd5870fb60f819c169e3947d166f4f1bcc79d
+Synthetic test slide titles, subtitles and notes.
+
+SampleShow.pptx
+https://github.com/apache/poi/blob/d91a76448f0963a93b6cd95fb97fbe1d8bad82c6/test-data/slideshow/SampleShow.pptx
+SHA-256 bfb4b2f07c9233afd2f32aa5781d849d0c7d225bf03721a10becf487b481d828
+Synthetic first/second slide, font-formatting and speaker-note test.
+
+testEXCEL_95.xls
+https://github.com/apache/poi/blob/d91a76448f0963a93b6cd95fb97fbe1d8bad82c6/test-data/spreadsheet/testEXCEL_95.xls
+SHA-256 ac0ce3a2eff43e32e56d6b789df6aaa1645ae846d22fa3a2fe3057391d0f1cae
+Synthetic numbers and squares; extraction reads existing cell values, not Excel.
+
+sample.xlsx
+https://github.com/apache/poi/blob/d91a76448f0963a93b6cd95fb97fbe1d8bad82c6/test-data/spreadsheet/sample.xlsx
+SHA-256 7c88883ea9ff72d8f90239cb1a5f5d9744014b611d9b1588a090ba7629a381de
+Synthetic Lorem/ipsum and numeric cells, rich-text formatting test.
+
+image-only.pdf
+SHA-256 8b59284d8984df838be15786fb0246badfab73ce8d6e444528cf829e8c462928
+Project-created fixture generated using pypdf 5.9.0: one 200x200 blank page,
+one 1x1 white RGB FlateDecode XObject painted at 100x100 points, no text layer.
+No scanned person/customer image; verifies that OCR is not silently assumed.
+
+encrypted.pdf
+SHA-256 3d5ad77beb4d902b2d321804230cf8bb48d44fc58bd1e548fb464bfca3799ffd
+Project-created fixture generated using pypdf 5.9.0: one 200x200 page containing
+the sentence Synthetic private material in Helvetica, encrypted with AES-256.
+Test-only public password: fixture-password-not-a-user-secret.
+This is not a live account password or application secret.
+
+The positive text PDF is constructed in material-parser.test.ts using standard
+PDF objects and a valid byte-offset xref. It has no external assets or URLs.
+Adversarial ZIPs are generated in memory in the same test: there is no downloaded
+malware, no executable macro payload and no network access needed by the tests.
+
+Verified local platform: Windows x64, @kreuzberg/node 4.10.2 native bindings.
+The same non-mocked tests must also pass on the Linux CI/runtime; Windows-only
+success is not evidence that production's libpdfium.so packaging is complete.
+Native extraction configuration and format claims were checked against:
+https://docs.kreuzberg.dev/reference/api-typescript/
+https://docs.kreuzberg.dev/reference/formats/
+https://github.com/kreuzberg-dev/kreuzberg-lts/blob/v4.10.2/crates/kreuzberg-node/src/config/types.rs
+In 4.10.2, JsSecurityLimits keys are camelCase. Its generic archive limits are
+supplemented by our independent bounded OOXML decompression/CRC/subtype checks.
+V8 --max-old-space-size does not cap native Rust/PDFium allocations: actual
+container memory/PID/CPU limits and the parent-enforced timeout remain necessary.
+The read-only production image must pre-extract the pinned bundled PDFium to
+/app/parser-runtime/kreuzberg-pdfium/libpdfium.so at build time; only the owned
+Linux child is given TMPDIR=/app/parser-runtime when that fixed file exists.
+This preserves /tmp:noexec and avoids writable executable runtime caches.
