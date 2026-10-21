@@ -1,7 +1,53 @@
 import { randomBytes, randomInt } from 'node:crypto';
 import { mkdir, readFile } from 'node:fs/promises';
 
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+
+type PublishedReleaseReadback = { status: number; releaseRef: string | null };
+
+async function readPublishedRelease(
+  page: Page,
+  publicUrl: string,
+): Promise<PublishedReleaseReadback> {
+  const target = new URL(publicUrl);
+  if (
+    target.origin !== 'http://127.0.0.1:3001' ||
+    !/^\/a\/[a-z0-9-]+$/u.test(target.pathname) ||
+    target.search ||
+    target.hash
+  )
+    throw new Error('Public release readback requires the synthetic loopback assistant');
+  const response = await page.request.get(
+    target.origin + '/api/v1/public/assistants/' + target.pathname.slice(3),
+    { headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' } },
+  );
+  if (response.status() !== 200) return { status: response.status(), releaseRef: null };
+  const payload: unknown = await response.json();
+  const releaseRef =
+    typeof payload === 'object' &&
+    payload !== null &&
+    'data' in payload &&
+    typeof payload.data === 'object' &&
+    payload.data !== null &&
+    'releaseRef' in payload.data
+      ? payload.data.releaseRef
+      : null;
+  return {
+    status: response.status(),
+    releaseRef:
+      typeof releaseRef === 'string' && /^[0-9a-f]{32}$/u.test(releaseRef) ? releaseRef : null,
+  };
+}
+
+function safePublicationAlert(text: string): string {
+  const line = text.split(/\r?\n/u).find((value) => value.trim()) ?? '';
+  if (/\b(?:cookie|authorization|set-cookie|headers?)\s*:/iu.test(line))
+    return '[redacted header diagnostic]';
+  return line
+    .replace(/https?:\/\/\S+/giu, '[redacted URL]')
+    .replace(/[A-Za-z0-9_+\/=.%-]{20,}/gu, '[redacted token]')
+    .slice(0, 240);
+}
 
 test('operator provisions a merchant, merchant previews and publishes, consumer receives an AI reply', async ({
   browser,
@@ -462,15 +508,86 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   ).not.toBeChecked();
   await expect(publicLink).toHaveAttribute('href', publicUrl!);
   await merchantPage.reload();
+  const preV3Release = await readPublishedRelease(merchantPage, publicUrl!);
+  expect(preV3Release.status).toBe(200);
+  expect(preV3Release.releaseRef).toMatch(/^[0-9a-f]{32}$/u);
+  expect(preV3Release.releaseRef).not.toBe(firstReleaseRef);
+  const thirdPublishUrl = merchantOrigin + '/' + merchantId + '/publish/' + assistantId;
   await merchantNavigation.getByRole('link', { name: '测试与发布', exact: true }).click();
-  await merchantPage.getByLabel(/我已核对以上资料，并确认向消费者公开发布当前修订/u).check();
-  await merchantPage.getByRole('button', { name: '确认资料并发布 AI 客服', exact: true }).click();
-  await expect(merchantPage.getByText(/第 3 版已发布/u)).toBeVisible();
-  await expect(merchantPage.locator('a[href^="http://127.0.0.1:3001/a/"]').first()).toHaveAttribute(
-    'href',
-    publicUrl!,
-  );
-
+  // Knowledge and publish pages intentionally share the same confirmation form.
+  // Wait for the target route AND a publish-only heading before using its form;
+  // otherwise the old knowledge form can submit while soft navigation unmounts
+  // it, losing the action's UI result even when its transaction committed.
+  await expect(merchantPage).toHaveURL(thirdPublishUrl);
+  await expect(
+    merchantPage.getByRole('heading', { name: '发布前试聊', exact: true }),
+  ).toBeVisible();
+  const publishPath = new URL(thirdPublishUrl).pathname;
+  let thirdPublicationPosts = 0,
+    thirdActionStatus: number | null = null;
+  let thirdPublishedReleaseRef: string | null = null;
+  const countThirdPublication = (request: { method(): string; url(): string }) => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === publishPath)
+      thirdPublicationPosts += 1;
+  };
+  merchantPage.on('request', countThirdPublication);
+  try {
+    const publicationResponse = merchantPage.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' && new URL(response.url()).pathname === publishPath,
+    );
+    publicationResponse.catch(() => undefined);
+    await merchantPage.getByLabel(/我已核对以上资料，并确认向消费者公开发布当前修订/u).check();
+    await merchantPage.getByRole('button', { name: '确认资料并发布 AI 客服', exact: true }).click();
+    thirdActionStatus = (await publicationResponse).status();
+    expect(thirdActionStatus).toBe(200);
+    await expect(merchantPage.getByText(/第 3 版已发布/u)).toBeVisible();
+    await expect
+      .poll(
+        async () => {
+          const current = await readPublishedRelease(merchantPage, publicUrl!);
+          thirdPublishedReleaseRef = current.releaseRef;
+          return (
+            current.status === 200 &&
+            current.releaseRef !== null &&
+            current.releaseRef !== preV3Release.releaseRef
+          );
+        },
+        { timeout: 30_000, message: 'The third publication must advance beyond version two' },
+      )
+      .toBe(true);
+    expect(thirdPublicationPosts).toBe(1);
+    await expect(publicLink).toHaveAttribute('href', publicUrl!);
+  } catch (error) {
+    const form = merchantPage.locator('.assistant-confirm-form');
+    const alerts = await form
+      .getByRole('alert')
+      .allTextContents()
+      .catch(() => []);
+    const rawRevision = await form
+      .locator('input[name="draftRevision"]')
+      .inputValue()
+      .catch(() => '');
+    const current = await readPublishedRelease(merchantPage, publicUrl!).catch(() => null);
+    process.stdout.write(
+      JSON.stringify({
+        code: 'E2E_THIRD_PUBLICATION_UNVERIFIED',
+        routeIsExpected: merchantPage.url() === thirdPublishUrl,
+        actionStatus: thirdActionStatus,
+        publicationPosts: thirdPublicationPosts,
+        requestedDraftRevision: /^[1-9][0-9]{0,9}$/u.test(rawRevision) ? Number(rawRevision) : null,
+        preV3ReleaseRef: preV3Release.releaseRef,
+        currentPublicStatus: current?.status ?? null,
+        currentPublicReleaseRef: current?.releaseRef ?? null,
+        alerts: alerts.slice(0, 3).map(safePublicationAlert),
+        credentialsPrinted: false,
+        automaticWriteRetry: false,
+      }) + '\n',
+    );
+    throw error;
+  } finally {
+    merchantPage.off('request', countThirdPublication);
+  }
   await consumerPage.reload();
   await expect(answer).toBeVisible({ timeout: 30_000 });
   const publicSlug = new URL(publicUrl!).pathname.split('/')[2]!;
@@ -480,6 +597,8 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
     return envelope.data.releaseRef;
   }, publicSlug);
   expect(latestReleaseRef).not.toBe(firstReleaseRef);
+  expect(latestReleaseRef).not.toBe(preV3Release.releaseRef);
+  expect(latestReleaseRef).toBe(thirdPublishedReleaseRef);
   const oldHistoryRelease = await consumerPage.evaluate(async (sessionHandle) => {
     const response = await fetch(`/api/v1/public/sessions/${sessionHandle}/history`);
     if (response.status !== 200) throw new Error('Old synthetic history is unavailable');
