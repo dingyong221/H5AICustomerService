@@ -2,7 +2,6 @@ import Link from 'next/link';
 import { PageShell, StatusBadge } from '@h5cs/ui';
 import { merchantAssistants, requireMerchant } from '../tenant-data';
 import { merchantPath } from '../tenant-paths';
-import { ImprovementSummaryPanel } from '../improvements/improvement-summary';
 
 export default async function MerchantDashboard({
   params,
@@ -10,43 +9,94 @@ export default async function MerchantDashboard({
   params: Promise<{ merchantId: string }>;
 }) {
   const { merchantId } = await params;
-  const member = await requireMerchant(merchantId);
+  await requireMerchant(merchantId);
   const assistants = await merchantAssistants(merchantId);
+  const published = assistants.filter(
+    (assistant) => assistant.activeReleaseId && assistant.status === 'active',
+  );
   return (
     <PageShell
-      title="商家工作台"
-      eyebrow="Merchant Workspace"
-      aside={<StatusBadge tone="info">商家已登录</StatusBadge>}
-      description={<p>商家编号：{merchantId}。这里的资料和操作仅属于当前商家。</p>}
+      title="工作台"
+      eyebrow="Overview"
+      description={<p>配置客服、上线分享，再从消费者咨询中持续完善知识。</p>}
+      aside={
+        <Link className="tenant-feature-link" href={`${merchantPath(merchantId, 'drafts')}/new`}>
+          新建客服
+        </Link>
+      }
     >
+      <div className="tenant-feature-grid merchant-overview-stats">
+        <section className="merchant-account-card">
+          <span>全部客服</span>
+          <h2>{assistants.length}</h2>
+          <Link href={merchantPath(merchantId, 'drafts')}>查看客服列表</Link>
+        </section>
+        <section className="merchant-account-card">
+          <span>服务中</span>
+          <h2>{published.length}</h2>
+          <Link href={merchantPath(merchantId, 'publish')}>管理与分享</Link>
+        </section>
+        <section className="merchant-account-card">
+          <span>未发布</span>
+          <h2>{assistants.filter((assistant) => !assistant.activeReleaseId).length}</h2>
+          <Link href={merchantPath(merchantId, 'drafts')}>继续配置</Link>
+        </section>
+      </div>
       <section className="merchant-account-card assistant-create-card">
-        <h2>开始配置 AI 客服</h2>
-        <p>当前有 {assistants.length} 个客服。依次完成草稿、知识资料确认、试聊与发布。</p>
-        <div className="tenant-feature-grid">
-          <Link className="tenant-feature-link" href={merchantPath(merchantId, 'drafts')}>
-            客服草稿
-          </Link>
-          <Link className="tenant-feature-link" href={merchantPath(merchantId, 'knowledge')}>
-            知识库
-          </Link>
-          <Link className="tenant-feature-link" href={merchantPath(merchantId, 'publish')}>
-            测试与发布
-          </Link>
-          <Link className="tenant-feature-link" href={merchantPath(merchantId, 'conversations')}>
-            咨询管理
-          </Link>
-          <Link className="tenant-feature-link" href={merchantPath(merchantId, 'writing')}>
-            客服资料填写助手
-          </Link>
-          <Link className="tenant-feature-link" href={merchantPath(merchantId, 'help')}>
-            帮助中心与使用手册
-          </Link>
+        <div className="section-heading">
+          <h2>我的客服</h2>
+          <Link href={merchantPath(merchantId, 'drafts')}>全部客服 →</Link>
         </div>
-        {!assistants.length ? (
-          <p>商家已开通。下一步请点击“客服草稿”，填写业务资料并创建第一个客服。</p>
-        ) : null}
+        {assistants.length ? (
+          <ul className="assistant-workspace-list">
+            {assistants.slice(0, 5).map((assistant) => (
+              <li key={assistant.assistantId}>
+                <Link href={merchantPath(merchantId, 'drafts', assistant.assistantId)}>
+                  <strong>{assistant.displayName}</strong>
+                </Link>
+                <StatusBadge tone={assistant.status === 'paused' ? 'warning' : 'info'}>
+                  {assistant.status === 'paused'
+                    ? '已暂停'
+                    : assistant.activeReleaseId
+                      ? '已发布'
+                      : '待配置'}
+                </StatusBadge>
+                <Link
+                  href={merchantPath(
+                    merchantId,
+                    assistant.activeReleaseId ? 'publish' : 'drafts',
+                    assistant.assistantId,
+                  )}
+                >
+                  {assistant.activeReleaseId ? '发布与分享' : '继续配置'} →
+                </Link>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="assistant-empty-state">
+            <h3>从第一个客服开始</h3>
+            <p>基础资料 → 知识补充（支持上传文件）→ 效果试聊 → 发布分享。</p>
+            <Link
+              className="tenant-feature-link"
+              href={`${merchantPath(merchantId, 'drafts')}/new`}
+            >
+              新建客服
+            </Link>
+          </div>
+        )}
       </section>
-      <ImprovementSummaryPanel merchantId={merchantId} merchantUserId={member.merchantUserId} />
+      <div className="tenant-feature-grid">
+        <Link className="tenant-feature-link" href={merchantPath(merchantId, 'conversations')}>
+          查看消费者咨询 →
+        </Link>
+        <Link className="tenant-feature-link" href={merchantPath(merchantId, 'improvements')}>
+          处理问题与改进 →
+        </Link>
+        <Link className="tenant-feature-link" href={merchantPath(merchantId, 'help')}>
+          帮助中心 →
+        </Link>
+      </div>
     </PageShell>
   );
 }

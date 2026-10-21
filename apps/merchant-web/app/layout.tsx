@@ -5,7 +5,8 @@ import type { ReactNode } from 'react';
 import '@h5cs/ui/styles.css';
 import './styles.css';
 import './improvements/improvements.css';
-import { currentMerchant } from './account/merchant-actions';
+import { currentMerchant, currentMerchantCsrfToken } from './account/merchant-actions';
+import { MerchantLogoutForm } from './account/logout-form';
 import { MerchantNavigation } from './navigation';
 import { readImprovements } from './improvements/improvement-data';
 import { actionableImprovementCount } from './improvements/improvement-model';
@@ -67,6 +68,12 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
                 </a>
               </span>
             </div>
+            {merchant ? (
+              <MerchantLogoutForm
+                merchantId={merchant.merchantId}
+                csrfToken={await currentMerchantCsrfToken()}
+              />
+            ) : null}
           </aside>
           <main id="main-content">{children}</main>
         </div>

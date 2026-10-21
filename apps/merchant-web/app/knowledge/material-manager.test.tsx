@@ -8,8 +8,10 @@ const mocks = vi.hoisted(() => ({
   effects: [] as (() => unknown)[],
   refresh: vi.fn(),
   fetch: vi.fn(),
+  confirm: vi.fn(),
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh }) }));
+vi.mock('../workspace/use-unsaved-form', () => ({ useUnsavedForm: () => () => {} }));
 vi.mock('react', async (load) => ({
   ...(await load<typeof import('react')>()),
   useState<T>(initial: T) {
@@ -49,6 +51,7 @@ type Props = {
   'aria-label'?: string;
   onClick?: () => unknown;
   onChange?: (event: { target: { checked: boolean; value?: string } }) => void;
+  onSubmit?: (event: { preventDefault: () => void; currentTarget: unknown }) => void;
 };
 const merchantId = 'aa'.repeat(16),
   assistantId = 'bb'.repeat(16),
@@ -113,6 +116,8 @@ describe('material deletion merchant experience', () => {
     vi.clearAllMocks();
     vi.stubGlobal('React', React);
     vi.stubGlobal('fetch', mocks.fetch);
+    mocks.confirm.mockReturnValue(true);
+    vi.stubGlobal('window', { confirm: mocks.confirm });
   });
   afterEach(() => vi.unstubAllGlobals());
 
@@ -219,5 +224,100 @@ describe('material deletion merchant experience', () => {
     expect(summary(tree).props.value).toBe('');
     expect(button(tree, '直接使用提取文字').props.disabled).toBe(true);
     expect(checkbox(tree, '我同意将所选材料').props.checked).toBe(false);
+  });
+
+  it('preserves an unsaved reviewed summary and warnings when more files are uploaded, without auto-merging facts', async () => {
+    let tree = render();
+    checkbox(tree, first.name).props.onChange!({ target: { checked: true } });
+    tree = render();
+    checkbox(tree, '我同意将所选材料').props.onChange!({ target: { checked: true } });
+    tree = render();
+    mocks.fetch.mockResolvedValueOnce(
+      Response.json({ summary: '原有人工核对的整理稿', warnings: ['核对运费适用条件'] }),
+    );
+    button(tree, 'AI 整理所选材料').props.onClick!();
+    await vi.waitFor(() => expect(summary(render()).props.value).toBe('原有人工核对的整理稿'));
+    tree = render();
+    checkbox(tree, '我已核对整理稿').props.onChange!({ target: { checked: true } });
+    tree = render();
+    const NativeFormData = globalThis.FormData;
+    vi.stubGlobal(
+      'FormData',
+      class extends NativeFormData {
+        constructor() {
+          super();
+          this.append('files', new Blob(['新增资料']), '新增资料.txt');
+        }
+      },
+    );
+    mocks.fetch.mockResolvedValueOnce(Response.json({ saved: [second.id], errors: [] }));
+    nodes(tree).find((node) => node.type === 'form')!.props.onSubmit!({
+      preventDefault: vi.fn(),
+      currentTarget: {},
+    });
+    await vi.waitFor(() => expect(mocks.refresh).toHaveBeenCalledOnce());
+    tree = render();
+    expect(summary(tree).props.value).toBe('原有人工核对的整理稿');
+    expect(text(tree)).toContain('核对运费适用条件');
+    expect(text(tree)).toContain('原有未保存整理稿已保留');
+    expect(text(tree)).toContain('新增材料不会自动追加');
+    expect(checkbox(tree, '我已核对整理稿').props.checked).toBe(false);
+    expect(checkbox(tree, '我同意将所选材料').props.checked).toBe(false);
+    expect(mocks.confirm).not.toHaveBeenCalled();
+  });
+
+  it.each([{}, { saved: false }, { saved: 'true' }])(
+    'keeps all input and review on an ambiguous apply acknowledgement: %j',
+    async (result) => {
+      let tree = render();
+      summary(tree).props.onChange!({ target: { checked: false, value: '未保存的真实商品资料' } });
+      tree = render();
+      checkbox(tree, '我已核对整理稿').props.onChange!({ target: { checked: true } });
+      tree = render();
+      mocks.fetch.mockResolvedValueOnce(Response.json(result));
+      nodes(tree)
+        .filter((node) => node.type === 'form')
+        .at(-1)!.props.onSubmit!({ preventDefault: vi.fn(), currentTarget: {} });
+      await vi.waitFor(() => expect(text(render())).toContain('未能确认保存结果'));
+      tree = render();
+      expect(summary(tree).props.value).toBe('未保存的真实商品资料');
+      expect(checkbox(tree, '我已核对整理稿').props.checked).toBe(true);
+      expect(mocks.refresh).not.toHaveBeenCalled();
+      expect(mocks.fetch).toHaveBeenCalledOnce();
+      expect(text(tree)).toContain('不会自动重试');
+      expect(text(tree)).not.toContain('知识已保存到草稿');
+    },
+  );
+
+  it('does not charge a model call or replace an unsaved summary when reorganization is cancelled', () => {
+    let tree = render();
+    checkbox(tree, first.name).props.onChange!({ target: { checked: true } });
+    tree = render();
+    button(tree, '直接使用提取文字').props.onClick!();
+    tree = render();
+    const original = summary(tree).props.value;
+    checkbox(tree, '我同意将所选材料').props.onChange!({ target: { checked: true } });
+    tree = render();
+    mocks.confirm.mockReturnValue(false);
+    button(tree, 'AI 整理所选材料').props.onClick!();
+    expect(mocks.confirm).toHaveBeenCalledOnce();
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(summary(render()).props.value).toBe(original);
+    expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+
+  it('requires explicit confirmation before extraction text overwrites a different manual summary', () => {
+    let tree = render();
+    checkbox(tree, first.name).props.onChange!({ target: { checked: true } });
+    summary(tree).props.onChange!({ target: { checked: false, value: '手动填写并核对的内容' } });
+    tree = render();
+    mocks.confirm.mockReturnValue(false);
+    button(tree, '直接使用提取文字').props.onClick!();
+    expect(summary(render()).props.value).toBe('手动填写并核对的内容');
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    mocks.confirm.mockReturnValue(true);
+    button(render(), '直接使用提取文字').props.onClick!();
+    expect(summary(render()).props.value).toContain(first.text);
+    expect(mocks.fetch).not.toHaveBeenCalled();
   });
 });

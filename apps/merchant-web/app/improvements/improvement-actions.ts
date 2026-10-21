@@ -88,7 +88,7 @@ function refresh(merchantId: string, assistantId: string, improvementId: string)
   revalidatePath(`/${merchantId}`);
   revalidatePath(`/${merchantId}/improvements`);
   revalidatePath(`/${merchantId}/improvements/${improvementId}`);
-  for (const section of ['drafts', 'knowledge', 'publish'])
+  for (const section of ['drafts', 'knowledge', 'preview', 'publish'])
     revalidatePath(`/${merchantId}/${section}/${assistantId}`);
 }
 

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
 import { PageShell } from '@h5cs/ui';
 import { merchantAssistants } from './tenant-data';
 import { merchantPath } from './tenant-paths';
@@ -9,21 +10,23 @@ export async function AssistantCollection({
   section,
 }: {
   merchantId: string;
-  section: 'knowledge' | 'publish';
+  section: 'knowledge' | 'preview' | 'publish';
 }) {
+  if (!/^[0-9a-f]{32}$/u.test(merchantId)) notFound();
   const assistants = await merchantAssistants(merchantId, merchantPath(merchantId, section));
-  const title = section === 'knowledge' ? '知识库' : '测试与发布';
+  const title =
+    section === 'knowledge' ? '知识补充' : section === 'preview' ? '效果试聊' : '发布分享';
   return (
     <PageShell
       title={title}
       eyebrow="Merchant Workspace"
-      description={<p>商家编号：{merchantId}。请选择本商家的客服，进入对应功能页面。</p>}
+      description={<p>先选择客服，再进入{title}。不会修改其他客服的资料。</p>}
     >
       <p>
         <Link href={`${merchantPath(merchantId, 'help')}#${section}`}>查看操作帮助</Link>
       </p>
       <section className="merchant-account-card assistant-create-card">
-        <h2>选择要{section === 'knowledge' ? '维护资料' : '试聊和发布'}的客服</h2>
+        <h2>选择客服</h2>
         {assistants.length ? (
           <ul className="assistant-workspace-list">
             {assistants.map((assistant) => (
@@ -36,10 +39,10 @@ export async function AssistantCollection({
             ))}
           </ul>
         ) : (
-          <p>本商家还没有客服。请先到“客服草稿”创建。</p>
+          <p>本商家还没有客服，请先新建客服。</p>
         )}
         <Link className="tenant-feature-link" href={merchantPath(merchantId, 'drafts')}>
-          进入客服草稿
+          返回客服列表
         </Link>
       </section>
     </PageShell>

@@ -76,6 +76,7 @@ export async function createAssistantDraft(
     revalidatePath(`/${merchantId}`);
     revalidatePath(`/${merchantId}/drafts`);
     revalidatePath(`/${merchantId}/knowledge`);
+    revalidatePath(`/${merchantId}/preview`);
     revalidatePath(`/${merchantId}/publish`);
     return {
       error: null,

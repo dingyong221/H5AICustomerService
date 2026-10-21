@@ -1,7 +1,7 @@
 export function safeMerchantReturnPath(merchantId: string, value: unknown): string | null {
   if (!/^[0-9a-f]{32}$/u.test(merchantId) || typeof value !== 'string') return null;
   const allowed = new RegExp(
-    `^/${merchantId}(?:/(?:drafts|knowledge|publish|conversations)(?:/[0-9a-f]{32})?|/(?:writing|help))?$`,
+    `^/${merchantId}(?:/(?:drafts|knowledge|preview|publish|conversations)(?:/[0-9a-f]{32})?|/drafts/new|/(?:writing|help))?$`,
     'u',
   );
   if (allowed.test(value)) return value;

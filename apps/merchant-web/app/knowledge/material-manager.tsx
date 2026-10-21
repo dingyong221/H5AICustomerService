@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import type { KnowledgeMaterial } from '@h5cs/database';
 import { merchantPath } from '../tenant-paths';
+import { useUnsavedForm } from '../workspace/use-unsaved-form';
 export function MaterialManager({
   merchantId,
   assistantId,
@@ -32,6 +33,7 @@ export function MaterialManager({
   const previousMaterials = useRef(materials);
   const visibleMaterials = materials?.filter((item) => !deletedIds.includes(item.id));
   const disabled = !!busy || pendingDelete !== null || materials === null;
+  useUnsavedForm(!!summary.trim() || busy !== null);
   function clearOrganization() {
     setSummary('');
     setWarnings([]);
@@ -57,6 +59,12 @@ export function MaterialManager({
   }, [materials]);
   const endpoint = `${merchantPath(merchantId, 'knowledge', assistantId)}/materials`;
   async function request(kind: string, body: FormData | Record<string, unknown>) {
+    if (
+      kind === 'organize' &&
+      summary.trim() &&
+      !window.confirm('重新整理将替换当前未保存的整理稿。确认继续？')
+    )
+      return;
     setBusy(kind);
     setError('');
     setNotice('');
@@ -87,9 +95,14 @@ export function MaterialManager({
         );
       if (kind === 'upload') {
         const ids = Array.isArray(result.saved) ? result.saved : [];
+        if (!ids.length || !ids.every((id) => typeof id === 'string' && /^[0-9a-f]{32}$/u.test(id)))
+          throw new Error('未能确认上传结果，请刷新核对已保存材料后再操作；不会自动重试。');
         setSelected(ids);
-        clearOrganization();
-        setNotice(`已保存 ${ids.length} 份可解析材料，尚未加入客服知识。`);
+        setConfirmed(false);
+        setConsent(false);
+        setNotice(
+          `已保存 ${ids.length} 份可解析材料，尚未加入客服知识。${summary.trim() ? '原有未保存整理稿已保留，新增材料不会自动追加；请重新整理或手动补充后核对保存。' : ''}`,
+        );
         setError(result.errors?.join('\n') ?? '');
         if (fileInput.current) fileInput.current.value = '';
         router.refresh();
@@ -110,10 +123,16 @@ export function MaterialManager({
           '材料已删除，未保存的整理稿已清空。已保存草稿、已发布客服及消费者链接未改变；如需撤下相关回答，请修改草稿并重新发布。',
         );
         router.refresh();
-      } else {
+      } else if (kind === 'apply') {
+        if (result.saved !== true)
+          throw new Error(
+            '未能确认保存结果，整理稿已保留。请刷新核对草稿修订后再操作；不会自动重试。',
+          );
         clearOrganization();
-        setNotice('已保存到新的草稿修订。请重新确认资料、试聊并发布，消费者才会使用新版知识。');
+        setNotice('知识已保存到草稿。下一步进入效果试聊，发布后才会更新消费者回答。');
         router.refresh();
+      } else {
+        throw new Error('未能确认操作类型，请刷新核对后再操作。');
       }
     } catch (cause) {
       setError(
@@ -130,12 +149,16 @@ export function MaterialManager({
       className="merchant-account-card assistant-detail-card knowledge-manager"
       aria-label="基础材料管理"
     >
-      <h2>上传基础材料并整理为知识</h2>
-      <p>
-        支持 PDF、DOC/DOCX、PPT/PPTX、XLS/XLSX、TXT、CSV、Markdown。每次最多 5 份，单份 10 MB、合计
-        20 MB。只提取文字，不执行宏、链接或公式；扫描件暂不支持
-        OCR。原文件不长期保存，仅保存提取文字、文件名和摘要指纹。
-      </p>
+      <h2>上传并补充知识</h2>
+      <p>上传 → 整理 → 核对保存。已有完整资料时，可直接进入下一步试聊。</p>
+      <details className="knowledge-format-help">
+        <summary>支持的格式与上传说明</summary>
+        <p>
+          PDF、DOC/DOCX、PPT/PPTX、XLS/XLSX、TXT、CSV、Markdown。每次最多 5 份，单份 10 MB、合计 20
+          MB。只提取文字，不执行宏、链接或公式；扫描件暂不支持
+          OCR。原文件不长期保存，仅保存提取文字、文件名和摘要指纹。
+        </p>
+      </details>
       {notice ? <p role="status">{notice}</p> : null}
       {error ? (
         <p role="alert" className="knowledge-error">
@@ -258,6 +281,12 @@ export function MaterialManager({
                 setError('提取文字超过 4000 字，请先 AI 整理，或自行复制精简后填写整理稿。');
                 return;
               }
+              if (
+                summary.trim() &&
+                summary !== text &&
+                !window.confirm('使用提取文字将替换当前未保存的整理稿。确认继续？')
+              )
+                return;
               setSummary(text);
               setWarnings([]);
               setConfirmed(false);
@@ -269,71 +298,74 @@ export function MaterialManager({
       ) : (
         <p>尚无上传材料。可上传商品表、服务说明、售后规则或 FAQ。</p>
       )}
-      <form
-        className="merchant-account-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void request('apply', { summary, revision, mode, confirmed });
-        }}
-      >
-        <h3>核对并保存知识整理稿</h3>
-        <p>
-          整理稿最多 4000
-          字。只有下方保存后的内容会写入“商品或服务资料”；完整原文件不会自动成为客服回答依据。价格与优惠原字段不会自动改写，请同步核对避免冲突。
-        </p>
-        <label>
-          知识整理稿
-          <textarea
-            aria-label="知识整理稿"
-            rows={12}
-            value={summary}
-            maxLength={4000}
-            required
-            disabled={disabled}
-            onChange={(event) => {
-              setSummary(event.target.value);
-              setConfirmed(false);
-            }}
-          />
-        </label>
-        <p>
-          {summary.length} / 4000 字 · 当前草稿修订 {revision}
-        </p>
-        {warnings.length ? (
-          <ul>
-            {warnings.map((warning, index) => (
-              <li key={index}>{warning}</li>
-            ))}
-          </ul>
-        ) : null}
-        <label>
-          保存方式
-          <select
-            value={mode}
-            disabled={disabled}
-            onChange={(event) => {
-              setMode(event.target.value);
-              setConfirmed(false);
-            }}
-          >
-            <option value="append">追加到现有商品或服务资料</option>
-            <option value="replace">替换现有商品或服务资料（需核对原文）</option>
-          </select>
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={confirmed}
-            required
-            disabled={disabled}
-            onChange={(event) => setConfirmed(event.target.checked)}
-          />
-          我已核对整理稿与现有价格、优惠及适用条件，确认按所选方式保存；不会自动发布
-        </label>
-        <button type="submit" disabled={disabled || !confirmed || !summary.trim()}>
-          {busy === 'apply' ? '正在保存…' : '保存整理稿到客服草稿'}
-        </button>
-      </form>
+      <details className="knowledge-summary-editor" open={!!summary || warnings.length > 0}>
+        <summary>{summary ? '核对并保存知识整理稿' : '手动补充知识文字'}</summary>
+        <form
+          className="merchant-account-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void request('apply', { summary, revision, mode, confirmed });
+          }}
+        >
+          <h3>核对并保存知识整理稿</h3>
+          <p>
+            整理稿最多 4000
+            字。只有下方保存后的内容会写入“商品或服务资料”；完整原文件不会自动成为客服回答依据。价格与优惠原字段不会自动改写，请同步核对避免冲突。
+          </p>
+          <label>
+            知识整理稿
+            <textarea
+              aria-label="知识整理稿"
+              rows={7}
+              value={summary}
+              maxLength={4000}
+              required
+              disabled={disabled}
+              onChange={(event) => {
+                setSummary(event.target.value);
+                setConfirmed(false);
+              }}
+            />
+          </label>
+          <p>
+            {summary.length} / 4000 字 · 当前草稿修订 {revision}
+          </p>
+          {warnings.length ? (
+            <ul>
+              {warnings.map((warning, index) => (
+                <li key={index}>{warning}</li>
+              ))}
+            </ul>
+          ) : null}
+          <label>
+            保存方式
+            <select
+              value={mode}
+              disabled={disabled}
+              onChange={(event) => {
+                setMode(event.target.value);
+                setConfirmed(false);
+              }}
+            >
+              <option value="append">追加到现有商品或服务资料</option>
+              <option value="replace">替换现有商品或服务资料（需核对原文）</option>
+            </select>
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={confirmed}
+              required
+              disabled={disabled}
+              onChange={(event) => setConfirmed(event.target.checked)}
+            />
+            我已核对整理稿与现有价格、优惠及适用条件，确认按所选方式保存；不会自动发布
+          </label>
+          <button type="submit" disabled={disabled || !confirmed || !summary.trim()}>
+            {busy === 'apply' ? '正在保存…' : '保存整理稿到客服草稿'}
+          </button>
+        </form>
+      </details>
     </section>
   );
 }

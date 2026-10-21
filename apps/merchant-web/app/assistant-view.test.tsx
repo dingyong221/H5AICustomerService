@@ -20,12 +20,12 @@ vi.mock('next/navigation', () => ({
   },
 }));
 vi.mock('next/link', () => ({
-  default: ({ href, children }: { href: string; children: React.ReactNode }) =>
-    React.createElement('a', { href }, children),
+  default: ({ children, ...props }: { href: string; children: React.ReactNode }) =>
+    React.createElement('a', props, children),
 }));
 vi.mock('@h5cs/ui', () => ({
-  PageShell: ({ children }: { children: React.ReactNode }) =>
-    React.createElement('main', null, children),
+  PageShell: ({ children, title }: { children: React.ReactNode; title: string }) =>
+    React.createElement('main', null, React.createElement('h1', null, title), children),
   StatusBadge: ({ children }: { children: React.ReactNode }) =>
     React.createElement('span', null, children),
 }));
@@ -73,10 +73,17 @@ vi.mock('./share-assistant-link', () => ({
   ShareAssistantLink: ({ href }: { href: string }) =>
     React.createElement('a', { 'data-fixed-link': true, href }, '复制消费者链接'),
 }));
-vi.mock('./workspace/edit-draft-form', () => ({ EditDraftForm: () => null }));
-vi.mock('./workspace/draft-readiness-panel', () => ({ DraftReadinessPanel: () => null }));
+vi.mock('./workspace/edit-draft-form', () => ({
+  EditDraftForm: ({ continueHref }: { continueHref: string }) =>
+    React.createElement('form', { 'data-edit': true, 'data-continue-href': continueHref }),
+}));
+vi.mock('./workspace/draft-readiness-panel', () => ({
+  DraftReadinessPanel: () => React.createElement('section', { 'data-readiness': true }),
+}));
 vi.mock('./workspace/draft-revision-notice', () => ({ DraftRevisionNotice: () => null }));
-vi.mock('./workspace/preview-chat-form', () => ({ PreviewChatForm: () => null }));
+vi.mock('./workspace/preview-chat-form', () => ({
+  PreviewChatForm: () => React.createElement('form', { 'data-preview': true }),
+}));
 vi.mock('./improvements/improvement-summary', () => ({ ImprovementSummaryPanel: () => null }));
 vi.mock('./knowledge/material-manager', () => ({
   MaterialManager: ({ assistantId }: { assistantId: string }) =>
@@ -146,15 +153,21 @@ describe('assistant publication flow', () => {
     expect(html).toContain('data-publish-ready="true"');
   });
 
-  it('retains the scoped upload manager and the same single publication entry on knowledge', async () => {
+  it('makes file upload the second workflow step without duplicating editing or publishing', async () => {
     const html = renderToStaticMarkup(
       await AssistantView({ merchantId, assistantId, section: 'knowledge' }),
     );
     expect(mocks.materials).toHaveBeenCalledWith(merchantId, assistantId, 'cc'.repeat(16));
     expect(html).toContain(`data-materials-assistant="${assistantId}"`);
     expect(html).not.toContain('data-confirm-revision');
-    expect(html).toContain('data-publish-revision="3"');
-    expect(html.match(/data-publish-ready=/gu)).toHaveLength(1);
+    expect(html).toContain('<h1>知识补充</h1>');
+    expect(html).toContain('下一步：效果试聊');
+    expect(html).toContain(`href="/${merchantId}/preview/${assistantId}"`);
+    expect(html).toContain('查看已保存的商品与服务资料');
+    expect(html).not.toContain('data-publish-ready');
+    expect(html).not.toContain('data-edit');
+    expect(html).not.toContain('data-preview');
+    expect(html).not.toContain('data-readiness');
   });
 
   it('uses the latest revision when editing invalidates an earlier confirmation', async () => {
@@ -167,7 +180,7 @@ describe('assistant publication flow', () => {
     expect(html).toContain('data-publish-ready="true"');
   });
 
-  it.each(['drafts', 'knowledge', 'publish'] as const)(
+  it.each(['drafts', 'knowledge', 'preview', 'publish'] as const)(
     'retains the same persisted link on %s, refresh and a newer draft',
     async (section) => {
       mocks.snapshot.mockResolvedValue({ ...assistant, activeReleaseId: 'dd'.repeat(16) });
@@ -197,7 +210,7 @@ describe('assistant publication flow', () => {
       if (unavailable === 'policy')
         mocks.policy.mockReturnValue({ ready: false, reason: '模型暂不可用' });
       const html = renderToStaticMarkup(
-        await AssistantView({ merchantId, assistantId, section: 'knowledge' }),
+        await AssistantView({ merchantId, assistantId, section: 'publish' }),
       );
       expect(html).toContain('href="https://example.test/a/test-assistant"');
       expect(html).toContain('固定地址仍保留');
@@ -219,5 +232,55 @@ describe('assistant publication flow', () => {
     );
     expect(html).toContain('正式域名配置暂不可用');
     expect(html).not.toContain('data-fixed-link');
+  });
+
+  it('keeps step one focused on editing and saves before continuing to file upload', async () => {
+    const html = renderToStaticMarkup(
+      await AssistantView({ merchantId, assistantId, section: 'drafts' }),
+    );
+    expect(html).toContain('<h1>基础资料</h1>');
+    expect(html).toContain('data-edit="true"');
+    expect(html).toContain(`data-continue-href="/${merchantId}/knowledge/${assistantId}"`);
+    expect(html).not.toContain('data-materials-assistant');
+    expect(html).not.toContain('data-preview');
+    expect(html).not.toContain('data-publish-ready');
+    expect(html).not.toContain('data-readiness');
+  });
+
+  it('isolates test chat from publication and provides a clear next step', async () => {
+    const html = renderToStaticMarkup(
+      await AssistantView({ merchantId, assistantId, section: 'preview' }),
+    );
+    expect(html).toContain('<h1>效果试聊</h1>');
+    expect(html).toContain('data-preview="true"');
+    expect(html).toContain('下一步：发布分享');
+    expect(html).not.toContain('data-edit');
+    expect(html).not.toContain('data-materials-assistant');
+    expect(html).not.toContain('data-publish-ready');
+  });
+
+  it('keeps review and publication only in the final step', async () => {
+    const html = renderToStaticMarkup(
+      await AssistantView({ merchantId, assistantId, section: 'publish' }),
+    );
+    expect(html).toContain('<h1>发布分享</h1>');
+    expect(html).toContain('发布内容核对');
+    expect(html).toContain('data-readiness="true"');
+    expect(html).toContain('data-publish-revision="3"');
+    expect(html).not.toContain('data-preview');
+    expect(html).not.toContain('data-edit');
+    expect(html).not.toContain('data-materials-assistant');
+  });
+
+  it('shows the four scoped steps without claiming that merely visiting a step completed it', async () => {
+    const html = renderToStaticMarkup(
+      await AssistantView({ merchantId, assistantId, section: 'knowledge' }),
+    );
+    expect(html).toContain('aria-label="客服发布步骤"');
+    expect(html.match(/aria-current="step"/gu)).toHaveLength(1);
+    for (const section of ['drafts', 'knowledge', 'preview', 'publish']) {
+      expect(html).toContain(`href="/${merchantId}/${section}/${assistantId}"`);
+    }
+    expect(html).not.toContain('已完成');
   });
 });
