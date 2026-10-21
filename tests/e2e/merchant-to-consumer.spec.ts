@@ -172,24 +172,88 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await expect(merchantPage.getByText(referenceNotes)).toHaveCount(0);
   // Actual upload/extraction, consented organization and an explicit review.
   const materialPanel = merchantPage.getByRole('region', { name: '基础材料管理' });
-  await materialPanel.getByLabel('选择基础材料').setInputFiles({
-    name: '空调清洗基础资料.txt',
-    mimeType: 'text/plain',
-    buffer: Buffer.from(
-      '提供上门空调清洗咨询，预约需提前1天；不提供安装服务。价格和优惠需商家确认。',
-      'utf8',
-    ),
-  });
+  const deletedMaterialName = '待删除的旧材料A.txt';
+  const retainedMaterialName = '空调清洗基础资料B.txt';
+  await materialPanel.getByLabel('选择基础材料').setInputFiles([
+    {
+      name: deletedMaterialName,
+      mimeType: 'text/plain',
+      buffer: Buffer.from('合成旧材料A：本条仅用于验证删除，不应进入最终知识。', 'utf8'),
+    },
+    {
+      name: retainedMaterialName,
+      mimeType: 'text/plain',
+      buffer: Buffer.from(
+        '提供上门空调清洗咨询，预约需提前1天；不提供安装服务。价格和优惠需商家确认。',
+        'utf8',
+      ),
+    },
+  ]);
   await materialPanel.getByRole('button', { name: '上传并提取文字', exact: true }).click();
-  await expect(materialPanel.getByRole('status')).toContainText('已保存 1 份', { timeout: 60000 });
+  await expect(materialPanel.getByRole('status')).toContainText('已保存 2 份', { timeout: 60000 });
+  const materialA = materialPanel.getByRole('checkbox', {
+    name: new RegExp(deletedMaterialName, 'u'),
+  });
+  const materialB = materialPanel.getByRole('checkbox', {
+    name: new RegExp(retainedMaterialName, 'u'),
+  });
+  await expect(materialA).toBeChecked();
+  await expect(materialB).toBeChecked();
+  await materialPanel.getByRole('button', { name: '直接使用提取文字', exact: true }).click();
+  await expect(materialPanel.getByLabel('知识整理稿', { exact: true })).toHaveValue(/合成旧材料A/u);
+  await materialPanel.getByRole('checkbox', { name: /我已核对整理稿/u }).check();
+  const deleteButton = materialPanel.getByRole('button', {
+    name: `删除材料：${deletedMaterialName}`,
+    exact: true,
+  });
+  await deleteButton.click();
+  const deleteDialog = materialPanel.getByRole('alertdialog', {
+    name: `删除材料：${deletedMaterialName}`,
+    exact: true,
+  });
+  await expect(deleteDialog).toContainText('不会自动修改已保存草稿、已发布客服或消费者链接');
+  await deleteDialog.getByRole('button', { name: '取消', exact: true }).click();
+  await expect(materialA).toBeChecked();
+  await deleteButton.click();
+  const deletionResponse = merchantPage.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname.endsWith(`/knowledge/${assistantId}/materials/delete`),
+  );
+  await deleteDialog.getByRole('button', { name: '确认删除材料', exact: true }).click();
+  const deletion = await deletionResponse;
+  expect(deletion.status()).toBe(200);
+  const deletedSource = (await deletion.json()) as { deleted: boolean; sourceId: string };
+  expect(deletedSource.deleted).toBe(true);
+  expect(deletedSource.sourceId).toMatch(/^[0-9a-f]{32}$/u);
+  await expect(materialA).toHaveCount(0);
+  await expect(materialB).toBeChecked();
+  await expect(materialPanel.getByLabel('知识整理稿', { exact: true })).toHaveValue('');
+  await expect(materialPanel.getByRole('checkbox', { name: /我已核对整理稿/u })).not.toBeChecked();
   await expect(
-    materialPanel.getByRole('checkbox', { name: /空调清洗基础资料\.txt/u }),
-  ).toBeChecked();
+    materialPanel.getByRole('checkbox', { name: /我同意将所选材料的文字/u }),
+  ).not.toBeChecked();
+  await materialPanel.getByRole('button', { name: '直接使用提取文字', exact: true }).click();
+  await expect(materialPanel.getByLabel('知识整理稿', { exact: true })).not.toHaveValue(
+    /合成旧材料A/u,
+  );
+  await merchantPage.reload();
+  await expect(materialA).toHaveCount(0);
+  await expect(materialB).toBeVisible();
+  await materialB.check();
   await expect(
     materialPanel.getByRole('button', { name: 'AI 整理所选材料', exact: true }),
   ).toBeDisabled();
   await materialPanel.getByRole('checkbox', { name: /我同意将所选材料的文字/u }).check();
+  const organizationRequest = merchantPage.waitForRequest(
+    (request) =>
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname.endsWith(`/knowledge/${assistantId}/materials/organize`),
+  );
   await materialPanel.getByRole('button', { name: 'AI 整理所选材料', exact: true }).click();
+  const organization = (await organizationRequest).postDataJSON() as { sourceIds: string[] };
+  expect(organization.sourceIds).toHaveLength(1);
+  expect(organization.sourceIds).not.toContain(deletedSource.sourceId);
   await expect(materialPanel.getByLabel('知识整理稿', { exact: true })).toHaveValue(
     /预约需提前1天/u,
     { timeout: 30000 },
@@ -215,12 +279,12 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await expect(merchantPage.locator('.assistant-facts')).toContainText('预约需提前1天');
   await expect(
     merchantPage.getByRole('button', { name: '确认当前草稿资料', exact: true }),
-  ).toBeEnabled();
-  await merchantPage.getByLabel(/我已逐项核对以上资料/u).check();
-  await merchantPage.getByRole('button', { name: '确认当前草稿资料' }).click();
-  await expect(merchantPage.getByText('当前草稿资料已确认')).toBeVisible();
+  ).toHaveCount(0);
+  await expect(merchantPage.getByText('资料待确认', { exact: true })).toBeVisible();
   await merchantNavigation.getByRole('link', { name: '测试与发布', exact: true }).click();
-  await expect(merchantPage.getByRole('button', { name: '确认发布 AI 客服' })).toBeEnabled();
+  await expect(
+    merchantPage.getByRole('button', { name: '确认资料并发布 AI 客服', exact: true }),
+  ).toBeEnabled();
   await expect(merchantPage.getByRole('img', { name: '扫码打开消费者 AI 客服' })).toHaveCount(0);
   await expect(merchantPage.locator('a[href^="http://127.0.0.1:3001/a/"]')).toHaveCount(0);
   await merchantPage.getByLabel('试聊问题').fill('你们提供什么服务？');
@@ -232,12 +296,18 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   );
   await expect(merchantPage.locator('a[href^="http://127.0.0.1:3001/a/"]')).toHaveCount(0);
   await expect(merchantPage.getByRole('img', { name: '扫码打开消费者 AI 客服' })).toHaveCount(0);
-  await merchantPage.getByLabel(/我确认发布当前修订/u).check();
-  await merchantPage.getByRole('button', { name: '确认发布 AI 客服' }).click();
+  await merchantPage.getByLabel(/我已核对以上资料，并确认向消费者公开发布当前修订/u).check();
+  await merchantPage.getByRole('button', { name: '确认资料并发布 AI 客服', exact: true }).click();
   const publicLink = merchantPage.locator('a[href^="http://127.0.0.1:3001/a/"]').first();
   await expect(publicLink).toBeVisible();
   const publicUrl = await publicLink.getAttribute('href');
   expect(publicUrl).toMatch(/^http:\/\/127\.0\.0\.1:3001\/a\/[a-z0-9-]+$/u);
+  await expect(
+    merchantPage.getByRole('heading', { name: '固定消费者链接', exact: true }),
+  ).toBeVisible();
+  await expect(merchantPage.locator('#consumer-link')).toBeInViewport();
+  await merchantPage.reload();
+  await expect(publicLink).toHaveAttribute('href', publicUrl!);
   const shareQr = merchantPage.getByRole('img', { name: '扫码打开消费者 AI 客服' }).first();
   await expect(shareQr).toBeVisible();
   await expect(shareQr).toHaveAttribute('src', /^data:image\/png;base64,/u);
@@ -269,12 +339,12 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   );
   await consumerPage.getByRole('button', { name: '发送消息' }).click();
   const firstSessionPayload = (await (await firstSessionResponse).json()) as {
-    data: { releaseRef: string };
+    data: { releaseRef: string; sessionHandle: string };
   };
   const firstReleaseRef = firstSessionPayload.data.releaseRef;
-  const answer = consumerPage.getByText(
-    '我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。',
-  );
+  const answer = consumerPage
+    .getByText('我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。')
+    .first();
   await expect(answer).toBeVisible({ timeout: 60_000 });
   await expect(answer).toContainText('预约需提前1天；不提供安装服务。');
   const merchantId = new URL(managementUrl).pathname.slice(1);
@@ -322,13 +392,19 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await merchantPage.getByRole('button', { name: '符合预期，判定通过', exact: true }).click();
   await expect(merchantPage.getByText('商家已判定通过。', { exact: true })).toBeVisible();
   await merchantPage.getByRole('link', { name: '核对并确认知识资料', exact: true }).click();
-  await merchantPage.getByLabel(/我已逐项核对以上资料/u).check();
-  await merchantPage.getByRole('button', { name: '确认当前草稿资料', exact: true }).click();
-  await expect(merchantPage.getByText('当前草稿资料已确认')).toBeVisible();
-  await merchantNavigation.getByRole('link', { name: '测试与发布', exact: true }).click();
-  await merchantPage.getByLabel(/我确认发布当前修订/u).check();
-  await merchantPage.getByRole('button', { name: '确认发布 AI 客服', exact: true }).click();
-  await expect(merchantPage.getByText('Release #2 已发布。')).toBeVisible();
+  await merchantPage.getByLabel(/我已核对以上资料，并确认向消费者公开发布当前修订/u).check();
+  await merchantPage.getByRole('button', { name: '确认资料并发布 AI 客服', exact: true }).click();
+  await expect(merchantPage.getByText(/第 2 版已发布/u)).toBeVisible();
+  await expect(merchantPage.locator('#consumer-link')).toBeInViewport();
+  for (const section of ['knowledge', 'publish', 'drafts']) {
+    await merchantPage.goto(`${managementUrl}/${section}/${assistantId}`);
+    await expect(
+      merchantPage.getByRole('heading', { name: '固定消费者链接', exact: true }),
+    ).toBeVisible();
+    await expect(publicLink).toHaveAttribute('href', publicUrl!);
+    await merchantPage.reload();
+    await expect(publicLink).toHaveAttribute('href', publicUrl!);
+  }
   await merchantPage.goto(improvementUrl);
   await expect(
     merchantPage.getByText('本条改进已关联当前线上版本。', { exact: false }),
@@ -371,11 +447,9 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await merchantPage.reload();
   await expect(merchantPage.getByText('资料待确认')).toBeVisible();
   await merchantNavigation.getByRole('link', { name: '知识库', exact: true }).click();
-  await merchantPage.getByLabel(/我已逐项核对以上资料/u).check();
-  await merchantPage.getByRole('button', { name: '确认当前草稿资料' }).click();
-  await expect(merchantPage.getByText('当前草稿资料已确认')).toBeVisible();
-  // Confirming and editing again without leaving this page must not carry an old
-  // client-side confirmation into the new server revision.
+  await merchantPage.getByLabel(/我已核对以上资料，并确认向消费者公开发布当前修订/u).check();
+  // Editing without leaving this page must not carry consent for an old
+  // revision into the new server revision's combined confirmation/publication.
   await merchantPage.getByLabel('价格与条件').fill('具体价格按服务范围由商家核实确认。');
   await merchantPage.getByRole('button', { name: '保存草稿修订' }).click();
   await expect(
@@ -383,16 +457,15 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
       `草稿已保存至修订 ${beforeManualEdit + 2}，原有资料确认已失效。请核对新内容后重新确认。`,
     ),
   ).toBeVisible();
-  await expect(merchantPage.getByLabel(/我已逐项核对以上资料/u)).not.toBeChecked();
-  await expect(merchantPage.getByRole('button', { name: '确认当前草稿资料' })).toBeEnabled();
-  await merchantPage.getByLabel(/我已逐项核对以上资料/u).check();
-  await merchantPage.getByRole('button', { name: '确认当前草稿资料' }).click();
-  await expect(merchantPage.getByText('当前草稿资料已确认')).toBeVisible();
+  await expect(
+    merchantPage.getByLabel(/我已核对以上资料，并确认向消费者公开发布当前修订/u),
+  ).not.toBeChecked();
+  await expect(publicLink).toHaveAttribute('href', publicUrl!);
   await merchantPage.reload();
   await merchantNavigation.getByRole('link', { name: '测试与发布', exact: true }).click();
-  await merchantPage.getByLabel(/我确认发布当前修订/u).check();
-  await merchantPage.getByRole('button', { name: '确认发布 AI 客服' }).click();
-  await expect(merchantPage.getByText('Release #3 已发布。')).toBeVisible();
+  await merchantPage.getByLabel(/我已核对以上资料，并确认向消费者公开发布当前修订/u).check();
+  await merchantPage.getByRole('button', { name: '确认资料并发布 AI 客服', exact: true }).click();
+  await expect(merchantPage.getByText(/第 3 版已发布/u)).toBeVisible();
   await expect(merchantPage.locator('a[href^="http://127.0.0.1:3001/a/"]').first()).toHaveAttribute(
     'href',
     publicUrl!,
@@ -407,6 +480,29 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
     return envelope.data.releaseRef;
   }, publicSlug);
   expect(latestReleaseRef).not.toBe(firstReleaseRef);
+  const oldHistoryRelease = await consumerPage.evaluate(async (sessionHandle) => {
+    const response = await fetch(`/api/v1/public/sessions/${sessionHandle}/history`);
+    if (response.status !== 200) throw new Error('Old synthetic history is unavailable');
+    const envelope = (await response.json()) as { data: { releaseRef: string } };
+    return envelope.data.releaseRef;
+  }, firstSessionPayload.data.sessionHandle);
+  expect(oldHistoryRelease).toBe(firstReleaseRef);
+  const oldAssistantReplyCount = await consumerPage
+    .locator('.message-row--assistant .message-bubble p')
+    .count();
+  await consumerPage
+    .getByRole('textbox', { name: '输入想咨询的问题' })
+    .fill('现在可以提供哪些清洁咨询？');
+  await consumerPage.getByRole('button', { name: '发送消息' }).click();
+  await expect(consumerPage.locator('.message-row--assistant .message-bubble p')).toHaveCount(
+    oldAssistantReplyCount + 1,
+    { timeout: 60_000 },
+  );
+  const oldSessionAnswer = consumerPage.locator('.message-row--assistant .message-bubble p').last();
+  await expect(oldSessionAnswer).toContainText('预约需提前1天；不提供安装服务。', {
+    timeout: 60_000,
+  });
+  await expect(oldSessionAnswer).not.toContainText('洗衣机清洁');
   consumerPage.once('dialog', (dialog) => void dialog.accept());
   await consumerPage.getByRole('button', { name: '新建咨询' }).click();
   await expect(answer).toHaveCount(0);
@@ -426,6 +522,9 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   };
   expect(secondSessionPayload.data.releaseRef).toBe(latestReleaseRef);
   await expect(answer).toBeVisible({ timeout: 60_000 });
+  await expect(
+    consumerPage.locator('.message-row--assistant .message-bubble p').last(),
+  ).toContainText('也提供洗衣机清洁咨询');
 
   await operatorPage.reload();
   const merchantRow = operatorPage
@@ -490,7 +589,7 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   ).toBeVisible();
   await expect(
     operatorPage.locator('.ops-stat-card').filter({ hasText: '消费者问句' }).locator('strong'),
-  ).toHaveText('2');
+  ).toHaveText('3');
   await expect(
     operatorPage.locator('.ops-stat-card').filter({ hasText: '新建消费者会话' }).locator('strong'),
   ).toHaveText('2');
@@ -512,7 +611,7 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   ).toBe(404);
   await expect(
     operatorPage.locator('.ops-stat-card').filter({ hasText: '消费者问句' }).locator('strong'),
-  ).toHaveText('2');
+  ).toHaveText('3');
   await statusPanel.getByText('恢复此商家', { exact: true }).click();
   await statusPanel.getByLabel('操作原因（写入审计）').fill('运营增强合成验收：详情页恢复');
   await statusPanel.getByLabel('我已核对商家编号和操作影响').check();

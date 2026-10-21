@@ -35,6 +35,10 @@ const server = createServer(async (request, response) => {
   }
   const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
   const messages = JSON.stringify(payload.messages);
+  // Read only the facts message, not the visitor's request or earlier replies.
+  // This makes the browser regression distinguish immutable old-session facts
+  // from newly published facts without pretending to evaluate real-model quality.
+  const facts = payload.messages?.[1]?.content ?? '';
   const organizing = messages.includes('商家知识资料整理助手');
   const content = organizing
     ? JSON.stringify({
@@ -43,7 +47,8 @@ const server = createServer(async (request, response) => {
         warnings: ['请商家核对预约时间与服务限制。'],
       })
     : '我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。' +
-      (messages.includes('预约需提前1天') ? ' 预约需提前1天；不提供安装服务。' : '');
+      (facts.includes('预约需提前1天') ? ' 预约需提前1天；不提供安装服务。' : '') +
+      (facts.includes('也提供洗衣机清洁咨询') ? ' 也提供洗衣机清洁咨询。' : '');
   response.writeHead(200, { 'content-type': 'application/json' });
   response.end(
     JSON.stringify({

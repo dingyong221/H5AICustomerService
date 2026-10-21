@@ -22,7 +22,7 @@ function fixture(
   respond: (sql: string) => unknown[] = (sql) =>
     sql.includes('SELECT a.id') ? [{ id: Buffer.from(assistantId, 'hex') }] : [],
 ) {
-  const execute = vi.fn(async (sql: string) => [respond(sql), []]);
+  const execute = vi.fn(async (sql: string, _values?: unknown[]) => [respond(sql), []]);
   const beginTransaction = vi.fn(),
     commit = vi.fn(),
     rollback = vi.fn(),
@@ -55,6 +55,7 @@ describe('merchant uploaded material isolation and persistence', () => {
     const [sql, values] = f.execute.mock.calls[0] as unknown as [string, Buffer[]];
     expect(sql).toContain('a.merchant_id=? AND a.id=? AND mm.merchant_user_id=?');
     expect(sql).toContain("mm.status='active'");
+    expect(sql).toContain("mu.status='active'");
     expect(sql).toContain("mm.role IN ('owner','admin','editor')");
     expect(sql).toContain("m.status='active'");
     expect(sql).toContain("a.status <> 'paused'");
@@ -144,6 +145,93 @@ describe('merchant uploaded material isolation and persistence', () => {
       expect(f.end).toHaveBeenCalledOnce();
     }
   });
+  it('archives only the exact tenant uploaded source and audits once, without changing draft or published state', async () => {
+    const sourceId = 'dd'.repeat(16);
+    let status = 'active';
+    const f = fixture((sql) => {
+      if (sql.includes('SELECT a.id')) return [{}];
+      if (sql.includes('SELECT ks.id,ks.status'))
+        return [{ id: Buffer.from(sourceId, 'hex'), status }];
+      if (sql.startsWith('UPDATE knowledge_source')) status = 'archived';
+      return [];
+    });
+    const scope = { merchantId, assistantId, userId, sourceId };
+    await f.repository.archive(scope);
+    await f.repository.archive(scope);
+    expect(status).toBe('archived');
+    expect(f.commit).toHaveBeenCalledTimes(2);
+    expect(f.rollback).not.toHaveBeenCalled();
+    const statements = f.execute.mock.calls.map(([sql]) => sql);
+    const reads = f.execute.mock.calls.filter(([sql]) => sql.includes('SELECT ks.id,ks.status'));
+    expect(reads).toHaveLength(2);
+    expect(reads[0]?.[0]).toContain(
+      "ks.merchant_id=? AND ks.assistant_id=? AND ks.id=? AND ks.type='uploaded_file' FOR UPDATE",
+    );
+    expect((reads[0]?.[1] as Buffer[]).map((value) => value.toString('hex'))).toEqual([
+      merchantId,
+      assistantId,
+      sourceId,
+    ]);
+    expect(statements.filter((sql) => sql.startsWith('UPDATE knowledge_source'))).toHaveLength(1);
+    expect(statements.filter((sql) => sql.includes('knowledge.material_archive'))).toHaveLength(1);
+    expect(statements.join('\n')).not.toMatch(
+      /DELETE FROM|UPDATE assistant|UPDATE knowledge_revision|INSERT INTO assistant_release/u,
+    );
+  });
+  it.each(['denied-member', 'missing-source', 'foreign-scope', 'non-uploaded', 'inactive-source'])(
+    'rejects %s within the transaction without any mutation',
+    async (reason) => {
+      const f = fixture((sql) =>
+        sql.includes('SELECT a.id')
+          ? reason === 'denied-member'
+            ? []
+            : [{}]
+          : reason === 'inactive-source'
+            ? [{ status: 'inactive' }]
+            : [],
+      );
+      await expect(
+        f.repository.archive({ merchantId, assistantId, userId, sourceId: 'dd'.repeat(16) }),
+      ).rejects.toBeInstanceOf(KnowledgeMaterialAccessError);
+      expect(f.beginTransaction).toHaveBeenCalledOnce();
+      expect(f.rollback).toHaveBeenCalledOnce();
+      expect(f.commit).not.toHaveBeenCalled();
+      expect(
+        f.execute.mock.calls.every(([sql]) => !/UPDATE knowledge|INSERT|DELETE/u.test(sql)),
+      ).toBe(true);
+      expect(f.end).toHaveBeenCalledOnce();
+    },
+  );
+  it('rolls back the archive if its audit cannot be written', async () => {
+    const f = fixture((sql) => {
+      if (sql.includes('SELECT a.id')) return [{}];
+      if (sql.includes('SELECT ks.id,ks.status')) return [{ status: 'active' }];
+      if (sql.includes('INSERT INTO audit_log')) throw new Error('audit unavailable');
+      return [];
+    });
+    await expect(
+      f.repository.archive({ merchantId, assistantId, userId, sourceId: 'dd'.repeat(16) }),
+    ).rejects.toThrow('audit unavailable');
+    expect(f.rollback).toHaveBeenCalledOnce();
+    expect(f.commit).not.toHaveBeenCalled();
+    expect(f.end).toHaveBeenCalledOnce();
+  });
+  it.each(['merchantId', 'assistantId', 'userId', 'sourceId'] as const)(
+    'rejects malformed archive %s before opening a connection',
+    async (key) => {
+      const f = fixture();
+      await expect(
+        f.repository.archive({
+          merchantId,
+          assistantId,
+          userId,
+          sourceId: 'dd'.repeat(16),
+          [key]: '../invalid',
+        }),
+      ).rejects.toThrow('Invalid material scope');
+      expect(f.openConnection).not.toHaveBeenCalled();
+    },
+  );
   it.each([
     { text: '' },
     { text: 'x'.repeat(24001) },

@@ -6,6 +6,22 @@ import { useEffect, useState } from 'react';
 import { safeShareAssistantUrl } from './share-assistant-url';
 
 type QrState = Readonly<{ href: string; dataUrl: string | null }>;
+type CopyResult = 'copied' | 'failed';
+
+export async function copyAssistantLink(
+  href: string,
+  expectedOrigin: string,
+  clipboard: Pick<Clipboard, 'writeText'> | undefined,
+): Promise<CopyResult> {
+  const safeHref = safeShareAssistantUrl(href, expectedOrigin);
+  if (!safeHref || !clipboard) return 'failed';
+  try {
+    await clipboard.writeText(safeHref);
+    return 'copied';
+  } catch {
+    return 'failed';
+  }
+}
 
 export function ShareAssistantLink({
   href,
@@ -16,6 +32,7 @@ export function ShareAssistantLink({
 }) {
   const safeHref = safeShareAssistantUrl(href, expectedOrigin);
   const [qr, setQr] = useState<QrState>();
+  const [copy, setCopy] = useState<Readonly<{ href: string; result: CopyResult }>>();
 
   useEffect(() => {
     if (!safeHref) return;
@@ -36,12 +53,31 @@ export function ShareAssistantLink({
   if (!safeHref) return <p role="alert">消费者链接未通过校验，请勿分享。</p>;
 
   const currentQr = qr?.href === safeHref ? qr : undefined;
+  const copyState = copy?.href === safeHref ? copy.result : 'idle';
   const publicSlug = new URL(safeHref).pathname.slice(3);
   return (
     <div className="assistant-share">
       <p>
-        消费者链接：<a href={safeHref}>{safeHref}</a>
+        固定消费者链接：<a href={safeHref}>{safeHref}</a>
       </p>
+      <p>把此链接或二维码发给消费者即可咨询。保存草稿、刷新页面和发布新版不会更换此地址。</p>
+      <button
+        type="button"
+        onClick={() => {
+          void copyAssistantLink(safeHref, expectedOrigin, navigator.clipboard).then((result) =>
+            setCopy({ href: safeHref, result }),
+          );
+        }}
+      >
+        复制消费者链接
+      </button>
+      {copyState !== 'idle' ? (
+        <p role="status">
+          {copyState === 'copied'
+            ? '固定链接已复制，可发送给消费者。'
+            : '自动复制未成功，请选中上方链接手动复制。'}
+        </p>
+      ) : null}
       {currentQr?.dataUrl ? (
         <div className="assistant-share__qr">
           <Image

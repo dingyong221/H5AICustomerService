@@ -32,6 +32,20 @@ export async function publishAssistantAction(
   _previous: PublishAssistantState,
   formData: FormData,
 ): Promise<PublishAssistantState> {
+  return publishCurrentDraft(formData, false);
+}
+
+export async function confirmAndPublishAssistantAction(
+  _previous: PublishAssistantState,
+  formData: FormData,
+): Promise<PublishAssistantState> {
+  return publishCurrentDraft(formData, true);
+}
+
+async function publishCurrentDraft(
+  formData: FormData,
+  confirmAndPublish: boolean,
+): Promise<PublishAssistantState> {
   const unavailable: PublishAssistantState = {
     error: '发布条件未满足。',
     published: false,
@@ -59,7 +73,7 @@ export async function publishAssistantAction(
     typeof idempotencyKey !== 'string' ||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(idempotencyKey) ||
     typeof csrfToken !== 'string' ||
-    formData.get('publishConfirmed') !== 'yes'
+    formData.get(confirmAndPublish ? 'confirmAndPublish' : 'publishConfirmed') !== 'yes'
   )
     return { ...unavailable, error: '请确认当前草稿版本及发布影响。' };
   const merchant = await currentMerchantForWrite(merchantId, csrfToken);
@@ -87,10 +101,22 @@ export async function publishAssistantAction(
     if (
       !assistant ||
       assistant.draftRevision !== revision ||
-      !assistant.knowledgeConfirmed ||
+      (!confirmAndPublish && !assistant.knowledgeConfirmed) ||
       assistant.status === 'paused'
     ) {
       return { ...unavailable, error: '草稿或资料确认状态已变化，请刷新后重新检查。' };
+    }
+    // Consent covers both operations. Each repository transaction rechecks the
+    // current member, assistant ownership and exact revision under its own lock.
+    // If publish fails after confirmation, never report a published version/link.
+    if (confirmAndPublish && !assistant.knowledgeConfirmed) {
+      await repository.confirmDraftKnowledge({
+        merchantUserId: toMerchantUserId(merchant.merchantUserId),
+        merchantId: toMerchantId(merchantId),
+        assistantId: toAssistantId(assistantId),
+        expectedDraftRevision: revision,
+        now,
+      });
     }
     const release = await repository.publish({
       merchantUserId: toMerchantUserId(merchant.merchantUserId),
@@ -111,6 +137,7 @@ export async function publishAssistantAction(
             promptTemplateVersion: policy.promptTemplateVersion,
             retrievalPolicyVersion: policy.retrievalPolicyVersion,
             modelPolicyVersion: policy.modelPolicyVersion,
+            ...(confirmAndPublish ? { confirmation: 'confirm-and-publish-v1' } : {}),
           }),
         ),
         expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1_000),
@@ -125,13 +152,13 @@ export async function publishAssistantAction(
     revalidatePath(`/${merchantId}/publish`);
     revalidatePath(`/${merchantId}/improvements`);
     revalidatePath('/[merchantId]/improvements/[improvementId]', 'page');
-    const publicSnapshot = await repository.findPublicSnapshot(assistant.publicSlug);
-    const publicUrl =
-      publicSnapshot?.releaseRef === release.releaseId
-        ? publicAssistantUrl(policy.consumerOrigin, assistant.publicSlug)
-        : null;
+    // publish() has committed the active release (or recovered its idempotent
+    // result). The assistant's slug is persisted at creation and is never
+    // regenerated for a new release. A transient extra public read must not
+    // erase a successfully published permanent link.
+    const publicUrl = publicAssistantUrl(policy.consumerOrigin, assistant.publicSlug);
     return {
-      error: publicUrl ? null : '版本已发布，但公开配置校验暂未通过；请刷新后检查。',
+      error: publicUrl ? null : '版本已发布，但固定链接格式异常；请联系运营核对，勿重复发布。',
       published: true,
       publicUrl,
       releaseNo: release.releaseNo,
@@ -142,7 +169,10 @@ export async function publishAssistantAction(
       error instanceof AssistantRevisionConflictError ||
       error instanceof AssistantIdempotencyConflictError
     ) {
-      return { ...unavailable, error: '草稿状态已变化，请刷新并重新确认发布。' };
+      return {
+        ...unavailable,
+        error: '本次尚未确认发布，草稿或授权状态已变化。请刷新核对；仅资料确认不代表已发布。',
+      };
     }
     return { ...unavailable, error: '发布结果尚未确认，请刷新页面核对线上版本，勿连续重复提交。' };
   }
