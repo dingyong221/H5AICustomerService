@@ -309,7 +309,12 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await expect(materialA).toHaveCount(0);
   await expect(materialB).toBeChecked();
   await expect(materialPanel.getByLabel('知识整理稿', { exact: true })).toHaveValue('');
-  await expect(materialPanel.getByRole('checkbox', { name: /我已核对整理稿/u })).not.toBeChecked();
+  // Deletion clears the summary and collapses its editor. Inspect the retained
+  // input itself so an inaccessible, hidden role is not mistaken for a stale
+  // confirmation. The confirmation must still have been revoked.
+  await expect(
+    materialPanel.locator('.knowledge-summary-editor input[type="checkbox"]'),
+  ).not.toBeChecked();
   await expect(
     materialPanel.getByRole('checkbox', { name: /我同意将所选材料的文字/u }),
   ).not.toBeChecked();

@@ -17,9 +17,9 @@ import { pipeline } from 'node:stream/promises';
 import { createGzip } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
-export const SOURCE_SHA = '6c5df438259483d00bf983bddd072866eee66388';
+export const SOURCE_SHA = '43a70d4591913214b82c79a22b1a7eceed6ca67c';
 export const BASE_SHA = 'fcf4099a3662290410be0ed814b7f75720b94de4';
-export const SOURCE_CI_RUN_ID = 39544780300;
+export const SOURCE_CI_RUN_ID = 39545754179;
 export const SOURCE_CI_ATTEMPT = 1;
 export const RELEASE_FROZEN = true;
 export const BRANCH = 'codex/merchant-guided-workflow-delivery';
