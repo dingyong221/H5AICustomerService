@@ -78,10 +78,13 @@ docker run --detach --rm --pull=never --name "$restore_container" --network none
   --env MYSQL_ROOT_PASSWORD=h5cs-ci-restore-only \
   "$image_id" --skip-networking --skip-log-bin --mysqlx=OFF >/dev/null
 
+# The official entrypoint runs a temporary bootstrap mysqld before it execs
+# the final daemon. Socket SELECT 1 alone can succeed just before that temporary
+# process is stopped. Require PID 1 to be the final mysqld before probing SQL.
 ready=0
 for ((attempt=0; attempt<90; attempt++)); do
   if docker exec "$restore_container" sh -ec \
-    'MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; export MYSQL_PWD; exec mysql --protocol=socket -uroot --batch --skip-column-names --execute="SELECT 1"' \
+    'read -r pid1_comm < /proc/1/comm; test "$pid1_comm" = mysqld; MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; export MYSQL_PWD; exec mysql --protocol=socket -uroot --batch --skip-column-names --execute="SELECT 1"' \
     >/dev/null 2>&1; then
     ready=1
     break
