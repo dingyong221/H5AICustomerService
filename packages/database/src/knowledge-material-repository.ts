@@ -36,6 +36,7 @@ export class MySqlKnowledgeMaterialRepository {
     const [rows] = await connection.execute<RowDataPacket[]>(
       `SELECT a.id FROM assistant a
       JOIN merchant m ON m.id=a.merchant_id JOIN merchant_membership mm ON mm.merchant_id=m.id
+      JOIN merchant_user mu ON mu.id=mm.merchant_user_id AND mu.status='active'
       WHERE a.merchant_id=? AND a.id=? AND mm.merchant_user_id=? AND mm.status='active'
       AND mm.role IN ('owner','admin','editor') AND m.status='active' AND a.status <> 'paused' ${lock ? 'FOR UPDATE' : ''}`,
       [id(merchantId), id(assistantId), id(userId)],
@@ -85,6 +86,55 @@ export class MySqlKnowledgeMaterialRepository {
           createdAt: row.created_at.toISOString(),
         };
       });
+    } finally {
+      await connection.end();
+    }
+  }
+  /** Archive only the uploaded source. Existing draft/release snapshots remain immutable. */
+  async archive(input: {
+    merchantId: string;
+    assistantId: string;
+    userId: string;
+    sourceId: string;
+  }): Promise<void> {
+    const merchant = id(input.merchantId),
+      assistant = id(input.assistantId),
+      source = id(input.sourceId);
+    id(input.userId);
+    const connection = await this.config.openConnection();
+    try {
+      await connection.beginTransaction();
+      await this.#authorize(connection, input.merchantId, input.assistantId, input.userId, true);
+      const [rows] = await connection.execute<RowDataPacket[]>(
+        `SELECT ks.id,ks.status FROM knowledge_source ks
+        WHERE ks.merchant_id=? AND ks.assistant_id=? AND ks.id=? AND ks.type='uploaded_file' FOR UPDATE`,
+        [merchant, assistant, source],
+      );
+      // Missing, foreign-tenant and non-uploaded sources have the same response.
+      if (!rows.length || !['active', 'archived'].includes(String(rows[0]!.status)))
+        throw new KnowledgeMaterialAccessError();
+      if (rows[0]!.status === 'active') {
+        await connection.execute(
+          `UPDATE knowledge_source SET status='archived',updated_at=UTC_TIMESTAMP(6)
+          WHERE merchant_id=? AND assistant_id=? AND id=? AND type='uploaded_file' AND status='active'`,
+          [merchant, assistant, source],
+        );
+        await connection.execute(
+          `INSERT INTO audit_log (id,merchant_id,actor_type,actor_id,action,target_type,target_id,result,request_id,created_at,occurred_at)
+          VALUES (?,?,'merchant_user',?,'knowledge.material_archive','knowledge_source',?,'success',?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`,
+          [
+            randomBytes(16),
+            merchant,
+            input.userId,
+            input.sourceId,
+            randomBytes(16).toString('hex'),
+          ],
+        );
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
     } finally {
       await connection.end();
     }

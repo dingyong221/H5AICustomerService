@@ -67,6 +67,16 @@ export function publicationPolicy(environment: NodeJS.ProcessEnv = process.env):
   };
 }
 
+// A published assistant keeps its persisted URL even when model/readiness policy
+// is temporarily unavailable. This validates only the configured sharing origin,
+// not permission to publish a new version or a claim that service is healthy.
+export function publicSharingOrigin(environment: NodeJS.ProcessEnv = process.env): string | null {
+  return consumerOrigin(
+    environment['CONSUMER_H5_ORIGIN'],
+    environment['NODE_ENV'] === 'production',
+  );
+}
+
 export function publicAssistantUrl(origin: string, publicSlug: string): string | null {
   if (!/^[a-z0-9][a-z0-9-]{0,62}$/u.test(publicSlug)) return null;
   return `${origin}/a/${publicSlug}`;

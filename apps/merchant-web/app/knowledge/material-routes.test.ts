@@ -3,6 +3,7 @@ const mocks = vi.hoisted(() => ({
   member: vi.fn(),
   list: vi.fn(),
   save: vi.fn(),
+  archive: vi.fn(),
   organize: vi.fn(),
   parse: vi.fn(),
   snapshot: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock('@h5cs/database', () => ({
   MySqlKnowledgeMaterialRepository: class {
     list = mocks.list;
     save = mocks.save;
+    archive = mocks.archive;
   },
   MySqlAssistantLifecycleRepository: class {
     findManagementSnapshot = mocks.snapshot;
@@ -41,6 +43,7 @@ vi.mock('./material-http', async (original) => ({
 import { POST as upload } from '../[merchantId]/knowledge/[assistantId]/materials/route';
 import { POST as organize } from '../[merchantId]/knowledge/[assistantId]/materials/organize/route';
 import { POST as apply } from '../[merchantId]/knowledge/[assistantId]/materials/apply/route';
+import { POST as remove } from '../[merchantId]/knowledge/[assistantId]/materials/delete/route';
 import { readMaterialBody } from './material-http';
 
 const merchantId = 'aa'.repeat(16),
@@ -97,6 +100,7 @@ describe('knowledge material HTTP access boundaries', () => {
     mocks.member.mockResolvedValue({ merchantUserId: userId, merchantId });
     mocks.list.mockResolvedValue([material]);
     mocks.save.mockResolvedValue(sourceId);
+    mocks.archive.mockResolvedValue(undefined);
     mocks.parse.mockResolvedValue(material.text);
     mocks.organize.mockResolvedValue(organized);
     mocks.snapshot.mockResolvedValue({
@@ -108,7 +112,7 @@ describe('knowledge material HTTP access boundaries', () => {
   });
   afterEach(() => vi.unstubAllEnvs());
   it('checks origin, membership and CSRF before reading any body or parsing files', async () => {
-    for (const handler of [upload, organize, apply]) {
+    for (const handler of [upload, organize, apply, remove]) {
       const evil = json({}, { Origin: 'https://evil.invalid' });
       const readEvil = vi.spyOn(evil.body!, 'getReader');
       expect((await handler(evil, params)).status).toBe(403);
@@ -116,7 +120,7 @@ describe('knowledge material HTTP access boundaries', () => {
     }
     expect(mocks.member).not.toHaveBeenCalled();
     mocks.member.mockResolvedValue(null);
-    for (const handler of [upload, organize, apply]) {
+    for (const handler of [upload, organize, apply, remove]) {
       const request = json({});
       const read = vi.spyOn(request.body!, 'getReader');
       expect((await handler(request, params)).status).toBe(403);
@@ -129,11 +133,12 @@ describe('knowledge material HTTP access boundaries', () => {
   });
   it('rejects cross-merchant or cross-assistant permissions before parsing or external calls', async () => {
     mocks.list.mockRejectedValue(new mocks.AccessError());
-    for (const handler of [upload, organize, apply])
+    for (const handler of [upload, organize, apply, remove])
       expect((await handler(json({}), params)).status).toBe(403);
     expect(mocks.parse).not.toHaveBeenCalled();
     expect(mocks.organize).not.toHaveBeenCalled();
     expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.archive).not.toHaveBeenCalled();
     expect(mocks.snapshot).not.toHaveBeenCalled();
   });
   it('rejects malformed route scope and unavailable database without reading the payload', async () => {
@@ -167,6 +172,58 @@ describe('knowledge material HTTP access boundaries', () => {
     expect(
       (await organize(json({ consent: true, sourceIds: ['ee'.repeat(16)] }), params)).status,
     ).toBe(404);
+    expect(mocks.organize).not.toHaveBeenCalled();
+  });
+  it('requires an explicit single-source deletion confirmation before writing', async () => {
+    for (const value of [
+      null,
+      {},
+      { sourceId, confirmed: false },
+      { sourceId, confirmed: 'true' },
+      { sourceId: '../foreign', confirmed: true },
+      { sourceId: [sourceId], confirmed: true },
+    ])
+      expect((await remove(json(value), params)).status).toBe(400);
+    expect(
+      (await remove(json({ sourceId, confirmed: true, padding: 'x'.repeat(2000) }), params)).status,
+    ).toBe(400);
+    expect(mocks.archive).not.toHaveBeenCalled();
+  });
+  it('deletes idempotently in server-authorized scope without changing draft, publication or consumer link', async () => {
+    for (let i = 0; i < 2; i++) {
+      const response = await remove(
+        json({ sourceId, confirmed: true, merchantId: 'ff'.repeat(16), userId: 'ff'.repeat(16) }),
+        params,
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(await response.json()).toEqual({ deleted: true, sourceId });
+    }
+    expect(mocks.archive).toHaveBeenCalledTimes(2);
+    expect(mocks.archive).toHaveBeenCalledWith({ merchantId, assistantId, userId, sourceId });
+    expect(mocks.revalidate).toHaveBeenCalledWith(`/${merchantId}/knowledge/${assistantId}`);
+    expect(mocks.saveDraft).not.toHaveBeenCalled();
+    expect(mocks.publish).not.toHaveBeenCalled();
+    expect(mocks.organize).not.toHaveBeenCalled();
+  });
+  it('rejects missing/foreign sources without disclosure and fails closed on an unknown delete result', async () => {
+    mocks.archive.mockRejectedValueOnce(new mocks.AccessError('foreign secret'));
+    const denied = await remove(json({ sourceId, confirmed: true }), params);
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).not.toContain('secret');
+    mocks.archive.mockRejectedValueOnce(new Error('database credential private'));
+    const failed = await remove(json({ sourceId, confirmed: true }), params);
+    expect(failed.status).toBe(503);
+    expect(await failed.text()).toContain('请刷新核对已保存材料');
+    expect(mocks.archive).toHaveBeenCalledTimes(2);
+    expect(mocks.revalidate).not.toHaveBeenCalled();
+  });
+  it('refuses to organize archived sources after deletion instead of sending their old text', async () => {
+    await remove(json({ sourceId, confirmed: true }), params);
+    mocks.list.mockResolvedValue([]);
+    expect((await organize(json({ sourceIds: [sourceId], consent: true }), params)).status).toBe(
+      404,
+    );
     expect(mocks.organize).not.toHaveBeenCalled();
   });
   it('passes only selected source text and server-authorized scope, without payload-supplied context', async () => {

@@ -17,13 +17,16 @@ import { merchantPath } from './tenant-paths';
 import { ShareAssistantLink } from './share-assistant-link';
 import { currentMerchant, currentMerchantCsrfToken } from './account/merchant-actions';
 import { publicApiReady } from './workspace/api-readiness';
-import { ConfirmKnowledgeForm } from './workspace/confirm-knowledge-form';
 import { EditDraftForm } from './workspace/edit-draft-form';
 import { DraftReadinessPanel } from './workspace/draft-readiness-panel';
 import { DraftRevisionNotice } from './workspace/draft-revision-notice';
 import { PreviewChatForm } from './workspace/preview-chat-form';
 import { PublishAssistantForm } from './workspace/publish-assistant-form';
-import { publicationPolicy, publicAssistantUrl } from './workspace/publication-policy';
+import {
+  publicationPolicy,
+  publicAssistantUrl,
+  publicSharingOrigin,
+} from './workspace/publication-policy';
 import { workerReady } from './workspace/worker-readiness';
 import { ImprovementSummaryPanel } from './improvements/improvement-summary';
 import { MaterialManager } from './knowledge/material-manager';
@@ -74,42 +77,48 @@ export async function AssistantView({
       /* Do not confuse unavailable with empty. */
     }
   }
-  let verifiedPublicUrl: string | null = null;
-  if (
-    policy.ready &&
-    workerAvailable &&
-    publicApiAvailable &&
-    assistant.status === 'active' &&
-    assistant.activeReleaseId
-  ) {
-    try {
-      const publicSnapshot = await new MySqlAssistantLifecycleRepository(
-        database.config,
-      ).findPublicSnapshot(assistant.publicSlug);
-      if (publicSnapshot?.releaseRef === assistant.activeReleaseId) {
-        verifiedPublicUrl = publicAssistantUrl(policy.consumerOrigin, assistant.publicSlug);
-      }
-    } catch {
-      verifiedPublicUrl = null;
-    }
-  }
+  const sharingOrigin = publicSharingOrigin();
+  // Only an actually persisted release earns a share link. Its address is not a
+  // transient readiness result: editing or a Worker outage must not erase it.
+  const persistedPublicUrl =
+    assistant.activeReleaseId && sharingOrigin
+      ? publicAssistantUrl(sharingOrigin, assistant.publicSlug)
+      : null;
   const publishReady =
-    policy.ready &&
-    assistant.knowledgeConfirmed &&
-    assistant.status !== 'paused' &&
-    workerAvailable &&
-    publicApiAvailable;
+    policy.ready && assistant.status !== 'paused' && workerAvailable && publicApiAvailable;
   const publishReason = !policy.ready
     ? policy.reason
-    : !assistant.knowledgeConfirmed
-      ? '请先确认当前修订的业务资料。'
-      : assistant.status === 'paused'
-        ? '客服已暂停，需先恢复服务。'
-        : !workerAvailable
-          ? 'AI 对话服务尚未就绪，请稍后再试。'
-          : !publicApiAvailable
-            ? '公开会话服务尚未就绪，请稍后再试。'
-            : null;
+    : assistant.status === 'paused'
+      ? '客服已暂停，需先恢复服务。'
+      : !workerAvailable
+        ? 'AI 对话服务尚未就绪，请稍后再试。'
+        : !publicApiAvailable
+          ? '公开会话服务尚未就绪，请稍后再试。'
+          : null;
+  const publishPanel = (
+    <section className="merchant-account-card assistant-detail-card" id="release">
+      <h2>确认资料并发布</h2>
+      <p>
+        {assistant.activeReleaseId
+          ? '已有已发布版本。发布当前修订后，新咨询使用新版，原固定链接不变。'
+          : '当前尚未发布。勾选下方确认并提交，会实际发布客服并生成可分享的固定消费者链接。'}
+        上传材料、保存草稿或历史资料确认本身不代表已经发布。
+      </p>
+      <p>仅发布上方已保存的草稿修订。尚未保存的编辑内容不会发布，请先保存草稿。</p>
+      <PublishAssistantForm
+        key={`${assistantId}:${assistant.draftRevision}`}
+        merchantId={merchantId}
+        assistantId={assistantId}
+        draftRevision={assistant.draftRevision}
+        csrfToken={csrfToken}
+        idempotencyKey={randomUUID()}
+        ready={publishReady}
+        reason={publishReason}
+        consumerOrigin={sharingOrigin}
+        hasPublishedLink={persistedPublicUrl !== null}
+      />
+    </section>
+  );
   const facts = [
     ['细分行业', assistant.draft.industry],
     ['业务范围', assistant.draft.businessScope],
@@ -123,7 +132,9 @@ export async function AssistantView({
   return (
     <PageShell
       aside={<Link href={merchantPath(merchantId)}>返回商家工作台</Link>}
-      description={<p>核对本次录入的真实资料。确认只建立知识依据，不会自动向消费者开放客服。</p>}
+      description={
+        <p>核对真实业务资料后，勾选“确认资料并发布”，即可实际发布并获得固定消费者链接。</p>
+      }
       eyebrow="Assistant Draft"
       title={
         section === 'drafts'
@@ -143,7 +154,34 @@ export async function AssistantView({
       </div>
       <p>
         <Link href={`${merchantPath(merchantId, 'help')}#${section}`}>查看本页操作帮助</Link>
+        {section !== 'drafts' ? (
+          <>
+            {' '}
+            · <a href="#release">前往确认资料并发布</a>
+          </>
+        ) : null}
       </p>
+      {assistant.activeReleaseId ? (
+        <section
+          aria-labelledby="consumer-link-title"
+          className="merchant-account-card assistant-detail-card"
+          id="consumer-link"
+          tabIndex={-1}
+        >
+          <h2 id="consumer-link-title">固定消费者链接</h2>
+          <p>此客服已有实际发布版本。消费者使用同一地址，发布新版或编辑草稿不会更换链接。</p>
+          {persistedPublicUrl && sharingOrigin ? (
+            <ShareAssistantLink expectedOrigin={sharingOrigin} href={persistedPublicUrl} />
+          ) : (
+            <p role="alert">已发布版本保留，但消费者链接的正式域名配置暂不可用，请联系运营核对。</p>
+          )}
+          {!publishReady ? (
+            <p role="status">固定地址仍保留，当前服务暂不可用，建议恢复后再分享。{publishReason}</p>
+          ) : (
+            <p>可复制上方链接或下载二维码发给消费者；请勿发送商家后台管理地址。</p>
+          )}
+        </section>
+      ) : null}
       <section className="merchant-account-card assistant-detail-card" id="draft">
         <div className="section-heading">
           <h2>草稿修订 {assistant.draftRevision}</h2>
@@ -175,6 +213,7 @@ export async function AssistantView({
           materials={materials}
         />
       ) : null}
+      {section === 'knowledge' ? publishPanel : null}
       {section !== 'publish' && (
         <section className="merchant-account-card assistant-detail-card">
           <h2>修订草稿</h2>
@@ -190,21 +229,8 @@ export async function AssistantView({
           />
         </section>
       )}
-      {section === 'knowledge' && (
-        <section className="merchant-account-card assistant-detail-card" id="knowledge">
-          <h2>商家确认</h2>
-          <p>只有经你确认的资料才会进入正式版本。价格、优惠、库存与承诺不得由模型自行补造。</p>
-          <ConfirmKnowledgeForm
-            key={`${assistantId}:${assistant.draftRevision}`}
-            merchantId={merchantId}
-            assistantId={assistantId}
-            draftRevision={assistant.draftRevision}
-            alreadyConfirmed={assistant.knowledgeConfirmed}
-          />
-        </section>
-      )}
       {section === 'publish' && (
-        <section className="merchant-account-card assistant-detail-card" id="release">
+        <section className="merchant-account-card assistant-detail-card" id="preview">
           <h2>发布前试聊</h2>
           <p>用当前未发布草稿测试回答，核对服务范围、价格和资料不足时的回复。</p>
           <PreviewChatForm
@@ -216,53 +242,7 @@ export async function AssistantView({
           />
         </section>
       )}
-      {section === 'publish' && (
-        <section className="merchant-account-card assistant-detail-card">
-          <h2>发布与消费者链接</h2>
-          {!assistant.knowledgeConfirmed ? (
-            <div className="assistant-detail-card" id="knowledge-confirmation">
-              <h3>先确认当前修订的业务资料</h3>
-              <p>
-                发布前请逐项核对上方草稿修订 {assistant.draftRevision}{' '}
-                的资料。确认后会更新本页的发布条件， 不会自动向消费者开放客服。
-              </p>
-              <ConfirmKnowledgeForm
-                key={`${assistantId}:${assistant.draftRevision}`}
-                merchantId={merchantId}
-                assistantId={assistantId}
-                draftRevision={assistant.draftRevision}
-                alreadyConfirmed={false}
-              />
-            </div>
-          ) : null}
-          {assistant.activeReleaseId ? (
-            <div>
-              <p>
-                已有线上版本：{assistant.activeReleaseId}。
-                {!verifiedPublicUrl ? ' 当前公开服务未通过运行态校验，请勿分享链接。' : null}
-              </p>
-              {verifiedPublicUrl ? (
-                <ShareAssistantLink
-                  expectedOrigin={policy.ready ? policy.consumerOrigin : ''}
-                  href={verifiedPublicUrl}
-                />
-              ) : null}
-            </div>
-          ) : (
-            <p>尚未发布。确认资料不会自动开放消费者咨询。</p>
-          )}
-          <PublishAssistantForm
-            merchantId={merchantId}
-            assistantId={assistantId}
-            draftRevision={assistant.draftRevision}
-            csrfToken={csrfToken}
-            idempotencyKey={randomUUID()}
-            ready={publishReady}
-            reason={publishReason}
-            consumerOrigin={policy.ready ? policy.consumerOrigin : null}
-          />
-        </section>
-      )}
+      {section === 'publish' ? publishPanel : null}
       <ImprovementSummaryPanel
         merchantId={merchantId}
         merchantUserId={session.merchantUserId}

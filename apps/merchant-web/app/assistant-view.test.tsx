@@ -5,6 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   snapshot: vi.fn(),
   materials: vi.fn(),
+  worker: vi.fn(),
+  api: vi.fn(),
+  policy: vi.fn(),
+  sharingOrigin: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({
@@ -39,24 +43,35 @@ vi.mock('./account/merchant-actions', () => ({
   currentMerchantCsrfToken: async () => 'test-csrf',
 }));
 vi.mock('./workspace/publication-policy', () => ({
-  publicationPolicy: () => ({
-    ready: true,
-    consumerOrigin: 'https://example.test',
-    promptTemplateVersion: 'p1',
-    retrievalPolicyVersion: 'r1',
-    modelPolicyVersion: 'm1',
-  }),
-  publicAssistantUrl: () => null,
+  publicationPolicy: mocks.policy,
+  publicSharingOrigin: mocks.sharingOrigin,
+  publicAssistantUrl: (origin: string, slug: string) => `${origin}/a/${slug}`,
 }));
-vi.mock('./workspace/worker-readiness', () => ({ workerReady: async () => true }));
-vi.mock('./workspace/api-readiness', () => ({ publicApiReady: async () => true }));
+vi.mock('./workspace/worker-readiness', () => ({ workerReady: mocks.worker }));
+vi.mock('./workspace/api-readiness', () => ({ publicApiReady: mocks.api }));
 vi.mock('./workspace/confirm-knowledge-form', () => ({
   ConfirmKnowledgeForm: ({ draftRevision }: { draftRevision: number }) =>
     React.createElement('form', { 'data-confirm-revision': draftRevision }),
 }));
 vi.mock('./workspace/publish-assistant-form', () => ({
-  PublishAssistantForm: ({ ready, reason }: { ready: boolean; reason: string | null }) =>
-    React.createElement('form', { 'data-publish-ready': ready, 'data-reason': reason }),
+  PublishAssistantForm: ({
+    ready,
+    reason,
+    draftRevision,
+  }: {
+    ready: boolean;
+    reason: string | null;
+    draftRevision: number;
+  }) =>
+    React.createElement('form', {
+      'data-publish-ready': ready,
+      'data-reason': reason,
+      'data-publish-revision': draftRevision,
+    }),
+}));
+vi.mock('./share-assistant-link', () => ({
+  ShareAssistantLink: ({ href }: { href: string }) =>
+    React.createElement('a', { 'data-fixed-link': true, href }, '复制消费者链接'),
 }));
 vi.mock('./workspace/edit-draft-form', () => ({ EditDraftForm: () => null }));
 vi.mock('./workspace/draft-readiness-panel', () => ({ DraftReadinessPanel: () => null }));
@@ -97,20 +112,32 @@ describe('assistant publication flow', () => {
     vi.stubGlobal('React', React);
     mocks.snapshot.mockResolvedValue(assistant);
     mocks.materials.mockResolvedValue([]);
+    mocks.worker.mockResolvedValue(true);
+    mocks.api.mockResolvedValue(true);
+    mocks.policy.mockReturnValue({
+      ready: true,
+      consumerOrigin: 'https://example.test',
+      promptTemplateVersion: 'p1',
+      retrievalPolicyVersion: 'r1',
+      modelPolicyVersion: 'm1',
+    });
+    mocks.sharingOrigin.mockReturnValue('https://example.test');
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it('offers confirmation for the exact unconfirmed revision on the publish page', async () => {
+  it('offers one combined publication entry for the exact unconfirmed revision', async () => {
     const html = renderToStaticMarkup(
       await AssistantView({ merchantId, assistantId, section: 'publish' }),
     );
-    expect(html).toContain('先确认当前修订的业务资料');
-    expect(html).toContain('data-confirm-revision="3"');
-    expect(html).toContain('data-publish-ready="false"');
-    expect(html).toContain('请先确认当前修订的业务资料');
+    expect(html).toContain('确认资料并发布');
+    expect(html).not.toContain('data-confirm-revision');
+    expect(html).toContain('data-publish-revision="3"');
+    expect(html).toContain('data-publish-ready="true"');
+    expect(html).not.toContain('data-fixed-link');
+    expect(html.match(/data-publish-ready=/gu)).toHaveLength(1);
   });
 
-  it('removes the confirmation step and unlocks publishing after confirmation', async () => {
+  it('keeps confirmed-but-unpublished drafts publishable without another disabled confirmation step', async () => {
     mocks.snapshot.mockResolvedValue({ ...assistant, knowledgeConfirmed: true });
     const html = renderToStaticMarkup(
       await AssistantView({ merchantId, assistantId, section: 'publish' }),
@@ -119,15 +146,15 @@ describe('assistant publication flow', () => {
     expect(html).toContain('data-publish-ready="true"');
   });
 
-  it('retains the scoped upload manager and confirmation on the knowledge page', async () => {
+  it('retains the scoped upload manager and the same single publication entry on knowledge', async () => {
     const html = renderToStaticMarkup(
       await AssistantView({ merchantId, assistantId, section: 'knowledge' }),
     );
     expect(mocks.materials).toHaveBeenCalledWith(merchantId, assistantId, 'cc'.repeat(16));
     expect(html).toContain(`data-materials-assistant="${assistantId}"`);
-    expect(html).toContain('data-confirm-revision="3"');
-    expect(html).not.toContain('先确认当前修订的业务资料');
-    expect(html).not.toContain('data-publish-ready');
+    expect(html).not.toContain('data-confirm-revision');
+    expect(html).toContain('data-publish-revision="3"');
+    expect(html.match(/data-publish-ready=/gu)).toHaveLength(1);
   });
 
   it('uses the latest revision when editing invalidates an earlier confirmation', async () => {
@@ -135,8 +162,62 @@ describe('assistant publication flow', () => {
     const html = renderToStaticMarkup(
       await AssistantView({ merchantId, assistantId, section: 'publish' }),
     );
-    expect(html).toContain('data-confirm-revision="4"');
-    expect(html).not.toContain('data-confirm-revision="3"');
-    expect(html).toContain('data-publish-ready="false"');
+    expect(html).toContain('data-publish-revision="4"');
+    expect(html).not.toContain('data-publish-revision="3"');
+    expect(html).toContain('data-publish-ready="true"');
+  });
+
+  it.each(['drafts', 'knowledge', 'publish'] as const)(
+    'retains the same persisted link on %s, refresh and a newer draft',
+    async (section) => {
+      mocks.snapshot.mockResolvedValue({ ...assistant, activeReleaseId: 'dd'.repeat(16) });
+      const first = renderToStaticMarkup(await AssistantView({ merchantId, assistantId, section }));
+      mocks.snapshot.mockResolvedValue({
+        ...assistant,
+        activeReleaseId: 'ee'.repeat(16),
+        draftRevision: 4,
+      });
+      const next = renderToStaticMarkup(await AssistantView({ merchantId, assistantId, section }));
+      for (const html of [first, next]) {
+        expect(html).toContain('固定消费者链接');
+        expect(html).toContain('href="https://example.test/a/test-assistant"');
+      }
+    },
+  );
+  it.each(['worker', 'api', 'policy', 'paused'])(
+    'does not erase an actually published URL during temporary %s unavailability',
+    async (unavailable) => {
+      mocks.snapshot.mockResolvedValue({
+        ...assistant,
+        activeReleaseId: 'dd'.repeat(16),
+        ...(unavailable === 'paused' ? { status: 'paused' } : {}),
+      });
+      if (unavailable === 'worker') mocks.worker.mockResolvedValue(false);
+      if (unavailable === 'api') mocks.api.mockResolvedValue(false);
+      if (unavailable === 'policy')
+        mocks.policy.mockReturnValue({ ready: false, reason: '模型暂不可用' });
+      const html = renderToStaticMarkup(
+        await AssistantView({ merchantId, assistantId, section: 'knowledge' }),
+      );
+      expect(html).toContain('href="https://example.test/a/test-assistant"');
+      expect(html).toContain('固定地址仍保留');
+      expect(html).toContain('data-publish-ready="false"');
+    },
+  );
+  it('never invents a published URL before a persisted active release exists', async () => {
+    const html = renderToStaticMarkup(
+      await AssistantView({ merchantId, assistantId, section: 'publish' }),
+    );
+    expect(html).not.toContain('href="https://example.test/a/test-assistant"');
+    expect(html).toContain('当前尚未发布');
+  });
+  it('does not substitute an unsafe/unconfigured origin when a published URL cannot be rendered', async () => {
+    mocks.snapshot.mockResolvedValue({ ...assistant, activeReleaseId: 'dd'.repeat(16) });
+    mocks.sharingOrigin.mockReturnValue(null);
+    const html = renderToStaticMarkup(
+      await AssistantView({ merchantId, assistantId, section: 'drafts' }),
+    );
+    expect(html).toContain('正式域名配置暂不可用');
+    expect(html).not.toContain('data-fixed-link');
   });
 });
