@@ -71,11 +71,11 @@ const jobs = () => ({
   })),
 });
 
-test('fixed 24-path source includes DB extension and dependency fix; only merchant runtime is rebuilt', () => {
-  assert.equal(SOURCE_SHA, '34f3fe0ea83c7d5d691945f21530b6b78000e693');
+test('fixed 27-path source includes DB extension, dependency fix and CI restore tooling; only merchant runtime is rebuilt', () => {
+  assert.equal(SOURCE_SHA, '1fccc6ef067a6f489f4f5943946273c553d577e4');
   assert.equal(BASE_SHA, 'ecee2c9d07a6691d513d54ac3519d6016812548e');
   assert.notEqual(SOURCE_SHA, BASE_SHA);
-  assert.equal(APPLICATION_PATHS.length, 24);
+  assert.equal(APPLICATION_PATHS.length, 27);
   assert.deepEqual([...APPLICATION_PATHS].sort(), [
     'apps/api/integration/knowledge-material-delete.integration.ts',
     'apps/api/package.json',
@@ -95,10 +95,13 @@ test('fixed 24-path source includes DB extension and dependency fix; only mercha
     'apps/merchant-web/app/workspace/publish-actions.ts',
     'apps/merchant-web/app/workspace/publish-assistant-form.test.ts',
     'apps/merchant-web/app/workspace/publish-assistant-form.tsx',
+    'package.json',
     'packages/database/src/knowledge-material-repository.ts',
     'packages/database/test/knowledge-material-repository.test.ts',
     'pnpm-lock.yaml',
     'pnpm-workspace.yaml',
+    'scripts/quality/verify-ci-mysql-restore.sh',
+    'scripts/quality/verify-ci-mysql-restore.test.mjs',
     'tests/e2e/fake-model.mjs',
     'tests/e2e/merchant-to-consumer.spec.ts',
   ]);
@@ -116,7 +119,7 @@ test('fixed 24-path source includes DB extension and dependency fix; only mercha
   );
   assert.equal(
     APPLICATION_PATHS.filter((path) => !path.startsWith('apps/merchant-web/')).length,
-    8,
+    11,
   );
   assert.equal(TRANSPORT_PATHS.length, 3);
   exactPaths([...APPLICATION_PATHS].reverse(), APPLICATION_PATHS);

@@ -394,7 +394,7 @@ jobs:
       - name: Check out the exact CI-reviewed application source, not the transport tree
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 34f3fe0ea83c7d5d691945f21530b6b78000e693
+          ref: 1fccc6ef067a6f489f4f5943946273c553d577e4
           fetch-depth: 0
       - name: Require this exact source CI and all four ordinary jobs to succeed
         env:
@@ -413,7 +413,7 @@ jobs:
             --build-arg NEXT_PUBLIC_MERCHANT_BASE_PATH=/console \
             --build-arg NEXT_PUBLIC_OPS_BASE_PATH=/ops \
             --label org.opencontainers.image.source=https://github.com/dingyong221/H5AICustomerService \
-            --label org.opencontainers.image.revision=34f3fe0ea83c7d5d691945f21530b6b78000e693 \
+            --label org.opencontainers.image.revision=1fccc6ef067a6f489f4f5943946273c553d577e4 \
             --label org.opencontainers.image.h5cs.web-path-mode=same_domain \
             --tag h5cs-merchant-web:ci .
       - name: Prove non-root read-only noexec startup and actual PDF extraction
@@ -427,7 +427,7 @@ jobs:
       - name: Upload only this single-image bundle for one day
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: offline-merchant-34f3fe0ea83c7d5d691945f21530b6b78000e693
+          name: offline-merchant-1fccc6ef067a6f489f4f5943946273c553d577e4
           path: ${{ steps.export.outputs.artifact_directory }}
           compression-level: 0
           retention-days: 1

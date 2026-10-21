@@ -17,9 +17,9 @@ import { pipeline } from 'node:stream/promises';
 import { createGzip } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
-export const SOURCE_SHA = '34f3fe0ea83c7d5d691945f21530b6b78000e693';
+export const SOURCE_SHA = '1fccc6ef067a6f489f4f5943946273c553d577e4';
 export const BASE_SHA = 'ecee2c9d07a6691d513d54ac3519d6016812548e';
-export const SOURCE_CI_RUN_ID = 39519490791;
+export const SOURCE_CI_RUN_ID = 39520708850;
 export const SOURCE_CI_ATTEMPT = 1;
 export const BRANCH = 'codex/material-delete-publish-delivery';
 export const APPLICATION_PATHS = Object.freeze([
@@ -41,10 +41,13 @@ export const APPLICATION_PATHS = Object.freeze([
   'apps/merchant-web/app/workspace/publish-actions.ts',
   'apps/merchant-web/app/workspace/publish-assistant-form.test.ts',
   'apps/merchant-web/app/workspace/publish-assistant-form.tsx',
+  'package.json',
   'packages/database/src/knowledge-material-repository.ts',
   'packages/database/test/knowledge-material-repository.test.ts',
   'pnpm-lock.yaml',
   'pnpm-workspace.yaml',
+  'scripts/quality/verify-ci-mysql-restore.sh',
+  'scripts/quality/verify-ci-mysql-restore.test.mjs',
   'tests/e2e/fake-model.mjs',
   'tests/e2e/merchant-to-consumer.spec.ts',
 ]);
@@ -95,17 +98,21 @@ export function exactPaths(actual, expected) {
 export function validateSourceCompatibility(actual) {
   const paths = exactPaths(actual, APPLICATION_PATHS);
   // The reviewed source is NOT merchant-directory-only: it adds the material
-  // repository method, tests and reviewed security dependency manifest/lock updates.
+  // repository method, tests, reviewed dependency manifest/lock updates and CI-only
+  // restore-drill readiness tooling. These tooling changes are NOT a migration.
   // No schema, shared contract or API/worker/other web runtime code changes are
   // admitted. Only merchant-web is rebuilt; the API SDK update is NOT deployed
   // by this artifact. WorkBuddy remains disabled on the unchanged API runtime.
   const nonMerchant = [
     'apps/api/integration/knowledge-material-delete.integration.ts',
     'apps/api/package.json',
+    'package.json',
     'packages/database/src/knowledge-material-repository.ts',
     'packages/database/test/knowledge-material-repository.test.ts',
     'pnpm-lock.yaml',
     'pnpm-workspace.yaml',
+    'scripts/quality/verify-ci-mysql-restore.sh',
+    'scripts/quality/verify-ci-mysql-restore.test.mjs',
     'tests/e2e/fake-model.mjs',
     'tests/e2e/merchant-to-consumer.spec.ts',
   ];
