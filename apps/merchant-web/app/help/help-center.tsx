@@ -34,7 +34,7 @@ export function HelpCenter({ merchantId }: { merchantId: string }) {
       <section className="help-overview">
         <h2>让顾客用上 AI 客服 先走这四步</h2>
         <ol className="help-quick-steps">
-          {['创建并保存草稿', '确认知识资料', '试聊并发布', '分享链接给顾客'].map((step, index) => (
+          {['基础资料', '知识补充（上传文件）', '效果试聊', '发布分享'].map((step, index) => (
             <li key={step}>
               <span>{index + 1}</span>
               {step}

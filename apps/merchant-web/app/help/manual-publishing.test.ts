@@ -2,6 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { helpTopics, manualMarkdown, manualUpdated, searchHelp } from './manual';
 
 describe('material deletion and permanent consumer-link help', () => {
+  it('explains the four task pages and puts file upload inside the normal publishing journey', () => {
+    const start = helpTopics.find((entry) => entry.id === 'start')!;
+    expect(start.summary).toContain('基础资料 → 知识补充 → 效果试聊 → 发布分享');
+    expect(start.steps).toHaveLength(4);
+    expect(start.steps[1]).toContain('上传文件');
+    expect(helpTopics.find((entry) => entry.id === 'preview')?.section).toBe('preview');
+    const publish = helpTopics.find((entry) => entry.id === 'publish')!;
+    expect(publish.steps.join('\n')).not.toContain('知识库与测试发布页均提供确认并发布入口');
+  });
   it('documents the explicit combined publish action instead of the old dead end', () => {
     expect(manualUpdated).toBe('2026-10-21');
     for (const id of ['start', 'knowledge', 'publish']) {

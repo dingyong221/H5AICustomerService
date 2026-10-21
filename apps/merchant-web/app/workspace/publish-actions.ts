@@ -144,11 +144,12 @@ async function publishCurrentDraft(
       },
       now,
     });
-    for (const section of ['drafts', 'knowledge', 'publish'])
+    for (const section of ['drafts', 'knowledge', 'preview', 'publish'])
       revalidatePath(`/${merchantId}/${section}/${assistantId}`);
     revalidatePath(`/${merchantId}`);
     revalidatePath(`/${merchantId}/drafts`);
     revalidatePath(`/${merchantId}/knowledge`);
+    revalidatePath(`/${merchantId}/preview`);
     revalidatePath(`/${merchantId}/publish`);
     revalidatePath(`/${merchantId}/improvements`);
     revalidatePath('/[merchantId]/improvements/[improvementId]', 'page');

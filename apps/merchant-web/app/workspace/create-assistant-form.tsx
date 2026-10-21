@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -10,6 +10,8 @@ import type { CreateAssistantState } from './workspace-actions';
 import { parseAssistantDraftForm } from './draft-form';
 import { retailDefaultDraft, retailTemplateCode } from './retail-preset';
 import { DraftFields, type DraftFieldValues } from '../writing/draft-fields';
+import { merchantPath } from '../tenant-paths';
+import { useUnsavedForm } from './use-unsaved-form';
 
 const subscribe = () => () => {};
 const clientReady = () => true;
@@ -44,6 +46,11 @@ export function CreateAssistantForm({
   });
   const [validationError, setValidationError] = useState<string | null>(null);
   const [humanContact, setHumanContact] = useState('');
+  const humanContactId = useId();
+  const signature = JSON.stringify({ ...values, humanContact });
+  const [initialSignature] = useState(signature);
+  const permitNavigation = useUnsavedForm(signature !== initialSignature);
+  const navigated = useRef(false);
   const router = useRouter();
   const hydrated = useSyncExternalStore(subscribe, clientReady, serverReady);
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateId);
@@ -75,6 +82,15 @@ export function CreateAssistantForm({
           ? `尚未创建客服，请填写：${missing.join('、')}。`
           : '尚未创建客服，请检查资料长度或特殊字符。',
       );
+      const name = missing.length
+        ? Object.entries(labels).find(([, label]) => missing.includes(label))?.[0]
+        : undefined;
+      const invalid = name
+        ? event.currentTarget.querySelector<HTMLElement>(`[name="${name}"]`)
+        : null;
+      const group = invalid?.closest('details');
+      if (group) group.open = true;
+      invalid?.focus();
       return;
     }
     setValidationError(null);
@@ -113,8 +129,11 @@ export function CreateAssistantForm({
     }
   }
   useEffect(() => {
-    if (state.created) router.refresh();
-  }, [state.created, router]);
+    if (!state.created || navigated.current) return;
+    navigated.current = true;
+    permitNavigation();
+    router.push(merchantPath(merchantId, 'knowledge', state.created.assistantId));
+  }, [state.created, merchantId, router, permitNavigation]);
   return (
     <form
       noValidate
@@ -122,16 +141,15 @@ export function CreateAssistantForm({
       className="assistant-create-form"
       onChange={() => setValidationError(null)}
     >
-      <p>填好资料并创建后，页面会显示客服入口，可继续编辑、试聊和发布。</p>
-      <p>
-        请填写以下 8
-        项客服资料；没有价格或优惠时请明确写“需联系商家确认”或“暂无优惠”，不要编造。人工联系方式可选。创建只保存草稿，确认资料并发布后才能提供消费者链接。
+      <p className="draft-form-group__hint">
+        创建后进入知识补充，可上传文件。此时只保存草稿，最后一步才正式发布。
       </p>
       <input name="merchantId" type="hidden" value={merchantId} />
       <input name="idempotencyKey" type="hidden" value={idempotencyKey} />
       <label>
         行业资料引导（可选）
         <select
+          disabled={pending || state.created !== null}
           onChange={(event) => {
             const selected = templates.find((template) => template.id === event.target.value);
             setSelectedTemplateId(event.target.value);
@@ -150,8 +168,8 @@ export function CreateAssistantForm({
       </label>
       {!templatesReady ? <p role="status">行业引导暂不可用，仍可手动填写业务资料。</p> : null}
       {selectedTemplate ? (
-        <aside className="assistant-industry-guide">
-          <h3>{selectedTemplate.displayName}：资料准备提示</h3>
+        <details className="assistant-industry-guide">
+          <summary>{selectedTemplate.displayName}：查看资料准备提示</summary>
           <p>{selectedTemplate.referenceNotes}</p>
           <strong>建议提供的产品/服务资料</strong>
           <ul>
@@ -172,40 +190,43 @@ export function CreateAssistantForm({
           <p>
             电商零售预设已填入通用知识。请核对是否适用，并补充你的实际商品、价格和交易规则；其他行业模板仅提供资料收集提示。
           </p>
-        </aside>
+        </details>
       ) : null}
-      <DraftFields
-        merchantId={merchantId}
-        csrfToken={csrfToken}
-        values={values}
-        includeName
-        onChange={(field, value) => setValues((previous) => ({ ...previous, [field]: value }))}
-      />
-      <label>
-        人工联系说明（可选）
-        <textarea
-          name="humanContact"
-          maxLength={500}
-          rows={3}
-          value={humanContact}
-          onChange={(event) => setHumanContact(event.target.value)}
-          placeholder="例如：工作日 9:00—18:00，微信号 shop_service 或电话 010-12345678。请填写你真实可用的渠道。"
+      <fieldset disabled={pending || state.created !== null} className="draft-form-fields">
+        <DraftFields
+          merchantId={merchantId}
+          csrfToken={csrfToken}
+          values={values}
+          includeName
+          onChange={(field, value) => setValues((previous) => ({ ...previous, [field]: value }))}
+          responseFields={
+            <div className="draft-field">
+              <label htmlFor={humanContactId}>人工联系说明（可选）</label>
+              <textarea
+                id={humanContactId}
+                name="humanContact"
+                maxLength={500}
+                rows={3}
+                value={humanContact}
+                onChange={(event) => setHumanContact(event.target.value)}
+                placeholder="填写真实联系方式和服务时间；此处不实时转接人工"
+              />
+              <p className="draft-form-group__hint">
+                最多 500 字，发布后消费者可见。不要填写密码或敏感资料。
+              </p>
+            </div>
+          }
         />
-      </label>
-      <p>
-        最多 500 字纯文本，不支持
-        HTML。发布后消费者可查看；本平台不会实时转接人工，不要填写密码或私人敏感资料。
-      </p>
+      </fieldset>
       {validationError || state.error ? (
         <p role="alert">{validationError ?? state.error} 当前填写内容不会清空。</p>
       ) : null}
       {state.created ? (
         <div className="assistant-created-result" role="status">
           <strong>已创建客服草稿「{state.created.displayName}」。</strong>
-          <p>已保存至商家后台，客服编号：{state.created.assistantId}。当前尚未发布给消费者。</p>
-          <p>下一步：核对业务资料，试聊后发布给消费者。</p>
-          <Link href={`/${merchantId}/drafts/${state.created.assistantId}`}>
-            进入客服配置、试聊和发布
+          <p>正在进入知识补充；当前尚未发布。</p>
+          <Link href={merchantPath(merchantId, 'knowledge', state.created.assistantId)}>
+            下一步：上传与补充知识
           </Link>
         </div>
       ) : null}

@@ -54,7 +54,7 @@ export async function POST(
       draft: { ...current.draft, materialsSummary: combined },
       now: new Date(),
     });
-    for (const section of ['drafts', 'knowledge', 'publish']) {
+    for (const section of ['drafts', 'knowledge', 'preview', 'publish']) {
       revalidatePath(`/${scope.merchantId}/${section}`);
       revalidatePath(`/${scope.merchantId}/${section}/${scope.assistantId}`);
     }

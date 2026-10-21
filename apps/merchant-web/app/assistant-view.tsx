@@ -13,6 +13,12 @@ import { toAssistantId, toMerchantId } from '@h5cs/domain';
 import { PageShell, StatusBadge } from '@h5cs/ui';
 
 import { merchantPath } from './tenant-paths';
+import {
+  AssistantWorkflowActions,
+  AssistantWorkflowSteps,
+  assistantWorkflowSteps,
+  type AssistantWorkflowSection,
+} from './assistant-workflow';
 
 import { ShareAssistantLink } from './share-assistant-link';
 import { currentMerchant, currentMerchantCsrfToken } from './account/merchant-actions';
@@ -28,7 +34,6 @@ import {
   publicSharingOrigin,
 } from './workspace/publication-policy';
 import { workerReady } from './workspace/worker-readiness';
-import { ImprovementSummaryPanel } from './improvements/improvement-summary';
 import { MaterialManager } from './knowledge/material-manager';
 
 export const dynamic = 'force-dynamic';
@@ -40,7 +45,7 @@ export async function AssistantView({
 }: {
   merchantId: string;
   assistantId: string;
-  section: 'drafts' | 'knowledge' | 'publish';
+  section: AssistantWorkflowSection;
 }) {
   if (!/^[0-9a-f]{32}$/u.test(merchantId) || !/^[0-9a-f]{32}$/u.test(assistantId)) notFound();
   const session = await currentMerchant(merchantId);
@@ -101,10 +106,8 @@ export async function AssistantView({
       <p>
         {assistant.activeReleaseId
           ? '已有已发布版本。发布当前修订后，新咨询使用新版，原固定链接不变。'
-          : '当前尚未发布。勾选下方确认并提交，会实际发布客服并生成可分享的固定消费者链接。'}
-        上传材料、保存草稿或历史资料确认本身不代表已经发布。
+          : '当前尚未发布。确认并发布后，即可获得发给消费者的固定链接。'}
       </p>
-      <p>仅发布上方已保存的草稿修订。尚未保存的编辑内容不会发布，请先保存草稿。</p>
       <PublishAssistantForm
         key={`${assistantId}:${assistant.draftRevision}`}
         merchantId={merchantId}
@@ -129,125 +132,186 @@ export async function AssistantView({
     ['资料不足时的回复', assistant.draft.insufficientInfoMessage],
     ['人工联系说明', assistant.draft.humanContact || '尚未提供。此处不实时转接人工。'],
   ] as const;
+  const step = assistantWorkflowSteps.find((item) => item.section === section)!;
   return (
-    <PageShell
-      aside={<Link href={merchantPath(merchantId)}>返回商家工作台</Link>}
-      description={
-        <p>核对真实业务资料后，勾选“确认资料并发布”，即可实际发布并获得固定消费者链接。</p>
-      }
-      eyebrow="Assistant Draft"
-      title={
-        section === 'drafts'
-          ? assistant.displayName
-          : section === 'knowledge'
-            ? '知识库'
-            : '测试与发布'
-      }
-    >
-      <p>
-        当前客服：{assistant.displayName} · 商家编号：{merchantId}
-      </p>
-      <div className="tenant-feature-grid">
-        <Link href={merchantPath(merchantId, 'drafts', assistantId)}>客服草稿</Link>
-        <Link href={merchantPath(merchantId, 'knowledge', assistantId)}>知识库</Link>
-        <Link href={merchantPath(merchantId, 'publish', assistantId)}>测试与发布</Link>
-      </div>
-      <p>
-        <Link href={`${merchantPath(merchantId, 'help')}#${section}`}>查看本页操作帮助</Link>
-        {section !== 'drafts' ? (
-          <>
-            {' '}
-            · <a href="#release">前往确认资料并发布</a>
-          </>
-        ) : null}
-      </p>
-      {assistant.activeReleaseId ? (
-        <section
-          aria-labelledby="consumer-link-title"
-          className="merchant-account-card assistant-detail-card"
-          id="consumer-link"
-          tabIndex={-1}
-        >
-          <h2 id="consumer-link-title">固定消费者链接</h2>
-          <p>此客服已有实际发布版本。消费者使用同一地址，发布新版或编辑草稿不会更换链接。</p>
-          {persistedPublicUrl && sharingOrigin ? (
-            <ShareAssistantLink expectedOrigin={sharingOrigin} href={persistedPublicUrl} />
-          ) : (
-            <p role="alert">已发布版本保留，但消费者链接的正式域名配置暂不可用，请联系运营核对。</p>
-          )}
-          {!publishReady ? (
-            <p role="status">固定地址仍保留，当前服务暂不可用，建议恢复后再分享。{publishReason}</p>
-          ) : (
-            <p>可复制上方链接或下载二维码发给消费者；请勿发送商家后台管理地址。</p>
-          )}
-        </section>
-      ) : null}
-      <section className="merchant-account-card assistant-detail-card" id="draft">
-        <div className="section-heading">
-          <h2>草稿修订 {assistant.draftRevision}</h2>
-          <StatusBadge tone={assistant.knowledgeConfirmed ? 'info' : 'warning'}>
-            {assistant.knowledgeConfirmed ? '资料已确认' : '资料待确认'}
+    <div className="assistant-workflow-layout">
+      <PageShell
+        aside={<Link href={merchantPath(merchantId, 'drafts')}>返回客服列表</Link>}
+        description={<p>{step.description}</p>}
+        eyebrow="AI 客服 / 配置与发布"
+        title={step.title}
+      >
+        <div className="assistant-workflow-context">
+          <p>
+            当前客服：<strong>{assistant.displayName}</strong>
+          </p>
+          <span>草稿修订 {assistant.draftRevision}</span>
+          <StatusBadge tone={assistant.activeReleaseId ? 'success' : 'warning'}>
+            {assistant.activeReleaseId ? '已有发布版本' : '尚未发布'}
           </StatusBadge>
+          <Link href={`${merchantPath(merchantId, 'help')}#${section}`}>本步帮助</Link>
         </div>
-        <DraftRevisionNotice
-          key={assistantId}
-          revision={assistant.draftRevision}
-          knowledgeConfirmed={assistant.knowledgeConfirmed}
-        />
-        <dl className="assistant-facts">
-          {facts.map(([label, value]) => (
-            <div key={label}>
-              <dt>{label}</dt>
-              <dd>{value}</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
-      <DraftReadinessPanel draft={assistant.draft} />
-      {section === 'knowledge' ? (
-        <MaterialManager
+        <AssistantWorkflowSteps
           merchantId={merchantId}
           assistantId={assistantId}
-          csrfToken={csrfToken}
-          revision={assistant.draftRevision}
-          materials={materials}
+          section={section}
         />
-      ) : null}
-      {section === 'knowledge' ? publishPanel : null}
-      {section !== 'publish' && (
-        <section className="merchant-account-card assistant-detail-card">
-          <h2>修订草稿</h2>
-          <p>修改后将产生新修订，已有资料确认失效，需重新核对。</p>
-          <EditDraftForm
-            key={assistant.draftRevision}
-            csrfToken={csrfToken}
-            returnPath={merchantPath(merchantId, section, assistantId)}
-            merchantId={merchantId}
-            assistantId={assistantId}
-            draftRevision={assistant.draftRevision}
-            draft={assistant.draft}
+        {assistant.activeReleaseId ? (
+          <section
+            aria-labelledby="consumer-link-title"
+            className="assistant-fixed-link"
+            id="consumer-link"
+            tabIndex={-1}
+          >
+            <div className="assistant-fixed-link__heading">
+              <h2 id="consumer-link-title">固定消费者链接</h2>
+              <span>已发布 · 新版本沿用此地址</span>
+            </div>
+            <details open={section === 'publish'}>
+              <summary>查看链接与二维码</summary>
+              {persistedPublicUrl && sharingOrigin ? (
+                <ShareAssistantLink expectedOrigin={sharingOrigin} href={persistedPublicUrl} />
+              ) : (
+                <p role="alert">
+                  已发布版本保留，但消费者链接的正式域名配置暂不可用，请联系运营核对。
+                </p>
+              )}
+            </details>
+            {!publishReady ? (
+              <p role="status">
+                固定地址仍保留，当前服务暂不可用，建议恢复后再分享。{publishReason}
+              </p>
+            ) : null}
+          </section>
+        ) : null}
+        {section === 'drafts' ? (
+          <section className="merchant-account-card assistant-detail-card" id="draft">
+            <h2>填写业务资料</h2>
+            <p className="workflow-hint">
+              保存本步后，继续上传商品表、说明文档或 FAQ。已有线上版本不受草稿编辑影响。
+            </p>
+            <DraftRevisionNotice
+              key={assistantId}
+              revision={assistant.draftRevision}
+              knowledgeConfirmed={assistant.knowledgeConfirmed}
+            />
+            <EditDraftForm
+              key={assistantId}
+              csrfToken={csrfToken}
+              returnPath={merchantPath(merchantId, 'drafts', assistantId)}
+              continueHref={merchantPath(merchantId, 'knowledge', assistantId)}
+              merchantId={merchantId}
+              assistantId={assistantId}
+              draftRevision={assistant.draftRevision}
+              draft={assistant.draft}
+            />
+          </section>
+        ) : null}
+        {section === 'knowledge' ? (
+          <>
+            <p className="workflow-note">
+              有文件就上传整理；没有文件，可直接使用已保存的文字资料进入试聊。上传本身不会自动写入知识或发布。
+            </p>
+            <MaterialManager
+              merchantId={merchantId}
+              assistantId={assistantId}
+              csrfToken={csrfToken}
+              revision={assistant.draftRevision}
+              materials={materials}
+            />
+            <details className="workflow-disclosure">
+              <summary>查看已保存的商品与服务资料</summary>
+              <p className="workflow-saved-text">{assistant.draft.materialsSummary}</p>
+              <Link href={merchantPath(merchantId, 'drafts', assistantId)}>
+                返回基础资料修改价格、优惠或手填内容
+              </Link>
+            </details>
+          </>
+        ) : null}
+        {section === 'preview' ? (
+          <div className="assistant-preview-layout">
+            <section className="merchant-account-card assistant-detail-card" id="preview">
+              <h2>发布前试聊</h2>
+              <p className="workflow-hint">
+                试聊使用当前已保存的修订 {assistant.draftRevision}，不会改变线上客服。
+              </p>
+              <PreviewChatForm
+                merchantId={merchantId}
+                assistantId={assistantId}
+                draftRevision={assistant.draftRevision}
+                csrfToken={csrfToken}
+                available={workerAvailable && assistant.status !== 'paused'}
+              />
+            </section>
+            <aside className="workflow-checklist" aria-label="试聊检查建议">
+              <h2>建议检查</h2>
+              <ul>
+                <li>商品与服务范围是否准确？</li>
+                <li>价格、优惠和适用条件是否一致？</li>
+                <li>未知问题能否引导联系商家？</li>
+              </ul>
+              <Link href={merchantPath(merchantId, 'drafts', assistantId)}>
+                回答不准确？返回修改资料
+              </Link>
+            </aside>
+          </div>
+        ) : null}
+        {section === 'publish' ? (
+          <>
+            <section
+              className="merchant-account-card assistant-detail-card workflow-review"
+              aria-label="发布内容核对"
+            >
+              <div className="section-heading">
+                <h2>核对本次发布内容</h2>
+                <Link href={merchantPath(merchantId, 'drafts', assistantId)}>修改资料</Link>
+              </div>
+              <p className="workflow-hint">
+                以下是已保存的草稿修订 {assistant.draftRevision}。展开各项核对后再确认发布。
+              </p>
+              {facts.map(([label, value]) => (
+                <details key={label} className="workflow-review__fact">
+                  <summary>
+                    {label}
+                    <span>{value.length > 46 ? `${value.slice(0, 46)}…` : value}</span>
+                  </summary>
+                  <p>{value}</p>
+                </details>
+              ))}
+            </section>
+            <details className="workflow-disclosure workflow-readiness">
+              <summary>查看资料自检提示</summary>
+              <DraftReadinessPanel draft={assistant.draft} />
+            </details>
+            {publishPanel}
+          </>
+        ) : null}
+        {section === 'drafts' ? (
+          <AssistantWorkflowActions
+            backHref={merchantPath(merchantId, 'drafts')}
+            backLabel="返回客服列表"
           />
-        </section>
-      )}
-      {section === 'publish' && (
-        <section className="merchant-account-card assistant-detail-card" id="preview">
-          <h2>发布前试聊</h2>
-          <p>用当前未发布草稿测试回答，核对服务范围、价格和资料不足时的回复。</p>
-          <PreviewChatForm
-            merchantId={merchantId}
-            assistantId={assistantId}
-            draftRevision={assistant.draftRevision}
-            csrfToken={csrfToken}
-            available={workerAvailable && assistant.status !== 'paused'}
+        ) : section === 'knowledge' ? (
+          <AssistantWorkflowActions
+            backHref={merchantPath(merchantId, 'drafts', assistantId)}
+            backLabel="上一步：基础资料"
+            nextHref={merchantPath(merchantId, 'preview', assistantId)}
+            nextLabel="下一步：效果试聊"
           />
-        </section>
-      )}
-      {section === 'publish' ? publishPanel : null}
-      <ImprovementSummaryPanel
-        merchantId={merchantId}
-        merchantUserId={session.merchantUserId}
-        assistantId={assistantId}
-      />
-    </PageShell>
+        ) : section === 'preview' ? (
+          <AssistantWorkflowActions
+            backHref={merchantPath(merchantId, 'knowledge', assistantId)}
+            backLabel="上一步：知识补充"
+            nextHref={merchantPath(merchantId, 'publish', assistantId)}
+            nextLabel="下一步：发布分享"
+          />
+        ) : (
+          <AssistantWorkflowActions
+            backHref={merchantPath(merchantId, 'preview', assistantId)}
+            backLabel="上一步：效果试聊"
+          />
+        )}
+      </PageShell>
+    </div>
   );
 }

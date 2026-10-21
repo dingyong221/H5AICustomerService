@@ -5,6 +5,22 @@ import { expect, test, type Page } from '@playwright/test';
 
 type PublishedReleaseReadback = { status: number; releaseRef: string | null };
 
+async function openMerchantDetails(page: Page, label: string): Promise<void> {
+  const summary = page.locator('summary').filter({ hasText: label });
+  await expect(summary).toHaveCount(1);
+  if (!(await summary.evaluate((element) => element.parentElement?.hasAttribute('open'))))
+    await summary.click();
+}
+
+async function expectMerchantStep(page: Page, title: string): Promise<void> {
+  await expect(page.getByRole('heading', { level: 1, name: title, exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('navigation', { name: '客服发布步骤' }).getByRole('link', {
+      name: new RegExp(`^${title}`, 'u'),
+    }),
+  ).toHaveAttribute('aria-current', 'step');
+}
+
 async function readPublishedRelease(
   page: Page,
   publicUrl: string,
@@ -141,16 +157,25 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   ).toHaveAttribute('href', new URL(managementUrl).pathname);
   await expect(merchantPage.getByRole('link', { name: 'HTTPS 安全绑定' })).toHaveCount(0);
   const merchantNavigation = merchantPage.getByRole('navigation', { name: '商家后台主导航' });
-  for (const [name, section] of [
-    ['客服草稿', 'drafts'],
-    ['知识库', 'knowledge'],
-    ['测试与发布', 'publish'],
-  ] as const) {
-    await merchantNavigation.getByRole('link', { name, exact: true }).click();
-    await expect(merchantPage).toHaveURL(managementUrl + '/' + section);
-    await expect(merchantPage.getByRole('heading', { name, exact: true })).toBeVisible();
-  }
-  await merchantNavigation.getByRole('link', { name: '客服草稿', exact: true }).click();
+  await openMerchantDetails(merchantPage, 'AI 客服');
+  const assistantMenu = merchantNavigation.locator('summary').filter({ hasText: 'AI 客服' });
+  await assistantMenu.click();
+  await expect(
+    merchantNavigation.getByRole('link', { name: '客服列表', exact: true }),
+  ).toBeHidden();
+  await assistantMenu.focus();
+  await assistantMenu.press('Enter');
+  await merchantNavigation.getByRole('link', { name: '客服列表', exact: true }).click();
+  await expect(merchantPage).toHaveURL(managementUrl + '/drafts');
+  // Creating a new assistant has its own page; it is not buried below a list.
+  await expect(merchantPage.locator('.assistant-create-form')).toHaveCount(0);
+  await merchantPage
+    .getByRole('main')
+    .getByRole('link', { name: '新建客服', exact: true })
+    .first()
+    .click();
+  await expect(merchantPage).toHaveURL(managementUrl + '/drafts/new');
+  await expect(merchantPage.getByRole('button', { name: '创建客服草稿' })).toBeEnabled();
   await operatorPage.reload();
   await expect(operatorPage.getByRole('link', { name: managementUrl })).toHaveAttribute(
     'href',
@@ -178,24 +203,29 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await merchantPage.getByLabel('行业资料引导（可选）').selectOption({
     label: '本地生活服务 · v1',
   });
+  await openMerchantDetails(merchantPage, '本地生活服务：查看资料准备提示');
   await expect(merchantPage.getByText(referenceNotes)).toBeVisible();
   await expect(merchantPage.getByLabel('细分行业')).toHaveValue('本地生活服务');
   await merchantPage.getByLabel('细分行业').fill('家电清洗');
   await merchantPage.getByLabel('业务范围').fill('提供家用空调清洗咨询');
   await merchantPage.getByLabel('商品或服务资料').fill('提供上门空调清洗服务');
+  await openMerchantDetails(merchantPage, '交易规则');
   await merchantPage.getByLabel('价格与条件').fill('价格需联系商家确认');
   await merchantPage.getByLabel('优惠与售卖策略').fill('目前无已确认优惠');
+  await openMerchantDetails(merchantPage, '回复设置');
   await merchantPage.getByLabel('欢迎语').fill('您好，我是 AI 客服。');
   await merchantPage.getByLabel('资料不足时的回复').fill('资料不足，请联系商家核实。');
   await merchantPage
     .getByLabel('人工联系说明（可选）')
     .fill('工作日9:00至18:00，请通过测试店铺订单页联系人工。');
   await merchantPage.getByRole('button', { name: '创建客服草稿' }).click();
-  await expect(merchantPage.getByText(`已创建客服草稿「${assistantName}」`)).toBeVisible();
-  await expect(merchantPage.getByRole('link', { name: '进入客服配置、试聊和发布' })).toBeVisible();
-  await expect(
-    merchantPage.locator('.assistant-workspace-list').getByRole('link', { name: assistantName }),
-  ).toBeVisible();
+  await expect(merchantPage).toHaveURL(
+    new RegExp(`^${managementUrl}/knowledge/[0-9a-f]{32}$`, 'u'),
+  );
+  const assistantId = new URL(merchantPage.url()).pathname.split('/').at(-1)!;
+  const assistantUrl = `${managementUrl}/drafts/${assistantId}`;
+  await expectMerchantStep(merchantPage, '知识补充');
+  await expect(merchantPage.getByText(`当前客服：${assistantName}`, { exact: true })).toBeVisible();
   await operatorPage.reload();
   const industryTemplate = operatorPage.locator('.ops-template-list li').filter({
     hasText: industryCode,
@@ -206,15 +236,19 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await operatorPage.reload();
   await expect(industryTemplate).toContainText('已停用');
   await expect(industryTemplate.getByRole('button', { name: '确认停用此行业模板' })).toHaveCount(0);
-  await merchantPage.reload();
+  await merchantPage.goto(`${managementUrl}/drafts/new`);
   await expect(merchantPage.getByRole('option', { name: '本地生活服务 · v1' })).toHaveCount(0);
-  await merchantPage.getByRole('link', { name: assistantName }).click();
-  await expect(merchantPage.getByRole('heading', { name: assistantName })).toBeVisible();
-  const assistantUrl = merchantPage.url();
-  const assistantId = new URL(assistantUrl).pathname.split('/').at(-1)!;
-  await merchantNavigation.getByRole('link', { name: '知识库', exact: true }).click();
+  await merchantPage.goto(assistantUrl);
+  await expectMerchantStep(merchantPage, '基础资料');
+  await merchantPage
+    .getByRole('navigation', { name: '客服发布步骤' })
+    .getByRole('link', { name: /^知识补充/u })
+    .click();
   await expect(merchantPage).toHaveURL(managementUrl + '/knowledge/' + assistantId);
-  await expect(merchantPage.getByRole('heading', { name: '知识库', exact: true })).toBeVisible();
+  await expectMerchantStep(merchantPage, '知识补充');
+  await expect(merchantPage.locator('.assistant-edit-form')).toHaveCount(0);
+  await expect(merchantPage.locator('.assistant-preview-form')).toHaveCount(0);
+  await expect(merchantPage.locator('.assistant-confirm-form')).toHaveCount(0);
   await expect(merchantPage.getByText(referenceNotes)).toHaveCount(0);
   // Actual upload/extraction, consented organization and an explicit review.
   const materialPanel = merchantPage.getByRole('region', { name: '基础材料管理' });
@@ -283,7 +317,27 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await expect(materialPanel.getByLabel('知识整理稿', { exact: true })).not.toHaveValue(
     /合成旧材料A/u,
   );
-  await merchantPage.reload();
+  const unsavedSummary = await materialPanel.getByLabel('知识整理稿', { exact: true }).inputValue();
+  const leaveDialog = merchantPage.waitForEvent('dialog');
+  const cancelledNavigation = merchantPage
+    .getByRole('link', { name: '下一步：效果试聊', exact: true })
+    .click();
+  cancelledNavigation.catch(() => undefined);
+  const leavePrompt = await leaveDialog;
+  expect(leavePrompt.type()).toBe('confirm');
+  expect(leavePrompt.message()).toContain('未保存的资料');
+  await leavePrompt.dismiss();
+  await cancelledNavigation;
+  await expect(merchantPage).toHaveURL(managementUrl + '/knowledge/' + assistantId);
+  await expect(materialPanel.getByLabel('知识整理稿', { exact: true })).toHaveValue(unsavedSummary);
+  // This reload deliberately discards only the unsaved synthetic summary.
+  const reloadDialog = merchantPage.waitForEvent('dialog');
+  const discardSummaryReload = merchantPage.reload();
+  discardSummaryReload.catch(() => undefined);
+  const reloadPrompt = await reloadDialog;
+  expect(reloadPrompt.type()).toBe('beforeunload');
+  await reloadPrompt.accept();
+  await discardSummaryReload;
   await expect(materialA).toHaveCount(0);
   await expect(materialB).toBeVisible();
   await materialB.check();
@@ -321,16 +375,18 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await merchantPage.setViewportSize(materialViewport ?? { width: 1280, height: 720 });
   await materialPanel.getByRole('checkbox', { name: /我已核对整理稿/u }).check();
   await materialPanel.getByRole('button', { name: '保存整理稿到客服草稿', exact: true }).click();
-  await expect(materialPanel.getByRole('status')).toContainText('已保存到新的草稿修订');
-  await expect(merchantPage.locator('.assistant-facts')).toContainText('预约需提前1天');
+  await expect(materialPanel.getByRole('status')).toContainText('知识已保存到草稿');
+  await openMerchantDetails(merchantPage, '查看已保存的商品与服务资料');
+  await expect(merchantPage.locator('.workflow-saved-text')).toContainText('预约需提前1天');
   await expect(
     merchantPage.getByRole('button', { name: '确认当前草稿资料', exact: true }),
   ).toHaveCount(0);
-  await expect(merchantPage.getByText('资料待确认', { exact: true })).toBeVisible();
-  await merchantNavigation.getByRole('link', { name: '测试与发布', exact: true }).click();
-  await expect(
-    merchantPage.getByRole('button', { name: '确认资料并发布 AI 客服', exact: true }),
-  ).toBeEnabled();
+  await merchantPage.getByRole('link', { name: '下一步：效果试聊', exact: true }).click();
+  await expect(merchantPage).toHaveURL(managementUrl + '/preview/' + assistantId);
+  await expectMerchantStep(merchantPage, '效果试聊');
+  await expect(merchantPage.locator('.assistant-edit-form')).toHaveCount(0);
+  await expect(merchantPage.getByRole('region', { name: '基础材料管理' })).toHaveCount(0);
+  await expect(merchantPage.locator('.assistant-confirm-form')).toHaveCount(0);
   await expect(merchantPage.getByRole('img', { name: '扫码打开消费者 AI 客服' })).toHaveCount(0);
   await expect(merchantPage.locator('a[href^="http://127.0.0.1:3001/a/"]')).toHaveCount(0);
   await merchantPage.getByLabel('试聊问题').fill('你们提供什么服务？');
@@ -342,6 +398,14 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   );
   await expect(merchantPage.locator('a[href^="http://127.0.0.1:3001/a/"]')).toHaveCount(0);
   await expect(merchantPage.getByRole('img', { name: '扫码打开消费者 AI 客服' })).toHaveCount(0);
+  await merchantPage.getByRole('link', { name: '下一步：发布分享', exact: true }).click();
+  await expect(merchantPage).toHaveURL(managementUrl + '/publish/' + assistantId);
+  await expectMerchantStep(merchantPage, '发布分享');
+  await expect(merchantPage.locator('.assistant-preview-form')).toHaveCount(0);
+  await expect(merchantPage.locator('.assistant-edit-form')).toHaveCount(0);
+  await expect(
+    merchantPage.getByRole('button', { name: '确认资料并发布 AI 客服', exact: true }),
+  ).toBeEnabled();
   await merchantPage.getByLabel(/我已核对以上资料，并确认向消费者公开发布当前修订/u).check();
   await merchantPage.getByRole('button', { name: '确认资料并发布 AI 客服', exact: true }).click();
   const publicLink = merchantPage.locator('a[href^="http://127.0.0.1:3001/a/"]').first();
@@ -438,18 +502,42 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await merchantPage.getByRole('button', { name: '符合预期，判定通过', exact: true }).click();
   await expect(merchantPage.getByText('商家已判定通过。', { exact: true })).toBeVisible();
   await merchantPage.getByRole('link', { name: '核对并确认知识资料', exact: true }).click();
+  await expect(merchantPage).toHaveURL(`${managementUrl}/knowledge/${assistantId}`);
+  await merchantPage.getByRole('link', { name: '下一步：效果试聊', exact: true }).click();
+  await expectMerchantStep(merchantPage, '效果试聊');
+  await merchantPage.getByRole('link', { name: '下一步：发布分享', exact: true }).click();
+  await expectMerchantStep(merchantPage, '发布分享');
   await merchantPage.getByLabel(/我已核对以上资料，并确认向消费者公开发布当前修订/u).check();
   await merchantPage.getByRole('button', { name: '确认资料并发布 AI 客服', exact: true }).click();
   await expect(merchantPage.getByText(/第 2 版已发布/u)).toBeVisible();
   await expect(merchantPage.locator('#consumer-link')).toBeInViewport();
-  for (const section of ['knowledge', 'publish', 'drafts']) {
+  for (const section of ['knowledge', 'preview', 'publish', 'drafts']) {
     await merchantPage.goto(`${managementUrl}/${section}/${assistantId}`);
     await expect(
       merchantPage.getByRole('heading', { name: '固定消费者链接', exact: true }),
     ).toBeVisible();
+    await openMerchantDetails(merchantPage, '查看链接与二维码');
     await expect(publicLink).toHaveAttribute('href', publicUrl!);
     await merchantPage.reload();
+    await openMerchantDetails(merchantPage, '查看链接与二维码');
     await expect(publicLink).toHaveAttribute('href', publicUrl!);
+    await mkdir('artifacts/ops-enhancement/merchant-guided-workflow', { recursive: true });
+    for (const [width, height, viewport] of [
+      [1440, 1000, 'desktop'],
+      [390, 844, 'mobile'],
+    ] as const) {
+      await merchantPage.setViewportSize({ width, height });
+      expect(
+        await merchantPage.evaluate(
+          () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+        ),
+      ).toBe(true);
+      await merchantPage.screenshot({
+        path: `artifacts/ops-enhancement/merchant-guided-workflow/${section}-${viewport}-${pathMode ?? 'root'}.png`,
+        fullPage: true,
+      });
+    }
+    await merchantPage.setViewportSize({ width: 1280, height: 720 });
   }
   await merchantPage.goto(improvementUrl);
   await expect(
@@ -474,35 +562,66 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await merchantPage.goto(sourceConversationUrl);
   await expect(merchantPage.getByText('你们提供什么服务？', { exact: true })).toBeVisible();
   await merchantPage.getByRole('link', { name: '编辑对应客服的资料' }).click();
-  await expect(merchantPage.getByRole('heading', { name: assistantName })).toBeVisible();
-  const beforeManualEdit = Number(
-    (await merchantPage.getByRole('heading', { name: /^草稿修订 \d+$/u }).textContent())?.match(
-      /\d+$/u,
-    )?.[0],
-  );
+  await expectMerchantStep(merchantPage, '基础资料');
+  const editRevision = merchantPage.locator('.assistant-edit-form input[name="draftRevision"]');
+  const beforeManualEdit = Number(await editRevision.inputValue());
   expect(Number.isSafeInteger(beforeManualEdit) && beforeManualEdit > 0).toBe(true);
+  // Open and close a local-only helper to prove hydration before editing saved
+  // values; this does not send any data or consume a model call.
+  await merchantPage.getByRole('button', { name: '帮我写商品或服务资料', exact: true }).click();
+  await merchantPage.getByRole('button', { name: '关闭填写助手', exact: true }).click();
   await merchantPage
-    .getByLabel('商品或服务资料')
+    .locator('.assistant-edit-form textarea[name="materialsSummary"]')
     .fill('提供上门空调清洗服务，也提供洗衣机清洁咨询');
   await merchantPage.getByRole('button', { name: '保存草稿修订' }).click();
-  await expect(
-    merchantPage.getByText(
-      `草稿已保存至修订 ${beforeManualEdit + 1}，原有资料确认已失效。请核对新内容后重新确认。`,
-    ),
-  ).toBeVisible();
+  await expect(editRevision).toHaveValue(String(beforeManualEdit + 1));
   await merchantPage.reload();
-  await expect(merchantPage.getByText('资料待确认')).toBeVisible();
-  await merchantNavigation.getByRole('link', { name: '知识库', exact: true }).click();
-  await merchantPage.getByLabel(/我已核对以上资料，并确认向消费者公开发布当前修订/u).check();
-  // Editing without leaving this page must not carry consent for an old
-  // revision into the new server revision's combined confirmation/publication.
-  await merchantPage.getByLabel('价格与条件').fill('具体价格按服务范围由商家核实确认。');
-  await merchantPage.getByRole('button', { name: '保存草稿修订' }).click();
+  await expect(editRevision).toHaveValue(String(beforeManualEdit + 1));
   await expect(
-    merchantPage.getByText(
-      `草稿已保存至修订 ${beforeManualEdit + 2}，原有资料确认已失效。请核对新内容后重新确认。`,
-    ),
-  ).toBeVisible();
+    merchantPage.locator('.assistant-edit-form textarea[name="materialsSummary"]'),
+  ).toHaveValue('提供上门空调清洗服务，也提供洗衣机清洁咨询');
+  // This is the normal saved transition into supplemental knowledge, not a
+  // jump to an unrelated menu or an unsaved navigation.
+  await merchantPage.getByRole('button', { name: '保存并继续', exact: true }).click();
+  await expect(merchantPage).toHaveURL(`${managementUrl}/knowledge/${assistantId}`);
+  const beforeConcurrentEdit = Number(
+    (await merchantPage.getByText(/^草稿修订 \d+$/u).textContent())?.match(/\d+$/u)?.[0],
+  );
+  expect(beforeConcurrentEdit).toBe(beforeManualEdit + 2);
+  await merchantPage.getByRole('link', { name: '下一步：效果试聊', exact: true }).click();
+  await merchantPage.getByRole('link', { name: '下一步：发布分享', exact: true }).click();
+  await expectMerchantStep(merchantPage, '发布分享');
+  await merchantPage.getByLabel(/我已核对以上资料，并确认向消费者公开发布当前修订/u).check();
+  const beforeStalePublication = await readPublishedRelease(merchantPage, publicUrl!);
+  const concurrentDraftPage = await merchantPage.context().newPage();
+  try {
+    await concurrentDraftPage.goto(assistantUrl);
+    await expectMerchantStep(concurrentDraftPage, '基础资料');
+    await openMerchantDetails(concurrentDraftPage, '交易规则');
+    await concurrentDraftPage
+      .getByRole('button', { name: '帮我写价格与条件', exact: true })
+      .click();
+    await concurrentDraftPage.getByRole('button', { name: '关闭填写助手', exact: true }).click();
+    await concurrentDraftPage
+      .locator('.assistant-edit-form textarea[name="pricingSummary"]')
+      .fill('具体价格按服务范围由商家核实确认。');
+    await concurrentDraftPage.getByRole('button', { name: '保存草稿修订' }).click();
+    await expect(
+      concurrentDraftPage.locator('.assistant-edit-form input[name="draftRevision"]'),
+    ).toHaveValue(String(beforeConcurrentEdit + 1));
+    // A previously checked consent in another tab cannot publish a newer draft.
+    await merchantPage.getByRole('button', { name: '确认资料并发布 AI 客服', exact: true }).click();
+    await expect(merchantPage.locator('.assistant-confirm-form').getByRole('alert')).toContainText(
+      '草稿或资料确认状态已变化',
+    );
+    expect(await readPublishedRelease(merchantPage, publicUrl!)).toEqual(beforeStalePublication);
+  } finally {
+    await concurrentDraftPage.close();
+  }
+  await merchantPage.reload();
+  await expect(
+    merchantPage.locator('.assistant-confirm-form input[name="draftRevision"]'),
+  ).toHaveValue(String(beforeConcurrentEdit + 1));
   await expect(
     merchantPage.getByLabel(/我已核对以上资料，并确认向消费者公开发布当前修订/u),
   ).not.toBeChecked();
@@ -513,15 +632,8 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   expect(preV3Release.releaseRef).toMatch(/^[0-9a-f]{32}$/u);
   expect(preV3Release.releaseRef).not.toBe(firstReleaseRef);
   const thirdPublishUrl = merchantOrigin + '/' + merchantId + '/publish/' + assistantId;
-  await merchantNavigation.getByRole('link', { name: '测试与发布', exact: true }).click();
-  // Knowledge and publish pages intentionally share the same confirmation form.
-  // Wait for the target route AND a publish-only heading before using its form;
-  // otherwise the old knowledge form can submit while soft navigation unmounts
-  // it, losing the action's UI result even when its transaction committed.
   await expect(merchantPage).toHaveURL(thirdPublishUrl);
-  await expect(
-    merchantPage.getByRole('heading', { name: '发布前试聊', exact: true }),
-  ).toBeVisible();
+  await expectMerchantStep(merchantPage, '发布分享');
   const publishPath = new URL(thirdPublishUrl).pathname;
   let thirdPublicationPosts = 0,
     thirdActionStatus: number | null = null;

@@ -11,7 +11,10 @@ describe('merchant login return path', () => {
     expect(
       safeMerchantReturnPath(merchantId, `/workspace/${merchantId}/assistants/${assistantId}`),
     ).toBe(`/${merchantId}/drafts/${assistantId}`);
-    for (const section of ['drafts', 'knowledge', 'publish', 'conversations']) {
+    expect(safeMerchantReturnPath(merchantId, `/${merchantId}/drafts/new`)).toBe(
+      `/${merchantId}/drafts/new`,
+    );
+    for (const section of ['drafts', 'knowledge', 'preview', 'publish', 'conversations']) {
       expect(safeMerchantReturnPath(merchantId, `/${merchantId}/${section}`)).toBe(
         `/${merchantId}/${section}`,
       );
