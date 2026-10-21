@@ -598,8 +598,17 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await expectMerchantStep(merchantPage, '发布分享');
   await merchantPage.getByLabel(/我已核对以上资料，并确认向消费者公开发布当前修订/u).check();
   const beforeStalePublication = await readPublishedRelease(merchantPage, publicUrl!);
-  const concurrentDraftPage = await merchantPage.context().newPage();
+  // browser.newPage() owns its single-page context in root/subpath tests. Use
+  // an explicit second context, carrying only this merchant's session/CSRF
+  // cookies; the same-domain operator login must not be copied into it.
+  const concurrentContext = await browser.newContext();
   try {
+    const concurrentMerchantCookies = (await merchantPage.context().cookies()).filter((cookie) =>
+      ['h5cs_session', 'h5cs_csrf'].includes(cookie.name),
+    );
+    expect(concurrentMerchantCookies.some((cookie) => cookie.name === 'h5cs_session')).toBe(true);
+    await concurrentContext.addCookies(concurrentMerchantCookies);
+    const concurrentDraftPage = await concurrentContext.newPage();
     await concurrentDraftPage.goto(assistantUrl);
     await expectMerchantStep(concurrentDraftPage, '基础资料');
     await openMerchantDetails(concurrentDraftPage, '交易规则');
@@ -621,7 +630,7 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
     );
     expect(await readPublishedRelease(merchantPage, publicUrl!)).toEqual(beforeStalePublication);
   } finally {
-    await concurrentDraftPage.close();
+    await concurrentContext.close();
   }
   await merchantPage.reload();
   await expect(
