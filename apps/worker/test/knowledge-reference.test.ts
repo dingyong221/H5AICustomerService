@@ -81,4 +81,15 @@ describe('source-reference material organization', () => {
       expect(result?.summary).not.toMatch(/[\uD800-\uDBFF]$/u);
     }
   });
+  it('accepts a valid per-unit classification plan up to the advertised 80-unit input bound', () => {
+    const text = Array.from({ length: 80 }, (_, index) => `商品条目${index}元。`).join('');
+    const units = buildKnowledgeUnits(text);
+    expect(units).toHaveLength(80);
+    const result = renderKnowledgeOrganization(text, {
+      groups: units.map((unit) => ({ topic: '商品/服务', unitIds: [unit.id] })),
+      reviewUnitIds: [],
+    });
+    expect(result?.summary).toContain('商品条目79元。');
+    expect(result?.warnings.some((warning) => warning.includes('未涵盖全部原文'))).toBe(false);
+  });
 });
