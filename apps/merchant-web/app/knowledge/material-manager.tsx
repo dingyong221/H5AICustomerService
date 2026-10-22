@@ -4,6 +4,13 @@ import { useRouter } from 'next/navigation';
 import type { KnowledgeMaterial } from '@h5cs/database';
 import { merchantPath } from '../tenant-paths';
 import { useUnsavedForm } from '../workspace/use-unsaved-form';
+import {
+  filterMaterials,
+  knowledgeTemplates,
+  materialKinds,
+  reviewMaterials,
+  type MaterialKind,
+} from './material-review';
 export function MaterialManager({
   merchantId,
   assistantId,
@@ -32,6 +39,11 @@ export function MaterialManager({
     [deletedIds, setDeletedIds] = useState<string[]>([]);
   const previousMaterials = useRef(materials);
   const visibleMaterials = materials?.filter((item) => !deletedIds.includes(item.id));
+  const [query, setQuery] = useState('');
+  const [kind, setKind] = useState<MaterialKind>('all');
+  const [templateId, setTemplateId] = useState<string>('product');
+  const shownMaterials = filterMaterials(visibleMaterials ?? [], query, kind);
+  const reminders = reviewMaterials(visibleMaterials ?? []);
   const disabled = !!busy || pendingDelete !== null || materials === null;
   useUnsavedForm(!!summary.trim() || busy !== null);
   function clearOrganization() {
@@ -44,7 +56,12 @@ export function MaterialManager({
     if (materials !== null && previousMaterials.current !== null) {
       const active = new Set(materials.map((item) => item.id));
       const removed = new Set(
-        previousMaterials.current.filter((item) => !active.has(item.id)).map((item) => item.id),
+        previousMaterials.current
+          // A verified local deletion already invalidated its old summary. A
+          // delayed RSC acknowledgment must not clear a newer summary written
+          // from the remaining materials after that successful deletion.
+          .filter((item) => !active.has(item.id) && !deletedIds.includes(item.id))
+          .map((item) => item.id),
       );
       if (removed.size) {
         setSelected((previous) => previous.filter((source) => !removed.has(source)));
@@ -56,7 +73,7 @@ export function MaterialManager({
       }
     }
     if (materials !== null) previousMaterials.current = materials;
-  }, [materials]);
+  }, [materials, deletedIds]);
   const endpoint = `${merchantPath(merchantId, 'knowledge', assistantId)}/materials`;
   async function request(kind: string, body: FormData | Record<string, unknown>) {
     if (
@@ -88,6 +105,7 @@ export function MaterialManager({
         warnings?: string[];
         deleted?: boolean;
         sourceId?: string;
+        reused?: string[];
       };
       if (!response.ok || result.error)
         throw new Error(
@@ -100,8 +118,11 @@ export function MaterialManager({
         setSelected(ids);
         setConfirmed(false);
         setConsent(false);
+        const reused = Array.isArray(result.reused)
+          ? result.reused.filter((id) => ids.includes(id))
+          : [];
         setNotice(
-          `已保存 ${ids.length} 份可解析材料，尚未加入客服知识。${summary.trim() ? '原有未保存整理稿已保留，新增材料不会自动追加；请重新整理或手动补充后核对保存。' : ''}`,
+          `已保存 ${ids.length} 份可解析材料，${reused.length ? `其中 ${reused.length} 份原文相同，已复用已有材料而非重复保存；` : ''}尚未加入客服知识。${summary.trim() ? '原有未保存整理稿已保留，新增材料不会自动追加；请重新整理或手动补充后核对保存。' : ''}`,
         );
         setError(result.errors?.join('\n') ?? '');
         if (fileInput.current) fileInput.current.value = '';
@@ -195,7 +216,80 @@ export function MaterialManager({
         <>
           <h3>已保存材料</h3>
           <p>每个客服最多保存 50 份材料。展开可检查原始提取文字；所选文字合计最多 24000 字。</p>
-          {visibleMaterials.map((item) => (
+          <div className="knowledge-maintenance-tools">
+            <label>
+              查找材料或文字
+              <input
+                type="search"
+                value={query}
+                maxLength={200}
+                placeholder="例如：商品名、运费、营业时间"
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </label>
+            <label>
+              按文件格式
+              <select
+                value={kind}
+                onChange={(event) => {
+                  if (materialKinds.includes(event.target.value as MaterialKind))
+                    setKind(event.target.value as MaterialKind);
+                }}
+              >
+                <option value="all">全部格式</option>
+                <option value="document">文档 / PDF / 演示文稿</option>
+                <option value="table">表格 / CSV</option>
+                <option value="text">文字 / Markdown</option>
+              </select>
+            </label>
+            <p aria-live="polite">
+              显示 {shownMaterials.length} / {visibleMaterials.length} 份 · 已选 {selected.length}{' '}
+              份；筛选不会清除已选材料。
+            </p>
+            <button
+              type="button"
+              disabled={disabled || !shownMaterials.length}
+              onClick={() => {
+                setSelected(shownMaterials.slice(0, 5).map((item) => item.id));
+                setConfirmed(false);
+                setConsent(false);
+                setNotice('已选择当前结果的前 5 份以内材料；更多材料请分批整理。');
+              }}
+            >
+              选择当前结果（最多5份）
+            </button>
+            <button
+              type="button"
+              disabled={disabled || !selected.length}
+              onClick={() => {
+                setSelected([]);
+                setConfirmed(false);
+                setConsent(false);
+              }}
+            >
+              清空选择
+            </button>
+          </div>
+          <details className="knowledge-review-reminders">
+            <summary>材料核对提醒：{reminders.length} 项</summary>
+            <p>
+              仅检查完全重复、明确问答同题不同答和标明的截止日期。不能识别所有语义冲突、缺失或过期内容；没有提醒也不等于资料正确。请对照单独价格与优惠字段核对，不会自动合并、删改或下架。
+            </p>
+            {reminders.length ? (
+              <ul>
+                {reminders.slice(0, 10).map((item, index) => (
+                  <li key={index}>{item.detail}</li>
+                ))}
+              </ul>
+            ) : (
+              <p>本轮规则检查未发现上述提醒，请仍自行核对真实商品与适用条件。</p>
+            )}
+            {reminders.length > 10 ? <p>共 {reminders.length} 项，先展示前 10 项。</p> : null}
+          </details>
+          {!shownMaterials.length ? (
+            <p aria-live="polite">没有找到匹配材料，请调整关键词或文件格式。</p>
+          ) : null}
+          {shownMaterials.map((item) => (
             <div className="knowledge-material" key={item.id}>
               <label>
                 <input
@@ -218,6 +312,13 @@ export function MaterialManager({
                 <summary>查看提取文字</summary>
                 <pre>{item.text}</pre>
               </details>
+              <small>
+                录入于{' '}
+                {new Date(item.createdAt).toLocaleDateString('zh-CN', {
+                  timeZone: 'Asia/Shanghai',
+                })}{' '}
+                · 只保存提取文字，原文件请自行保留
+              </small>
               <button
                 type="button"
                 aria-label={`删除材料：${item.name}`}
@@ -298,6 +399,45 @@ export function MaterialManager({
       ) : (
         <p>尚无上传材料。可上传商品表、服务说明、售后规则或 FAQ。</p>
       )}
+      <details className="knowledge-quick-entry">
+        <summary>不会写？从业务填空模板开始</summary>
+        <p>
+          插入到下方整理稿后，填写真实信息再核对保存。“待补充”不能当作已确认业务事实；模板不会自动保存或发布。
+        </p>
+        <label>
+          选择业务模板
+          <select
+            value={templateId}
+            disabled={disabled}
+            onChange={(event) => setTemplateId(event.target.value)}
+          >
+            {knowledgeTemplates.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.title}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => {
+            const template = knowledgeTemplates.find((item) => item.id === templateId);
+            if (!template) return;
+            const next = [summary.trim(), template.text].filter(Boolean).join('\n\n');
+            if (next.length > 4000) {
+              setError('插入模板后超过4000字，请先精简现有整理稿；原文未改。');
+              return;
+            }
+            setSummary(next);
+            setConfirmed(false);
+            setConsent(false);
+            setNotice('已插入填空模板，请补充真实内容并核对；原有整理稿已保留，尚未保存或发布。');
+          }}
+        >
+          插入到整理稿
+        </button>
+      </details>
       <details className="knowledge-summary-editor" open={!!summary || warnings.length > 0}>
         <summary>{summary ? '核对并保存知识整理稿' : '手动补充知识文字'}</summary>
         <form

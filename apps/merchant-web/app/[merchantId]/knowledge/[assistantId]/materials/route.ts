@@ -29,21 +29,22 @@ export async function POST(
     if (valid.reduce((sum, file) => sum + file.size, 0) > 20 * 1024 * 1024)
       return materialResponse(413, { error: '每批文件总大小不能超过 20 MB。' });
     const saved: string[] = [],
+      reused: string[] = [],
       errors: string[] = [];
     for (const file of valid) {
       try {
         const data = Buffer.from(await file.arrayBuffer());
         const text = await parseMaterial(file.name, data);
-        saved.push(
-          await access.repository.save({
-            ...scope,
-            userId: access.session.merchantUserId,
-            name: file.name,
-            size: file.size,
-            sha256: createHash('sha256').update(data).digest('hex'),
-            text,
-          }),
-        );
+        const result = await access.repository.saveWithResult({
+          ...scope,
+          userId: access.session.merchantUserId,
+          name: file.name,
+          size: file.size,
+          sha256: createHash('sha256').update(data).digest('hex'),
+          text,
+        });
+        if (!saved.includes(result.id)) saved.push(result.id);
+        if (result.reused && !reused.includes(result.id)) reused.push(result.id);
       } catch (error) {
         errors.push(
           `${file.name.slice(0, 200)}：${error instanceof MaterialParseError ? error.message : '材料保存失败，请稍后重试。'}`,
@@ -54,6 +55,7 @@ export async function POST(
     return materialResponse(saved.length ? 200 : 422, {
       saved,
       errors,
+      ...(reused.length ? { reused } : {}),
       ...(!saved.length ? { error: errors.join('\n') || '没有材料保存成功。' } : {}),
     });
   } catch {

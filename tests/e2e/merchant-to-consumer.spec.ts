@@ -279,6 +279,17 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   });
   await expect(materialA).toBeChecked();
   await expect(materialB).toBeChecked();
+  const searchMaterials = materialPanel.getByLabel('查找材料或文字', { exact: true });
+  await searchMaterials.fill('预约需提前1天');
+  await expect(materialA).toHaveCount(0);
+  await expect(materialB).toBeChecked();
+  await searchMaterials.fill('没有这种知识的合成查询');
+  await expect(
+    materialPanel.getByText('没有找到匹配材料，请调整关键词或文件格式。', { exact: true }),
+  ).toBeVisible();
+  await searchMaterials.fill('');
+  await expect(materialA).toBeChecked();
+  await expect(materialB).toBeChecked();
   await materialPanel.getByRole('button', { name: '直接使用提取文字', exact: true }).click();
   await expect(materialPanel.getByLabel('知识整理稿', { exact: true })).toHaveValue(/合成旧材料A/u);
   await materialPanel.getByRole('checkbox', { name: /我已核对整理稿/u }).check();
@@ -397,6 +408,10 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await merchantPage.getByLabel('试聊问题').fill('你们提供什么服务？');
   await merchantPage.getByRole('button', { name: '发送测试问题' }).click();
   const previewAnswer = merchantPage.locator('.assistant-preview-answer');
+  await expect(previewAnswer.locator('.preview-evidence')).toContainText(
+    '不是向量检索结果或模型逐句引用',
+    { timeout: 60000 },
+  );
   await expect(previewAnswer).toContainText(
     '我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。',
     { timeout: 60_000 },

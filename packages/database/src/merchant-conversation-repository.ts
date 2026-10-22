@@ -241,7 +241,7 @@ export class MySqlMerchantConversationRepository {
              JOIN merchant_membership mm ON mm.merchant_id = cs.merchant_id
                AND mm.merchant_user_id = ? AND mm.status = 'active'
              JOIN merchant_user u ON u.id = mm.merchant_user_id AND u.status = 'active'
-            WHERE cs.merchant_id = ? AND cs.id = ? LIMIT 1 FOR UPDATE`,
+            WHERE cs.merchant_id = ? AND cs.id = ? AND mm.role IN ('owner','admin','editor') LIMIT 1 FOR UPDATE`,
           [merchantUserId, merchantId, sessionId],
         );
         if (!rows[0]) throw new MerchantConversationUnavailableError();

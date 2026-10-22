@@ -226,6 +226,93 @@ describe('material deletion merchant experience', () => {
     expect(checkbox(tree, '我同意将所选材料').props.checked).toBe(false);
   });
 
+  it('does not clear a new retained-material summary when delayed RSC props acknowledge an owned deletion', async () => {
+    let tree = render();
+    checkbox(tree, first.name).props.onChange!({ target: { checked: true } });
+    checkbox(tree, second.name).props.onChange!({ target: { checked: true } });
+    tree = render();
+    deletionButton(tree).props.onClick!();
+    tree = render();
+    mocks.fetch.mockResolvedValueOnce(Response.json({ deleted: true, sourceId }));
+    button(tree, '确认删除材料').props.onClick!();
+    await vi.waitFor(() => expect(mocks.refresh).toHaveBeenCalledOnce());
+    // The delete acknowledgment is visible before the delayed server list.
+    tree = render();
+    expect(deletionButton(tree)).toBeUndefined();
+    expect(checkbox(tree, second.name).props.checked).toBe(true);
+    button(tree, '直接使用提取文字').props.onClick!();
+    tree = render();
+    const retainedSummary = summary(tree).props.value;
+    expect(retainedSummary).toContain(second.text);
+    expect(retainedSummary).not.toContain(first.text);
+    checkbox(tree, '我已核对整理稿').props.onChange!({ target: { checked: true } });
+    const acknowledged = { ...defaultProps, materials: [second] };
+    render(acknowledged);
+    tree = render(acknowledged);
+    expect(summary(tree).props.value).toBe(retainedSummary);
+    expect(checkbox(tree, '我已核对整理稿').props.checked).toBe(true);
+    expect(checkbox(tree, second.name).props.checked).toBe(true);
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+  });
+  it('searches material text while preserving hidden selections and uses all selected sources, not only filtered rows', () => {
+    let tree = render();
+    checkbox(tree, first.name).props.onChange!({ target: { checked: true } });
+    checkbox(tree, second.name).props.onChange!({ target: { checked: true } });
+    tree = render();
+    const search = nodes(tree).find(
+      (node) => node.type === 'input' && node.props.type === 'search',
+    )!;
+    search.props.onChange!({ target: { checked: false, value: 'B商品' } });
+    tree = render();
+    expect(deletionButton(tree, first.name)).toBeUndefined();
+    expect(deletionButton(tree, second.name)).toBeDefined();
+    button(tree, '直接使用提取文字').props.onClick!();
+    tree = render();
+    expect(summary(tree).props.value).toContain(first.text);
+    expect(summary(tree).props.value).toContain(second.text);
+    expect(text(tree)).toContain('筛选不会清除已选材料');
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+  it('appends a plain-language template without losing prior unsaved text or silently confirming it', () => {
+    let tree = render();
+    checkbox(tree, first.name).props.onChange!({ target: { checked: true } });
+    tree = render();
+    button(tree, '直接使用提取文字').props.onClick!();
+    tree = render();
+    checkbox(tree, '我已核对整理稿').props.onChange!({ target: { checked: true } });
+    button(tree, '插入到整理稿').props.onClick!();
+    tree = render();
+    expect(summary(tree).props.value).toContain(first.text);
+    expect(summary(tree).props.value).toContain('商品名称：待补充');
+    expect(checkbox(tree, '我已核对整理稿').props.checked).toBe(false);
+    expect(button(tree, '保存整理稿到客服草稿').props.disabled).toBe(true);
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
+  it('still invalidates a new retained-material summary if the same refresh contains another external deletion', async () => {
+    let tree = render();
+    checkbox(tree, first.name).props.onChange!({ target: { checked: true } });
+    checkbox(tree, second.name).props.onChange!({ target: { checked: true } });
+    tree = render();
+    deletionButton(tree).props.onClick!();
+    tree = render();
+    mocks.fetch.mockResolvedValueOnce(Response.json({ deleted: true, sourceId }));
+    button(tree, '确认删除材料').props.onClick!();
+    await vi.waitFor(() => expect(mocks.refresh).toHaveBeenCalledOnce());
+    tree = render();
+    button(tree, '直接使用提取文字').props.onClick!();
+    tree = render();
+    expect(summary(tree).props.value).toContain(second.text);
+    checkbox(tree, '我已核对整理稿').props.onChange!({ target: { checked: true } });
+    const externalRemoval = { ...defaultProps, materials: [] };
+    render(externalRemoval);
+    tree = render(externalRemoval);
+    expect(summary(tree).props.value).toBe('');
+    expect(checkbox(tree, '我已核对整理稿').props.checked).toBe(false);
+    expect(button(tree, '保存整理稿到客服草稿').props.disabled).toBe(true);
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+  });
+
   it('preserves an unsaved reviewed summary and warnings when more files are uploaded, without auto-merging facts', async () => {
     let tree = render();
     checkbox(tree, first.name).props.onChange!({ target: { checked: true } });

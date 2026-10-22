@@ -1,16 +1,23 @@
 'use server';
 
-import { loadDatabaseConfig, MySqlAssistantLifecycleRepository } from '@h5cs/database';
+import {
+  loadDatabaseConfig,
+  MySqlAssistantLifecycleRepository,
+  MySqlKnowledgeMaterialRepository,
+  KnowledgeMaterialAccessError,
+} from '@h5cs/database';
 import { toAssistantId, toMerchantId } from '@h5cs/domain';
 import { headers } from 'next/headers';
 
 import { currentMerchantForWrite } from '../account/merchant-actions';
 import { requestWorkerPreview } from './worker-preview';
+import { previewEvidence, type PreviewEvidence } from './preview-evidence';
 
 export type PreviewChatState = Readonly<{
   answer: string | null;
   error: string | null;
   revision: number | null;
+  evidence?: PreviewEvidence;
 }>;
 
 export async function previewChatAction(
@@ -45,6 +52,12 @@ export async function previewChatAction(
   const database = loadDatabaseConfig();
   if (!database.configured) return failed('数据库暂不可用。');
   try {
+    // A valid merchant login alone is insufficient for a model-invoking write.
+    await new MySqlKnowledgeMaterialRepository(database.config).assertEditable(
+      merchantId,
+      assistantId,
+      session.merchantUserId,
+    );
     const snapshot = await new MySqlAssistantLifecycleRepository(
       database.config,
     ).findManagementSnapshot(toMerchantId(merchantId), toAssistantId(assistantId));
@@ -57,8 +70,15 @@ export async function previewChatAction(
       draft: snapshot.draft,
       question: rawQuestion.trim(),
     });
-    return { answer, error: null, revision: snapshot.draftRevision };
-  } catch {
+    return {
+      answer,
+      error: null,
+      revision: snapshot.draftRevision,
+      evidence: previewEvidence(snapshot.draft),
+    };
+  } catch (error) {
+    if (error instanceof KnowledgeMaterialAccessError)
+      return failed('登录已失效或无权试聊此客服。');
     return failed('试聊服务暂不可用，请稍后重试。');
   }
 }

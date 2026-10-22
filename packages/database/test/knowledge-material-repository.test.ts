@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Connection } from 'mysql2/promise';
 import type { DatabaseConnectionConfig } from '../src/config.js';
+import { createHash } from 'node:crypto';
 import {
   KnowledgeMaterialAccessError,
   MySqlKnowledgeMaterialRepository,
@@ -46,6 +47,18 @@ function fixture(
   };
 }
 describe('merchant uploaded material isolation and persistence', () => {
+  it('checks assistant edit authority without reading any material content', async () => {
+    const allowed = fixture();
+    await allowed.repository.assertEditable(merchantId, assistantId, userId);
+    expect(allowed.execute).toHaveBeenCalledOnce();
+    expect(allowed.execute.mock.calls[0]?.[0]).toContain("mm.role IN ('owner','admin','editor')");
+    expect(allowed.end).toHaveBeenCalledOnce();
+    const denied = fixture(() => []);
+    await expect(
+      denied.repository.assertEditable(merchantId, assistantId, userId),
+    ).rejects.toBeInstanceOf(KnowledgeMaterialAccessError);
+    expect(denied.end).toHaveBeenCalledOnce();
+  });
   it('authorizes tenant, assistant, active member and edit role before reading material text', async () => {
     const f = fixture(() => []);
     await expect(f.repository.list(merchantId, assistantId, userId)).rejects.toBeInstanceOf(
@@ -132,6 +145,52 @@ describe('merchant uploaded material isolation and persistence', () => {
       /INSERT INTO (assistant_release|knowledge_chunk)|UPDATE assistant/u,
     );
     expect(f.end).toHaveBeenCalledOnce();
+  });
+  it('reuses exact text within the authorized assistant before applying the 50 source limit, without overwriting its original name', async () => {
+    const sourceId = 'dd'.repeat(16);
+    const f = fixture((sql) =>
+      sql.includes('SELECT a.id')
+        ? [{}]
+        : Array.from({ length: 50 }, () => ({
+            id: Buffer.from(sourceId, 'hex'),
+            content_hash: createHash('sha256').update(input.text).digest(),
+          })),
+    );
+    await expect(
+      f.repository.saveWithResult({ ...input, name: '重传的新文件名.xlsx' }),
+    ).resolves.toEqual({ id: sourceId, reused: true });
+    expect(f.commit).toHaveBeenCalledOnce();
+    const statements = f.execute.mock.calls.map(([sql]) => sql).join('\n');
+    expect(statements).toContain(
+      'kr.merchant_id=ks.merchant_id AND kr.assistant_id=ks.assistant_id',
+    );
+    expect(statements).toContain(
+      "ks.merchant_id=? AND ks.assistant_id=? AND ks.type='uploaded_file' AND ks.status='active'",
+    );
+    expect(statements).not.toMatch(/INSERT|UPDATE knowledge|DELETE/u);
+    expect(f.rollback).not.toHaveBeenCalled();
+  });
+  it('does not merge a different price, and retains the legacy save string API', async () => {
+    const f = fixture((sql) =>
+      sql.includes('SELECT a.id')
+        ? [{}]
+        : sql.includes('SELECT ks.id,kr.content_hash')
+          ? [
+              {
+                id: Buffer.from('dd'.repeat(16), 'hex'),
+                content_hash: createHash('sha256').update('毛巾 39 元/条').digest(),
+              },
+            ]
+          : [],
+    );
+    await expect(f.repository.saveWithResult(input)).resolves.toEqual({
+      id: expect.stringMatching(/^[0-9a-f]{32}$/u),
+      reused: false,
+    });
+    expect(f.execute.mock.calls.map(([sql]) => sql).join('\n')).toContain(
+      'INSERT INTO knowledge_source',
+    );
+    await expect(fixture().repository.save(input)).resolves.toMatch(/^[0-9a-f]{32}$/u);
   });
   it('rolls back denied or full assistants, preserving existing sources and releases', async () => {
     for (const full of [false, true]) {

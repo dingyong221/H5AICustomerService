@@ -384,6 +384,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
              JOIN merchant_user u ON u.id = mm.merchant_user_id
             WHERE mm.merchant_id = ? AND mm.merchant_user_id = ?
               AND mm.status = 'active' AND m.status = 'active' AND u.status = 'active'
+              AND mm.role IN ('owner','admin','editor')
             LIMIT 1 FOR UPDATE`,
           [merchantId, merchantUserId],
         );
@@ -489,6 +490,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
             WHERE s.id = ? AND s.merchant_user_id = ? AND s.merchant_id = ?
               AND s.state = 'generating' AND s.assistant_id IS NULL
               AND u.status = 'active' AND m.status = 'active' AND mm.status = 'active'
+              AND mm.role IN ('owner','admin','editor')
             LIMIT 1
             FOR UPDATE`,
           [sessionId, merchantUserId, merchantId],
@@ -1071,6 +1073,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
            ON mm.merchant_id = a.merchant_id AND mm.merchant_user_id = u.id
         WHERE a.merchant_id = ? AND a.id = ?
           AND u.status = 'active' AND mm.status = 'active' AND m.status = 'active'
+          AND mm.role IN ('owner','admin','editor')
         LIMIT 1
         FOR UPDATE`,
       [merchantUserId, merchantId, assistantId],
