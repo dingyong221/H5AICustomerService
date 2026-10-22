@@ -5,16 +5,29 @@ import { PreviewService } from '../src/preview-service.js';
 import { buildKnowledgePrompt } from '../src/knowledge-prompt.js';
 import { createHealthServer } from '../src/health-server.js';
 import { WorkerHealth } from '../src/worker-health.js';
+import { buildKnowledgeUnits } from '../src/knowledge-grounding.js';
 
 const input = {
   merchantId: 'aa'.repeat(16),
   text: '【来源：商品.xlsx】\n毛巾 29 元/条。新疆单件运费 15 元；多件运费、包邮资格待确认。',
 };
-const result = {
-  summary: '商品.xlsx：毛巾 29 元/条；新疆单件运费 15 元，多件运费和包邮资格需商家确认。',
-  warnings: ['需确认多件运费和包邮适用条件。'],
+const referencePlan = {
+  groups: [
+    { topic: '商品/服务', unitIds: ['u0'] },
+    { topic: '配送售后', unitIds: ['u1'] },
+  ],
+  reviewUnitIds: ['u1'],
 };
-function fixture(content = JSON.stringify(result)) {
+const result = {
+  summary:
+    '商品/服务：\n【来源：商品.xlsx】\n毛巾 29 元/条。\n配送售后：\n【来源：商品.xlsx】\n新疆单件运费 15 元；多件运费、包邮资格待确认。',
+  warnings: [
+    '整理稿仅对原文分类摘录，请核对事实、适用条件、来源和完整性。',
+    '原文有待核对事项，请对照来源确认冲突、有效版本或适用条件。',
+    '需核对原文：新疆单件运费 15 元；多件运费、包邮资格待确认。',
+  ],
+};
+function fixture(content = JSON.stringify(referencePlan)) {
   const fetchImpl = vi.fn<typeof fetch>(async () =>
     Response.json({
       object: 'chat.completion',
@@ -44,7 +57,9 @@ describe('knowledge material organization', () => {
     expect(prompt.policy).toContain('不可把未知写成否定');
     expect(prompt.policy).toContain('事实冲突时不得自行选择或合并');
     expect(prompt.policy).toContain('不代表已确认或已发布');
-    expect(prompt.confirmedFacts).toBe(JSON.stringify({ materials: input.text }));
+    expect(prompt.policy).toContain('引用单元 id，不输出或改写事实文字');
+    expect(prompt.policy).toContain('没有配送说明不等于不配送');
+    expect(prompt.confirmedFacts).toBe(JSON.stringify({ units: buildKnowledgeUnits(input.text) }));
   });
   it.each([
     null,
@@ -71,11 +86,44 @@ describe('knowledge material organization', () => {
     const f = fixture(content);
     await expect(f.service.organize(input, AbortSignal.timeout(1000))).rejects.toThrow();
   });
-  it('accepts the exact input/output bounds and shares quota with writing, while isolating merchants', async () => {
-    const bounded = fixture(JSON.stringify({ summary: '资'.repeat(4000), warnings: [] }));
-    await expect(
-      bounded.service.organize({ ...input, text: '资'.repeat(24000) }, AbortSignal.timeout(1000)),
-    ).resolves.toMatchObject({ summary: '资'.repeat(4000) });
+  it.each([
+    '服务范围以商家实际预约系统为准。',
+    '配送售后：不涉及配送。',
+    '商品/服务：仅提供咨询服务，不包含实际清洗服务执行。',
+    '常见问答：不支持当天预约。',
+  ])(
+    'rejects unsupported non-numeric assertions, including observed live regressions: %s',
+    async (summary) => {
+      const f = fixture(JSON.stringify({ summary, warnings: [] }));
+      await expect(
+        f.service.organize(
+          {
+            ...input,
+            text: '提供上门空调清洗咨询。预约必须提前1天；不提供空调安装服务。测试清洗价格为每台79元，无已确认优惠；服务范围与实际预约需商家核实。',
+          },
+          AbortSignal.timeout(1000),
+        ),
+      ).rejects.toThrow('Invalid material reference plan');
+    },
+  );
+  it('rejects invented assertions in warnings without returning an unsafe summary', async () => {
+    const f = fixture(JSON.stringify({ ...result, warnings: ['需要商家检查预约系统。'] }));
+    await expect(f.service.organize(input, AbortSignal.timeout(1000))).rejects.toThrow(
+      'Invalid material reference plan',
+    );
+  });
+  it('accepts the full input bound, bounds whole-source output and shares quota while isolating merchants', async () => {
+    const text = '资'.repeat(24000);
+    const bounded = fixture(
+      JSON.stringify({
+        groups: [{ topic: '商品/服务', unitIds: buildKnowledgeUnits(text).map((unit) => unit.id) }],
+        reviewUnitIds: [],
+      }),
+    );
+    const organized = await bounded.service.organize({ ...input, text }, AbortSignal.timeout(1000));
+    expect(organized.summary.length).toBeLessThanOrEqual(4000);
+    expect(organized.summary).toContain('资'.repeat(1200));
+    expect(organized.warnings.some((warning) => warning.includes('未涵盖全部原文'))).toBe(true);
     const f = fixture();
     for (let index = 0; index < 5; index++)
       await f.service.organize(input, AbortSignal.timeout(1000));
@@ -153,6 +201,31 @@ describe('knowledge material organization', () => {
       expect(valid.status).toBe(200);
       expect(await valid.json()).toMatchObject({ data: result });
       expect(f.fetchImpl).toHaveBeenCalledOnce();
+      f.fetchImpl.mockResolvedValueOnce(
+        Response.json({
+          object: 'chat.completion',
+          choices: [
+            {
+              index: 0,
+              finish_reason: 'stop',
+              message: {
+                role: 'assistant',
+                content: JSON.stringify({ summary: '以本店预约系统为准。', warnings: [] }),
+              },
+            },
+          ],
+        }),
+      );
+      const unsafe = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-h5cs-preview-token': f.token },
+        body: JSON.stringify(input),
+      });
+      expect(unsafe.status).toBe(503);
+      const rejected = await unsafe.json();
+      expect(rejected).toMatchObject({ error: { code: 'UNAVAILABLE' } });
+      expect(rejected).not.toHaveProperty('data');
+      expect(JSON.stringify(rejected)).not.toContain('预约系统');
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) =>
