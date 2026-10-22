@@ -40,4 +40,16 @@ describe('merchant login return path', () => {
       expect(safeMerchantReturnPath(merchantId, value)).toBeNull();
     }
   });
+  it('restores only scoped history list/detail/cursor paths after login', () => {
+    const base = `/${merchantId}/publish/${assistantId}/history`;
+    for (const value of [base, `${base}/${'a'.repeat(32)}`, `${base}?before=20`])
+      expect(safeMerchantReturnPath(merchantId, value)).toBe(value);
+    for (const value of [
+      `${base}?before=0`,
+      `${base}?before=20&next=https://evil.test`,
+      `${base}/${'a'.repeat(32)}?token=bad`,
+      `${base}/../drafts`,
+    ])
+      expect(safeMerchantReturnPath(merchantId, value)).toBeNull();
+  });
 });

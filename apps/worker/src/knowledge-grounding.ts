@@ -66,7 +66,7 @@ export function renderKnowledgeOrganization(
     Array.isArray(ids) &&
     ids.length <= 80 &&
     ids.every((id) => typeof id === 'string' && byId.has(id));
-  if (!Array.isArray(groups) || !groups.length || groups.length > 20 || !validIds(reviewIds))
+  if (!Array.isArray(groups) || !groups.length || groups.length > 80 || !validIds(reviewIds))
     return null;
   const selected = new Map<string, string[]>();
   for (const raw of groups) {
