@@ -5,6 +5,11 @@ export function safeMerchantReturnPath(merchantId: string, value: unknown): stri
     'u',
   );
   if (allowed.test(value)) return value;
+  const history = new RegExp(
+    `^/${merchantId}/publish/[0-9a-f]{32}/history(?:/[0-9a-f]{32}|\\?before=[1-9][0-9]{0,9})?$`,
+    'u',
+  );
+  if (history.test(value)) return value;
   const improvements = new RegExp(
     `^/${merchantId}/improvements(?:/[0-9a-f]{32})?(?:\\?assistant=[0-9a-f]{32}(?:&session=[0-9a-f]{32}&message=[0-9a-f]{32})?)?(?:#create)?$`,
     'u',

@@ -8,8 +8,9 @@ import {
   MySqlKnowledgeMaterialRepository,
   MySqlMerchantAccessRepository,
   MySqlPlatformProvisioningRepository,
+  MySqlPublicSessionRepository,
 } from '@h5cs/database';
-import { toAssistantId, toMerchantId, toMerchantUserId } from '@h5cs/domain';
+import { toAssistantId, toMerchantId, toMerchantUserId, toReleaseId } from '@h5cs/domain';
 
 // Fail closed: these synthetic fixtures may only use the disposable loopback CI database.
 const url = process.env['H5CS_INTEGRATION_MYSQL_URL'];
@@ -306,4 +307,285 @@ describe('real MySQL uploaded material soft deletion', () => {
       ),
     ).toEqual([]);
   });
+});
+
+async function publishHistoryFixture(f: Awaited<ReturnType<typeof fixture>>, revision: number) {
+  await lifecycle.confirmDraftKnowledge({ ...f, expectedDraftRevision: revision, now: new Date() });
+  return lifecycle.publish({
+    ...f,
+    expectedDraftRevision: revision,
+    promptTemplateVersion: 'material-ci-v1',
+    modelPolicyVersion: 'material-ci-v1',
+    retrievalPolicyVersion: 'material-ci-v1',
+    idempotency: idem(),
+    now: new Date(),
+  });
+}
+
+describe('real MySQL published business-history recovery', () => {
+  it('restores an old snapshot as a fresh unconfirmed draft, keeps sources/link/sessions unchanged, then republishes a new version', async () => {
+    const f = await fixture();
+    await material(f, '恢复测试原始材料.txt');
+    const originalSources = await repository.list(f.merchantId, f.assistantId, f.userId);
+    const first = await publishHistoryFixture(f, 1);
+    const sessions = new MySqlPublicSessionRepository(
+      database,
+      randomBytes(32).toString('base64url'),
+    );
+    const session = () =>
+      sessions.createSession({
+        publicSlug: f.created.publicSlug,
+        sessionRequestId: `session_request_${randomBytes(16).toString('hex')}`,
+        visitorNonce: randomBytes(32).toString('base64url'),
+        now: new Date(),
+      });
+    const oldSession = await session();
+    const updated = await lifecycle.saveDraft({
+      ...f,
+      expectedRevision: 1,
+      draft: {
+        ...draft,
+        materialsSummary: '第二版 SYNTHETIC 商品A 59元。',
+        pricingSummary: '商品A 59元。',
+      },
+      now: new Date(),
+    });
+    const second = await publishHistoryFixture(f, updated.draftRevision);
+    const secondSession = await session();
+    const beforePublic = await lifecycle.findPublicSnapshot(f.created.publicSlug);
+    const beforeSnapshots = await sql(
+      'SELECT id,status,config_snapshot FROM assistant_release WHERE merchant_id=? AND assistant_id=? ORDER BY release_no',
+      [bytes(f.merchantId), bytes(f.assistantId)],
+    );
+    const restored = await lifecycle.restoreDraftFromRelease({
+      ...f,
+      releaseId: first.releaseId,
+      expectedRevision: updated.draftRevision,
+      now: new Date(),
+    });
+    expect(restored).toMatchObject({
+      sourceReleaseNo: 1,
+      assistant: {
+        draft: f.created.draft,
+        draftRevision: 3,
+        knowledgeConfirmed: false,
+        activeReleaseId: second.releaseId,
+        publicSlug: f.created.publicSlug,
+      },
+    });
+    expect(await lifecycle.findPublicSnapshot(f.created.publicSlug)).toEqual(beforePublic);
+    expect(
+      await sql(
+        'SELECT id,status,config_snapshot FROM assistant_release WHERE merchant_id=? AND assistant_id=? ORDER BY release_no',
+        [bytes(f.merchantId), bytes(f.assistantId)],
+      ),
+    ).toEqual(beforeSnapshots);
+    expect(await repository.list(f.merchantId, f.assistantId, f.userId)).toEqual(originalSources);
+    await expect(
+      lifecycle.restoreDraftFromRelease({
+        ...f,
+        releaseId: first.releaseId,
+        expectedRevision: 2,
+        now: new Date(),
+      }),
+    ).rejects.toThrow();
+    const restoreAudits = await sql(
+      "SELECT metadata FROM audit_log WHERE merchant_id=? AND action='assistant.draft_restore' AND target_id=?",
+      [bytes(f.merchantId), f.assistantId],
+    );
+    expect(restoreAudits).toHaveLength(1);
+    const restoreMetadata: unknown =
+      typeof restoreAudits[0]?.metadata === 'string'
+        ? JSON.parse(restoreAudits[0].metadata)
+        : restoreAudits[0]?.metadata;
+    expect(restoreMetadata).toEqual(
+      expect.objectContaining({
+        sourceReleaseId: first.releaseId,
+        sourceReleaseNo: 1,
+        previousDraftRevision: 2,
+        draftRevision: 3,
+        publicReleaseUnchanged: true,
+      }),
+    );
+    await expect(
+      lifecycle.publish({
+        ...f,
+        expectedDraftRevision: 3,
+        promptTemplateVersion: 'material-ci-v1',
+        modelPolicyVersion: 'material-ci-v1',
+        retrievalPolicyVersion: 'material-ci-v1',
+        idempotency: idem(),
+        now: new Date(),
+      }),
+    ).rejects.toThrow();
+    const third = await publishHistoryFixture(f, 3);
+    const thirdSession = await session();
+    expect(third.releaseNo).toBe(3);
+    expect((await lifecycle.findManagementSnapshot(f.merchantId, f.assistantId))?.publicSlug).toBe(
+      f.created.publicSlug,
+    );
+    expect((await lifecycle.findPublicSnapshot(f.created.publicSlug))?.releaseRef).toBe(
+      third.releaseId,
+    );
+    for (const [entry, release] of [
+      [oldSession, first],
+      [secondSession, second],
+      [thirdSession, third],
+    ] as const) {
+      expect(
+        await sql(
+          'SELECT LOWER(HEX(release_id)) AS release_id FROM conversation_session WHERE merchant_id=? AND assistant_id=? AND id=?',
+          [bytes(f.merchantId), bytes(f.assistantId), bytes(entry.sessionHandle.slice(2))],
+        ),
+      ).toEqual([expect.objectContaining({ release_id: release.releaseId })]);
+    }
+    const older = await lifecycle.listReleaseHistory({ ...f, beforeReleaseNo: 3 });
+    expect(older.items.map((item) => item.releaseNo)).toEqual([2, 1]);
+    expect(older.items.every((item) => !item.isCurrent)).toBe(true);
+  }, 30000);
+
+  it('isolates cross-merchant and sibling sources and rejects viewers/disabled actors without changing the draft', async () => {
+    const f = await fixture(),
+      other = await fixture();
+    const ownRelease = await publishHistoryFixture(f, 1);
+    const foreignRelease = await publishHistoryFixture(other, 1);
+    const sibling = await lifecycle.createManualDraft({
+      ...f,
+      displayName: '同商家历史隔离客服',
+      draft,
+      idempotency: idem(),
+      now: new Date(),
+    });
+    const siblingFixture = { ...f, assistantId: sibling.assistantId };
+    const siblingRelease = await publishHistoryFixture(siblingFixture, 1);
+    const before = await lifecycle.findManagementSnapshot(f.merchantId, f.assistantId);
+    for (const release of [foreignRelease, siblingRelease]) {
+      expect(
+        await lifecycle.findReleaseHistorySnapshot({ ...f, releaseId: release.releaseId }),
+      ).toBeNull();
+      await expect(
+        lifecycle.restoreDraftFromRelease({
+          ...f,
+          releaseId: release.releaseId,
+          expectedRevision: 1,
+          now: new Date(),
+        }),
+      ).rejects.toThrow();
+    }
+    expect(
+      (await lifecycle.listReleaseHistory({ ...f, assistantId: other.assistantId })).items,
+    ).toEqual([]);
+    await sql(
+      "UPDATE merchant_membership SET role='viewer' WHERE merchant_id=? AND merchant_user_id=?",
+      [bytes(f.merchantId), bytes(f.userId)],
+    );
+    expect(
+      (await lifecycle.findReleaseHistorySnapshot({ ...f, releaseId: ownRelease.releaseId }))
+        ?.canRestore,
+    ).toBe(false);
+    await expect(
+      lifecycle.restoreDraftFromRelease({
+        ...f,
+        releaseId: ownRelease.releaseId,
+        expectedRevision: 1,
+        now: new Date(),
+      }),
+    ).rejects.toThrow();
+    expect(await lifecycle.findManagementSnapshot(f.merchantId, f.assistantId)).toEqual(before);
+    await sql(
+      "UPDATE merchant_membership SET role='editor' WHERE merchant_id=? AND merchant_user_id=?",
+      [bytes(f.merchantId), bytes(f.userId)],
+    );
+    for (const [table, targetId] of [
+      ['merchant_user', f.userId],
+      ['merchant', f.merchantId],
+    ] as const) {
+      await sql(`UPDATE ${table} SET status='disabled' WHERE id=?`, [bytes(targetId)]);
+      expect(
+        await lifecycle.findReleaseHistorySnapshot({ ...f, releaseId: ownRelease.releaseId }),
+      ).toBeNull();
+      await expect(
+        lifecycle.restoreDraftFromRelease({
+          ...f,
+          releaseId: ownRelease.releaseId,
+          expectedRevision: 1,
+          now: new Date(),
+        }),
+      ).rejects.toThrow();
+      await sql(`UPDATE ${table} SET status='active' WHERE id=?`, [bytes(targetId)]);
+    }
+    await expect(
+      lifecycle.restoreDraftFromRelease({
+        ...f,
+        releaseId: ownRelease.releaseId,
+        expectedRevision: 1,
+        now: new Date(),
+      }),
+    ).resolves.toMatchObject({ assistant: { draftRevision: 2, knowledgeConfirmed: false } });
+  }, 30000);
+
+  it('rolls back draft writes when the restore audit fails in a real transaction', async () => {
+    const f = await fixture();
+    const release = await publishHistoryFixture(f, 1);
+    const before = await lifecycle.findManagementSnapshot(f.merchantId, f.assistantId);
+    const auditFailure = new MySqlAssistantLifecycleRepository({
+      ...database,
+      openConnection: async () => {
+        const connection = await database.openConnection();
+        return new Proxy(connection, {
+          get(targetConnection, property) {
+            if (property === 'execute')
+              return async (query: string, values: Parameters<Connection['execute']>[1]) => {
+                if (query.includes('assistant.draft_restore'))
+                  throw new Error('SYNTHETIC restore audit unavailable');
+                return targetConnection.execute(query, values);
+              };
+            const value: unknown = Reflect.get(targetConnection, property);
+            return typeof value === 'function' ? value.bind(targetConnection) : value;
+          },
+        }) as Connection;
+      },
+    });
+    await expect(
+      auditFailure.restoreDraftFromRelease({
+        ...f,
+        releaseId: toReleaseId(release.releaseId),
+        expectedRevision: 1,
+        now: new Date(),
+      }),
+    ).rejects.toThrow('SYNTHETIC restore audit unavailable');
+    expect(await lifecycle.findManagementSnapshot(f.merchantId, f.assistantId)).toEqual(before);
+    expect(
+      await sql(
+        "SELECT id FROM audit_log WHERE merchant_id=? AND action='assistant.draft_restore'",
+        [bytes(f.merchantId)],
+      ),
+    ).toEqual([]);
+    expect((await lifecycle.findPublicSnapshot(f.created.publicSlug))?.releaseRef).toBe(
+      release.releaseId,
+    );
+    const concurrent = await Promise.allSettled(
+      [1, 2].map(() =>
+        lifecycle.restoreDraftFromRelease({
+          ...f,
+          releaseId: release.releaseId,
+          expectedRevision: 1,
+          now: new Date(),
+        }),
+      ),
+    );
+    expect(concurrent.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(concurrent.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(await lifecycle.findManagementSnapshot(f.merchantId, f.assistantId)).toMatchObject({
+      draftRevision: 2,
+      knowledgeConfirmed: false,
+      activeReleaseId: release.releaseId,
+    });
+    expect(
+      await sql(
+        "SELECT id FROM audit_log WHERE merchant_id=? AND action='assistant.draft_restore'",
+        [bytes(f.merchantId)],
+      ),
+    ).toHaveLength(1);
+  }, 30000);
 });

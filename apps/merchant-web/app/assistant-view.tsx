@@ -258,6 +258,12 @@ export async function AssistantView({
         ) : null}
         {section === 'publish' ? (
           <>
+            <p className="workflow-hint">
+              需要找回以前发布的业务资料？
+              <Link href={`${merchantPath(merchantId, 'publish', assistantId)}/history`}>
+                查看发布历史与恢复草稿
+              </Link>
+            </p>
             <section
               className="merchant-account-card assistant-detail-card workflow-review"
               aria-label="发布内容核对"

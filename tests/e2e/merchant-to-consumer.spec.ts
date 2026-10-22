@@ -1074,4 +1074,141 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
     ),
   ).toBe(200);
   process.stdout.write('[ops-e2e] responsive layout and merchant/operator separation verified\n');
+
+  // Recovery is tested after reporting so its additional version/session does
+  // not change the earlier point-in-time usage assertions. All model replies
+  // here still come from the deterministic browser-test provider, not Qwen.
+  await merchantPage.goto(`${managementUrl}/publish/${assistantId}`);
+  await merchantPage.getByRole('link', { name: '查看发布历史与恢复草稿', exact: true }).click();
+  const historyUrl = `${managementUrl}/publish/${assistantId}/history`;
+  await expect(merchantPage).toHaveURL(historyUrl);
+  await expect(
+    merchantPage.getByRole('heading', { level: 1, name: '发布历史', exact: true }),
+  ).toBeVisible();
+  await merchantPage.getByRole('link', { name: '查看第 1 版', exact: true }).click();
+  await expect(
+    merchantPage.getByRole('heading', { level: 1, name: '第 1 版业务资料', exact: true }),
+  ).toBeVisible();
+  const restoreForm = merchantPage.locator('.release-restore-form');
+  const restoreRevision = Number(
+    await restoreForm.locator('input[name="draftRevision"]').inputValue(),
+  );
+  expect(Number.isSafeInteger(restoreRevision) && restoreRevision > 0).toBe(true);
+  const restoredSourceId = await restoreForm.locator('input[name="releaseId"]').inputValue();
+  expect(restoredSourceId).toBe(firstReleaseRef);
+  const restoreCheckbox = restoreForm.getByRole('checkbox', { name: /我确认用第 1 版业务资料/u });
+  await expect(restoreCheckbox).not.toBeChecked();
+  await expect(restoreCheckbox).toHaveAttribute('required', '');
+  await expect(merchantPage.getByRole('region', { name: '历史版本内容' })).toContainText(
+    '预约需提前1天',
+  );
+  for (const [width, height, viewport] of [
+    [1440, 1000, 'desktop'],
+    [390, 844, 'mobile'],
+  ] as const) {
+    await merchantPage.setViewportSize({ width, height });
+    expect(
+      await merchantPage.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+      ),
+    ).toBe(true);
+    await merchantPage.screenshot({
+      path: `artifacts/ops-enhancement/merchant-guided-workflow/history-${viewport}-${pathMode ?? 'root'}.png`,
+      fullPage: true,
+    });
+  }
+  await merchantPage.setViewportSize({ width: 1280, height: 720 });
+  const beforeRestorePublic = await readPublishedRelease(merchantPage, publicUrl!);
+  expect(beforeRestorePublic.releaseRef).toBe(latestReleaseRef);
+  const restorePath = new URL(merchantPage.url()).pathname;
+  let restorePosts = 0;
+  const countRestore = (request: { method(): string; url(): string }) => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === restorePath)
+      restorePosts++;
+  };
+  merchantPage.on('request', countRestore);
+  try {
+    await restoreCheckbox.check();
+    await restoreForm.getByRole('button', { name: '恢复为待核对草稿', exact: true }).click();
+    await expect(restoreForm.getByRole('status')).toContainText(
+      `已从第 1 版恢复为草稿修订 ${restoreRevision + 1}`,
+    );
+    await expect(
+      restoreForm.getByRole('button', { name: '恢复为待核对草稿', exact: true }),
+    ).toBeDisabled();
+    expect(restorePosts).toBe(1);
+    expect(await readPublishedRelease(merchantPage, publicUrl!)).toEqual(beforeRestorePublic);
+    await merchantPage.reload();
+    await expect(restoreForm.locator('input[name="draftRevision"]')).toHaveValue(
+      String(restoreRevision + 1),
+    );
+    await expect(restoreCheckbox).not.toBeChecked();
+    expect(restorePosts).toBe(1);
+  } finally {
+    merchantPage.off('request', countRestore);
+  }
+  await merchantPage.goto(`${managementUrl}/drafts/${assistantId}`);
+  await expect(
+    merchantPage.locator('.assistant-edit-form textarea[name="materialsSummary"]'),
+  ).toHaveValue(/预约需提前1天/u);
+  await expect(
+    merchantPage.locator('.assistant-edit-form textarea[name="materialsSummary"]'),
+  ).not.toHaveValue(/也提供洗衣机清洁咨询/u);
+  await merchantPage.getByRole('button', { name: '保存并继续', exact: true }).click();
+  await expectMerchantStep(merchantPage, '知识补充');
+  await merchantPage.getByRole('link', { name: '下一步：效果试聊', exact: true }).click();
+  await merchantPage.getByLabel('试聊问题').fill('预约需提前几天，是否提供安装服务？');
+  await merchantPage.getByRole('button', { name: '发送测试问题', exact: true }).click();
+  const restoredPreview = merchantPage.locator('.assistant-preview-answer > p');
+  await expect(restoredPreview).toContainText('预约需提前1天；不提供安装服务。', {
+    timeout: 60000,
+  });
+  await expect(restoredPreview).not.toContainText('也提供洗衣机清洁咨询');
+  await merchantPage.getByRole('link', { name: '下一步：发布分享', exact: true }).click();
+  await merchantPage.getByLabel(/我已核对以上资料，并确认向消费者公开发布当前修订/u).check();
+  await merchantPage.getByRole('button', { name: '确认资料并发布 AI 客服', exact: true }).click();
+  await expect(merchantPage.getByText(/第 4 版已发布/u)).toBeVisible();
+  await expect(publicLink).toHaveAttribute('href', publicUrl!);
+  const recoveredPublic = await readPublishedRelease(merchantPage, publicUrl!);
+  expect(recoveredPublic.status).toBe(200);
+  expect(recoveredPublic.releaseRef).not.toBe(latestReleaseRef);
+  expect(recoveredPublic.releaseRef).not.toBe(firstReleaseRef);
+  await consumerPage.reload();
+  await expect(
+    consumerPage.locator('.message-row--assistant .message-bubble p').last(),
+  ).toContainText('也提供洗衣机清洁咨询', { timeout: 30000 });
+  const recoveredContext = await browser.newContext();
+  try {
+    const recoveredConsumer = await recoveredContext.newPage();
+    await recoveredConsumer.goto(publicUrl!);
+    await recoveredConsumer
+      .getByRole('textbox', { name: '输入想咨询的问题' })
+      .fill('预约需提前几天，是否提供安装服务？');
+    const newSession = recoveredConsumer.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        /\/api\/v1\/public\/assistants\/[a-z0-9-]+\/sessions$/u.test(
+          new URL(response.url()).pathname,
+        ),
+    );
+    await recoveredConsumer.getByRole('button', { name: '发送消息' }).click();
+    const sessionResult = (await (await newSession).json()) as { data: { releaseRef: string } };
+    expect(sessionResult.data.releaseRef).toBe(recoveredPublic.releaseRef);
+    const recoveredAnswer = recoveredConsumer
+      .locator('.message-row--assistant .message-bubble p')
+      .last();
+    await expect(recoveredAnswer).toContainText('预约需提前1天；不提供安装服务。', {
+      timeout: 60000,
+    });
+    await expect(recoveredAnswer).not.toContainText('也提供洗衣机清洁咨询');
+    await recoveredConsumer.reload();
+    await expect(
+      recoveredConsumer.locator('.message-row--assistant .message-bubble p').last(),
+    ).toContainText('预约需提前1天；不提供安装服务。', { timeout: 30000 });
+  } finally {
+    await recoveredContext.close();
+  }
+  process.stdout.write(
+    '[history-e2e] source snapshot, draft-only recovery, reviewed publication, fixed URL and old/new sessions verified with deterministic provider\n',
+  );
 });

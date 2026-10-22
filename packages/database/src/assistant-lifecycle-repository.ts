@@ -80,6 +80,66 @@ type PublicRow = RowDataPacket & {
   config_snapshot: string | Record<string, unknown>;
 };
 
+type HistoryRow = ReleaseRow & {
+  status: string;
+  active_release_id: Buffer | null;
+  membership_role: string;
+  config_snapshot: string | Record<string, unknown>;
+};
+
+export type AssistantReleaseHistoryItem = Readonly<{
+  releaseId: ReleaseId;
+  releaseNo: number;
+  draftRevision: number;
+  status: 'active' | 'retired';
+  createdAt: Date;
+  activatedAt: Date;
+  isCurrent: boolean;
+  canRestore: boolean;
+}>;
+
+export type AssistantReleaseHistorySnapshot = AssistantReleaseHistoryItem &
+  Readonly<{ draft: AssistantDraftConfig }>;
+
+export class AssistantHistorySourceUnavailableError extends Error {
+  public constructor() {
+    super('Historical release is unavailable');
+    this.name = 'AssistantHistorySourceUnavailableError';
+  }
+}
+
+type DraftWrite = Parameters<AssistantLifecycleRepository['saveDraft']>[0];
+
+const historyScope = `FROM assistant_release r
+  JOIN assistant a ON a.id = r.assistant_id AND a.merchant_id = r.merchant_id
+  JOIN merchant m ON m.id = a.merchant_id
+  JOIN merchant_user u ON u.id = ?
+  JOIN merchant_membership mm ON mm.merchant_id = a.merchant_id AND mm.merchant_user_id = u.id
+ WHERE r.merchant_id = ? AND r.assistant_id = ?
+   AND u.status = 'active' AND mm.status = 'active' AND m.status = 'active'
+   AND r.status IN ('active','retired')`;
+
+const historyMetadata = (row: HistoryRow): AssistantReleaseHistoryItem => {
+  if (
+    !Number.isSafeInteger(row.release_no) ||
+    row.release_no < 1 ||
+    !Number.isSafeInteger(row.draft_revision) ||
+    row.draft_revision < 1 ||
+    (row.status !== 'active' && row.status !== 'retired')
+  )
+    throw new AssistantLifecyclePersistenceError('Stored release history is invalid');
+  return {
+    releaseId: toReleaseId(idString(row.release_id, 'releaseId')),
+    releaseNo: row.release_no,
+    draftRevision: row.draft_revision,
+    status: row.status,
+    createdAt: validDate(row.created_at, 'createdAt'),
+    activatedAt: validDate(row.activated_at, 'activatedAt'),
+    isCurrent: row.active_release_id?.equals(row.release_id) ?? false,
+    canRestore: ['owner', 'admin', 'editor'].includes(row.membership_role),
+  };
+};
+
 export { parseDraft as parseAssistantDraft, validateDraft as validateAssistantDraft };
 
 const OPERATION_GENERATE = 'assistant.generate';
@@ -633,50 +693,116 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
         assistantId,
       );
       if (current === null) throw new AssistantRevisionConflictError();
-      if (current.draft_revision !== input.expectedRevision) {
+      return this.#persistDraft(connection, current, input, draft);
+    });
+  }
+
+  public async listReleaseHistory(input: {
+    merchantUserId: MerchantUserId;
+    merchantId: MerchantId;
+    assistantId: AssistantId;
+    beforeReleaseNo?: number;
+  }): Promise<
+    Readonly<{ items: readonly AssistantReleaseHistoryItem[]; nextBeforeReleaseNo: number | null }>
+  > {
+    const user = idBuffer(input.merchantUserId, 'merchantUserId');
+    const merchant = idBuffer(input.merchantId, 'merchantId');
+    const assistant = idBuffer(input.assistantId, 'assistantId');
+    const before = input.beforeReleaseNo ?? null;
+    if (before !== null && (!Number.isSafeInteger(before) || before < 1))
+      throw new AssistantLifecyclePersistenceError('History cursor is invalid');
+    return this.#withConnection(async (connection) => {
+      const [rows] = await connection.execute<HistoryRow[]>(
+        `SELECT r.id AS release_id, r.release_no, r.draft_revision, r.status,
+                r.created_at, r.activated_at, a.active_release_id, mm.role AS membership_role
+          ${historyScope} AND (? IS NULL OR r.release_no < ?)
+          ORDER BY r.release_no DESC LIMIT 21`,
+        [user, merchant, assistant, before, before],
+      );
+      const items = rows.slice(0, 20).map(historyMetadata);
+      return { items, nextBeforeReleaseNo: rows.length > 20 ? items.at(-1)!.releaseNo : null };
+    });
+  }
+
+  public async findReleaseHistorySnapshot(input: {
+    merchantUserId: MerchantUserId;
+    merchantId: MerchantId;
+    assistantId: AssistantId;
+    releaseId: ReleaseId;
+  }): Promise<AssistantReleaseHistorySnapshot | null> {
+    const user = idBuffer(input.merchantUserId, 'merchantUserId');
+    const merchant = idBuffer(input.merchantId, 'merchantId');
+    const assistant = idBuffer(input.assistantId, 'assistantId');
+    const release = idBuffer(input.releaseId, 'releaseId');
+    return this.#withConnection(async (connection) => {
+      const [rows] = await connection.execute<HistoryRow[]>(
+        `SELECT r.id AS release_id, r.release_no, r.draft_revision, r.status,
+                r.created_at, r.activated_at, r.config_snapshot,
+                a.active_release_id, mm.role AS membership_role
+          ${historyScope} AND r.id = ? LIMIT 1`,
+        [user, merchant, assistant, release],
+      );
+      const row = rows[0];
+      return row ? { ...historyMetadata(row), draft: parseDraft(row.config_snapshot) } : null;
+    });
+  }
+
+  public async restoreDraftFromRelease(input: {
+    merchantUserId: MerchantUserId;
+    merchantId: MerchantId;
+    assistantId: AssistantId;
+    releaseId: ReleaseId;
+    expectedRevision: number;
+    now: Date;
+  }): Promise<Readonly<{ assistant: AssistantManagementSnapshot; sourceReleaseNo: number }>> {
+    validDate(input.now, 'now');
+    if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1)
+      throw new AssistantLifecyclePersistenceError('expectedRevision is invalid');
+    const user = idBuffer(input.merchantUserId, 'merchantUserId');
+    const merchant = idBuffer(input.merchantId, 'merchantId');
+    const assistant = idBuffer(input.assistantId, 'assistantId');
+    const release = idBuffer(input.releaseId, 'releaseId');
+    return this.#withTransaction(async (connection) => {
+      // Recheck the editor role and current revision under the existing tenant lock.
+      const current = await this.#lockManagement(connection, user, merchant, assistant);
+      if (!current || current.draft_revision !== input.expectedRevision)
         throw new AssistantRevisionConflictError();
-      }
-      const nextRevision = input.expectedRevision + 1;
-      const [draftResult] = await connection.execute<ResultSetHeader>(
-        `UPDATE assistant_draft
-            SET revision = ?, config = ?, validation = ?, updated_by = ?, updated_at = ?
-          WHERE merchant_id = ? AND assistant_id = ? AND revision = ?`,
+      const [rows] = await connection.execute<HistoryRow[]>(
+        `SELECT id AS release_id, release_no, config_snapshot FROM assistant_release
+          WHERE merchant_id = ? AND assistant_id = ? AND id = ?
+            AND status IN ('active','retired') LIMIT 1`,
+        [merchant, assistant, release],
+      );
+      const source = rows[0];
+      if (!source || !Number.isSafeInteger(source.release_no) || source.release_no < 1)
+        throw new AssistantHistorySourceUnavailableError();
+      const draft = parseDraft(source.config_snapshot);
+      const saved = await this.#persistDraft(connection, current, { ...input, draft }, draft);
+      const auditId = this.#newId('auditId');
+      await connection.execute(
+        `INSERT INTO audit_log
+           (id, merchant_id, actor_type, actor_id, action, target_type, target_id,
+            result, request_id, metadata, occurred_at, created_at)
+         VALUES (?, ?, 'merchant_user', ?, 'assistant.draft_restore', 'assistant', ?,
+                 'success', ?, ?, ?, ?)`,
         [
-          nextRevision,
-          JSON.stringify(draft),
-          JSON.stringify({ publishable: false, reason: 'knowledge_not_verified' }),
-          merchantUserId,
+          auditId,
+          merchant,
+          input.merchantUserId,
+          input.assistantId,
+          `assistant-restore-${auditId.toString('hex')}`,
+          JSON.stringify({
+            sourceReleaseId: input.releaseId,
+            sourceReleaseNo: source.release_no,
+            previousDraftRevision: input.expectedRevision,
+            draftRevision: saved.draftRevision,
+            publicReleaseUnchanged: true,
+          }),
           input.now,
-          merchantId,
-          assistantId,
-          input.expectedRevision,
+          input.now,
         ],
       );
-      const [assistantResult] = await connection.execute<ResultSetHeader>(
-        `UPDATE assistant
-            SET draft_revision = ?, updated_at = ?
-          WHERE merchant_id = ? AND id = ? AND draft_revision = ?`,
-        [nextRevision, input.now, merchantId, assistantId, input.expectedRevision],
-      );
-      if (draftResult.affectedRows !== 1 || assistantResult.affectedRows !== 1) {
-        throw new AssistantRevisionConflictError();
-      }
-      return {
-        assistantId: input.assistantId,
-        merchantId: input.merchantId,
-        displayName: current.display_name,
-        publicSlug: current.public_slug,
-        status: parseStatus(current.status),
-        draftRevision: nextRevision,
-        draft,
-        knowledgeConfirmed: false,
-        activeReleaseId:
-          current.active_release_id === null
-            ? null
-            : toReleaseId(idString(current.active_release_id, 'activeReleaseId')),
-        createdAt: current.created_at,
-        updatedAt: input.now,
-      };
+      return { assistant: saved, sourceReleaseNo: source.release_no };
     });
   }
 
@@ -1079,6 +1205,59 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
       [merchantUserId, merchantId, assistantId],
     );
     return rows[0] ?? null;
+  }
+
+  async #persistDraft(
+    connection: Connection,
+    current: PublishRow,
+    input: DraftWrite,
+    draft: AssistantDraftConfig,
+  ): Promise<AssistantManagementSnapshot> {
+    if (current.draft_revision !== input.expectedRevision)
+      throw new AssistantRevisionConflictError();
+    const nextRevision = input.expectedRevision + 1;
+    const merchant = idBuffer(input.merchantId, 'merchantId');
+    const assistant = idBuffer(input.assistantId, 'assistantId');
+    const user = idBuffer(input.merchantUserId, 'merchantUserId');
+    const [draftResult] = await connection.execute<ResultSetHeader>(
+      `UPDATE assistant_draft
+          SET revision = ?, config = ?, validation = ?, updated_by = ?, updated_at = ?
+        WHERE merchant_id = ? AND assistant_id = ? AND revision = ?`,
+      [
+        nextRevision,
+        JSON.stringify(draft),
+        JSON.stringify({ publishable: false, reason: 'knowledge_not_verified' }),
+        user,
+        input.now,
+        merchant,
+        assistant,
+        input.expectedRevision,
+      ],
+    );
+    const [assistantResult] = await connection.execute<ResultSetHeader>(
+      `UPDATE assistant
+          SET draft_revision = ?, updated_at = ?
+        WHERE merchant_id = ? AND id = ? AND draft_revision = ?`,
+      [nextRevision, input.now, merchant, assistant, input.expectedRevision],
+    );
+    if (draftResult.affectedRows !== 1 || assistantResult.affectedRows !== 1)
+      throw new AssistantRevisionConflictError();
+    return {
+      assistantId: input.assistantId,
+      merchantId: input.merchantId,
+      displayName: current.display_name,
+      publicSlug: current.public_slug,
+      status: parseStatus(current.status),
+      draftRevision: nextRevision,
+      draft,
+      knowledgeConfirmed: false,
+      activeReleaseId:
+        current.active_release_id === null
+          ? null
+          : toReleaseId(idString(current.active_release_id, 'activeReleaseId')),
+      createdAt: current.created_at,
+      updatedAt: input.now,
+    };
   }
 
   async #knowledgeReady(
