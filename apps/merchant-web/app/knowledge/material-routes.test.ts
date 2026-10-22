@@ -22,6 +22,7 @@ vi.mock('@h5cs/database', () => ({
   MySqlKnowledgeMaterialRepository: class {
     list = mocks.list;
     save = mocks.save;
+    saveWithResult = mocks.save;
     archive = mocks.archive;
   },
   MySqlAssistantLifecycleRepository: class {
@@ -99,7 +100,7 @@ describe('knowledge material HTTP access boundaries', () => {
     mocks.config.mockReturnValue({ configured: true, config: {} });
     mocks.member.mockResolvedValue({ merchantUserId: userId, merchantId });
     mocks.list.mockResolvedValue([material]);
-    mocks.save.mockResolvedValue(sourceId);
+    mocks.save.mockResolvedValue({ id: sourceId, reused: false });
     mocks.archive.mockResolvedValue(undefined);
     mocks.parse.mockResolvedValue(material.text);
     mocks.organize.mockResolvedValue(organized);
@@ -287,6 +288,14 @@ describe('knowledge material HTTP access boundaries', () => {
     const partial = await upload(files(['bad.pdf', '商品.txt']), params);
     expect(partial.status).toBe(200);
     expect(await partial.json()).toEqual({ saved: [sourceId], errors: ['bad.pdf：损坏的文件。'] });
+  });
+  it('reports exact-content reuse and selects each persisted source once for a repeated-file batch', async () => {
+    mocks.save.mockResolvedValue({ id: sourceId, reused: true });
+    const response = await upload(files(['商品.txt', '同文不同名.txt']), params);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ saved: [sourceId], reused: [sourceId], errors: [] });
+    expect(mocks.saveDraft).not.toHaveBeenCalled();
+    expect(mocks.publish).not.toHaveBeenCalled();
   });
   it('rejects missing files and more than five files, before starting parser work', async () => {
     for (const names of [[], ['1.txt', '2.txt', '3.txt', '4.txt', '5.txt', '6.txt']])

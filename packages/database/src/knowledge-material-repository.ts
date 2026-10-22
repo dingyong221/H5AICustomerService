@@ -9,6 +9,15 @@ export type KnowledgeMaterial = Readonly<{
   text: string;
   createdAt: string;
 }>;
+type MaterialInput = {
+  merchantId: string;
+  assistantId: string;
+  userId: string;
+  name: string;
+  size: number;
+  sha256: string;
+  text: string;
+};
 export class KnowledgeMaterialAccessError extends Error {
   constructor() {
     super('Material access denied');
@@ -26,6 +35,14 @@ type MaterialRow = RowDataPacket & {
 };
 export class MySqlKnowledgeMaterialRepository {
   constructor(private readonly config: DatabaseConnectionConfig) {}
+  async assertEditable(merchantId: string, assistantId: string, userId: string): Promise<void> {
+    const connection = await this.config.openConnection();
+    try {
+      await this.#authorize(connection, merchantId, assistantId, userId);
+    } finally {
+      await connection.end();
+    }
+  }
   async #authorize(
     connection: Connection,
     merchantId: string,
@@ -139,15 +156,10 @@ export class MySqlKnowledgeMaterialRepository {
       await connection.end();
     }
   }
-  async save(input: {
-    merchantId: string;
-    assistantId: string;
-    userId: string;
-    name: string;
-    size: number;
-    sha256: string;
-    text: string;
-  }) {
+  async save(input: MaterialInput): Promise<string> {
+    return (await this.saveWithResult(input)).id;
+  }
+  async saveWithResult(input: MaterialInput): Promise<{ id: string; reused: boolean }> {
     if (
       !input.name.trim() ||
       input.name.length > 200 ||
@@ -164,11 +176,23 @@ export class MySqlKnowledgeMaterialRepository {
     try {
       await connection.beginTransaction();
       await this.#authorize(connection, input.merchantId, input.assistantId, input.userId, true);
+      // The authorization row lock serializes uploads for this assistant. Read
+      // current active revisions after that lock, including when already full.
+      const contentHash = createHash('sha256').update(input.text).digest();
       const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT ks.id FROM knowledge_source ks
+        `SELECT ks.id,kr.content_hash FROM knowledge_source ks
+        JOIN knowledge_revision kr ON kr.merchant_id=ks.merchant_id AND kr.assistant_id=ks.assistant_id
+        AND kr.source_id=ks.id AND kr.revision_no=ks.current_revision_no
         WHERE ks.merchant_id=? AND ks.assistant_id=? AND ks.type='uploaded_file' AND ks.status='active'`,
         [id(input.merchantId), id(input.assistantId)],
       );
+      const existing = rows.find(
+        (row) => Buffer.isBuffer(row.content_hash) && row.content_hash.equals(contentHash),
+      );
+      if (existing && Buffer.isBuffer(existing.id) && existing.id.length === 16) {
+        await connection.commit();
+        return { id: existing.id.toString('hex'), reused: true };
+      }
       if (rows.length >= 50) throw new Error('最多保存 50 份材料。');
       const source = randomBytes(16),
         revision = randomBytes(16);
@@ -185,7 +209,7 @@ export class MySqlKnowledgeMaterialRepository {
           id(input.merchantId),
           id(input.assistantId),
           source,
-          createHash('sha256').update(input.text).digest(),
+          contentHash,
           JSON.stringify({ text: input.text, size: input.size, sha256: input.sha256 }),
         ],
       );
@@ -201,7 +225,7 @@ export class MySqlKnowledgeMaterialRepository {
         ],
       );
       await connection.commit();
-      return source.toString('hex');
+      return { id: source.toString('hex'), reused: false };
     } catch (error) {
       await connection.rollback();
       throw error;

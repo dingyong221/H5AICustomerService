@@ -92,6 +92,56 @@ async function material(f: Awaited<ReturnType<typeof fixture>>, name: string) {
 }
 
 describe('real MySQL uploaded material soft deletion', () => {
+  it('serializes duplicate imports within one assistant, isolates equal text in another merchant, and never reuses archived sources', async () => {
+    const a = await fixture(),
+      b = await fixture();
+    const text = 'SYNTHETIC DUPLICATE 保温杯39元/件，单件新疆运费15元；其他地区需确认。';
+    const input = {
+      ...a,
+      name: '商品表原件.csv',
+      text,
+      size: Buffer.byteLength(text),
+      sha256: createHash('sha256').update(text).digest('hex'),
+    };
+    const result = await Promise.all([
+      repository.saveWithResult(input),
+      repository.saveWithResult({ ...input, name: '商品表再次导入.csv' }),
+    ]);
+    expect(result[0]!.id).toBe(result[1]!.id);
+    expect(result.map((x) => x.reused).sort()).toEqual([false, true]);
+    expect(await repository.list(a.merchantId, a.assistantId, a.userId)).toHaveLength(1);
+    const other = await repository.saveWithResult({ ...input, ...b });
+    expect(other.reused).toBe(false);
+    expect(other.id).not.toBe(result[0]!.id);
+    await sql(
+      "UPDATE merchant_membership SET role='viewer' WHERE merchant_id=? AND merchant_user_id=?",
+      [bytes(a.merchantId), bytes(a.userId)],
+    );
+    await expect(
+      repository.assertEditable(a.merchantId, a.assistantId, a.userId),
+    ).rejects.toBeInstanceOf(KnowledgeMaterialAccessError);
+    await sql(
+      "UPDATE merchant_membership SET role='owner' WHERE merchant_id=? AND merchant_user_id=?",
+      [bytes(a.merchantId), bytes(a.userId)],
+    );
+    await expect(
+      repository.assertEditable(a.merchantId, a.assistantId, a.userId),
+    ).resolves.toBeUndefined();
+    await expect(repository.archive({ ...a, sourceId: other.id })).rejects.toBeInstanceOf(
+      KnowledgeMaterialAccessError,
+    );
+    await repository.archive({ ...a, sourceId: result[0]!.id });
+    const restored = await repository.saveWithResult(input);
+    expect(restored.reused).toBe(false);
+    expect(restored.id).not.toBe(result[0]!.id);
+    expect((await repository.list(a.merchantId, a.assistantId, a.userId)).map((x) => x.id)).toEqual(
+      [restored.id],
+    );
+    expect(
+      (await lifecycle.findManagementSnapshot(a.merchantId, a.assistantId))?.draftRevision,
+    ).toBe(1);
+    expect(await lifecycle.findPublicSnapshot(a.created.publicSlug)).toBeNull();
+  });
   it('atomically authorizes the exact source, archives idempotently, preserves release/draft/URL, and rolls back a failed audit', async () => {
     const a = await fixture(),
       b = await fixture();

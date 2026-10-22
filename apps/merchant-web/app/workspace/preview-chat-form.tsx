@@ -44,7 +44,24 @@ export function PreviewChatForm({
         <div aria-live="polite" className="assistant-preview-answer">
           <strong>AI 试聊回答</strong>
           <p>{state.answer}</p>
+          {state.evidence ? (
+            <details className="preview-evidence">
+              <summary>核对本次试聊依据 · 草稿修订 {state.revision}</summary>
+              <p>
+                下方是本次实际发送的已保存草稿资料。当前采用完整确认事实，不是向量检索结果或模型逐句引用；请自行检查回答是否有依据。来源标记属于商家核对的稿件，不保证每个附件的所有内容都已纳入。
+              </p>
+              {state.evidence.map((item) => (
+                <details key={item.label}>
+                  <summary>{item.label}</summary>
+                  <pre>{item.text}</pre>
+                </details>
+              ))}
+            </details>
+          ) : null}
         </div>
+      ) : null}
+      {state.answer && state.revision !== draftRevision ? (
+        <p role="status">草稿已变化，旧修订的试聊回答已隐藏，请用当前资料重新试聊。</p>
       ) : null}
       <button disabled={!available || pending} type="submit">
         {pending ? '正在试聊…' : '发送测试问题'}
