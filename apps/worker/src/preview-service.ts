@@ -199,8 +199,10 @@ export class PreviewService {
     this.#writingBusy.add(merchantId);
     try {
       const output = await this.#generator.generate(buildKnowledgePrompt(text), signal);
-      const result = parseMaterialOrganization(JSON.parse(output));
-      if (!result) throw new Error('Invalid material organization');
+      const result = parseMaterialOrganization(
+        renderKnowledgeOrganization(text, JSON.parse(output)),
+      );
+      if (!result) throw new Error('Invalid material reference plan');
       const numbers = (value: string) => value.match(/[-+−]?\d+(?:[.,]\d+)*(?:[%％])?/gu) ?? [];
       const allowed = new Set(numbers(text));
       if (
@@ -209,8 +211,6 @@ export class PreviewService {
         )
       )
         throw new Error('Invented number');
-      if (!isSourceGroundedOrganization(text, result))
-        throw new Error('Unsupported material assertion');
       return result;
     } finally {
       this.#writingBusy.delete(merchantId);
@@ -234,4 +234,4 @@ export function createPreviewService(
 }
 import { parseMaterialOrganization, type MaterialOrganization } from '@h5cs/contracts';
 import { buildKnowledgePrompt } from './knowledge-prompt.js';
-import { isSourceGroundedOrganization } from './knowledge-grounding.js';
+import { renderKnowledgeOrganization } from './knowledge-grounding.js';
