@@ -17,6 +17,7 @@ concurrency:
 jobs:
   quality:
     name: Quality and build
+    if: ${{ github.event_name != 'workflow_dispatch' || github.ref_name != 'codex/offline-knowledge-quality-delivery' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -134,6 +135,7 @@ jobs:
 
   mysql-integration:
     name: Real MySQL merchant-to-consumer flow
+    if: ${{ github.event_name != 'workflow_dispatch' || github.ref_name != 'codex/offline-knowledge-quality-delivery' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -187,6 +189,7 @@ jobs:
 
   browser-e2e:
     name: Browser operator-to-consumer flow
+    if: ${{ github.event_name != 'workflow_dispatch' || github.ref_name != 'codex/offline-knowledge-quality-delivery' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -268,6 +271,7 @@ jobs:
 
   image-packaging:
     name: Build five release container targets
+    if: ${{ github.event_name != 'workflow_dispatch' || github.ref_name != 'codex/offline-knowledge-quality-delivery' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
@@ -361,3 +365,111 @@ jobs:
       - name: Stop isolated MySQL
         if: always()
         run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml down
+
+  offline-candidate-delivery:
+    name: Verify and export the frozen merchant knowledge quality candidate
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'codex/offline-knowledge-quality-delivery' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+    steps:
+      - name: Check out delivery tooling with the frozen application history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Install locked pnpm for transport-only checks
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.19.0
+          run_install: false
+      - name: Set up Node.js 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Verify transport-only changes before installing dependencies
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          import { assertTransportOnlyPaths, validatePlan } from './scripts/quality/candidate-offline-contract.mjs';
+          const plan = validatePlan(JSON.parse(readFileSync('scripts/operations/r1-offline-delivery-plan.json', 'utf8')));
+          if (execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() !== process.env.GITHUB_SHA) throw new Error('TRANSPORT_CHECKOUT_MISMATCH');
+          assertTransportOnlyPaths(execFileSync('git', ['diff', '--name-only', plan.sourceSha, 'HEAD', '--'], { encoding: 'utf8' }).trim().split(/\r?\n/u).filter(Boolean));
+          NODE
+      - name: Install frozen dependencies for transport formatting
+        run: pnpm install --frozen-lockfile
+      - name: Validate transport release policy and formatting
+        run: |
+          node scripts/quality/release-gate.mjs static --version 0.1.0
+          pnpm exec prettier --check .github/workflows/ci.yml scripts/quality/candidate-offline-contract.mjs scripts/quality/candidate-offline-contract.test.mjs scripts/quality/export-candidate-offline.mjs scripts/operations/r1-offline-delivery-plan.json docs/operations/2026-10-17-offline-candidate-delivery.md
+      - name: Verify offline delivery contracts without Docker or network
+        run: node --test scripts/quality/candidate-offline-contract.test.mjs
+      - name: Download the previously verified source digest manifest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: candidate-images-d34ad65b2c3b049fa6be4f4be944480a6eb2ee17
+          run-id: 39818820017
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/h5cs-offline-source-manifest
+      - name: Authenticate only this temporary runner to private GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Export and verify save remove load roundtrip for the same five images
+        id: export
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/quality/export-candidate-offline.mjs --run
+      - name: Reject a repeated export while preserving the loaded images
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          H5CS_DELIVERY_DIRECTORY: ${{ steps.export.outputs.artifact_directory }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          import { join } from 'node:path';
+          import { spawnSync } from 'node:child_process';
+          import { assertLoadedImage, validateDeliveryManifest, validatePlan } from './scripts/quality/candidate-offline-contract.mjs';
+          const fail = () => { throw new Error('PREEXISTING_IMAGE_PROTECTION_NOT_VERIFIED'); };
+          const plan = validatePlan(JSON.parse(await readFile('scripts/operations/r1-offline-delivery-plan.json', 'utf8')));
+          const delivery = validateDeliveryManifest(JSON.parse(await readFile(join(process.env.H5CS_DELIVERY_DIRECTORY, 'delivery.json'), 'utf8')), plan);
+          const dockerEnvironment = Object.fromEntries(['PATH', 'HOME', 'USER', 'LANG', 'LC_ALL', 'DOCKER_CONFIG', 'TMPDIR', 'TEMP', 'TMP'].filter((key) => typeof process.env[key] === 'string').map((key) => [key, process.env[key]]));
+          const docker = (args) => {
+            const result = spawnSync('docker', args, { env: dockerEnvironment, encoding: 'utf8', timeout: 30000, maxBuffer: 8 * 1024 * 1024, shell: false });
+            if (result.error || result.status !== 0) fail();
+            return result.stdout;
+          };
+          const inventory = () => [...new Set(docker(['image', 'ls', '--no-trunc', '--quiet']).trim().split(/\r?\n/u).filter(Boolean))].sort().join('\n');
+          const before = inventory();
+          const rerun = spawnSync(process.execPath, ['scripts/quality/export-candidate-offline.mjs', '--run'], { env: process.env, encoding: 'utf8', timeout: 90000, maxBuffer: 1024 * 1024, shell: false });
+          let stopped;
+          try { stopped = JSON.parse(rerun.stderr.trim()); } catch { fail(); }
+          if (rerun.error || rerun.status !== 1 || rerun.stdout.trim() !== '' || stopped.type !== 'stopped' || stopped.phase !== 'pull_exact_images' || stopped.code !== 'PREEXISTING_IMAGE_REFERENCE' || stopped.publicDeployment !== false) fail();
+          if (inventory() !== before) fail();
+          for (const record of delivery.images) {
+            const inspected = JSON.parse(docker(['image', 'inspect', record.loadTag]));
+            if (!Array.isArray(inspected) || inspected.length !== 1) fail();
+            assertLoadedImage(inspected[0], record, plan);
+          }
+          process.stdout.write(`${JSON.stringify({ type: 'preexisting_images_preserved', imageCount: delivery.images.length, noNewImages: true, publicDeployment: false })}\n`);
+          NODE
+      - name: Upload bounded private delivery bundle for one day
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: offline-candidate-d34ad65b2c3b049fa6be4f4be944480a6eb2ee17
+          path: ${{ steps.export.outputs.artifact_directory }}
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - name: Preserve private staging and production boundaries
+        run: |
+          echo 'The application images are still the frozen d34ad65 candidate.'
+          echo 'Application CI and exact-image browser evidence are verified from the fixed source runs; this workflow checks transport only.'
+          echo 'No server credential, database migration, or public traffic switch occurred.'
+          echo 'Archive hashes and image config IDs are not a substitute for signed provenance or real-model acceptance.'
