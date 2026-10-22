@@ -62,3 +62,15 @@
 前两轮真实千问候选提示词探针（非新镜像端到端验收）分别仅通过清洗服务案例、仅通过零售和冲突营业时间案例，没有保存或发布模型结果。自由文本匹配会误拒绝正常的原句组合，且单纯子串匹配不能证明否定词/条件被保留，因此已被上面的编号分类方案取代，不靠继续放宽事实匹配来“通过”。失败原始回答保留在工具树 `grounding-qwen-fc62b5d-result.json`、`grounding-qwen-4a66ed7-result.json`，不重写失败为成功。
 
 本地最新 Worker 92 项通过及构建前检查记录见实现树 `artifacts/merchant-guided-preview-20261022/grounding-reference-check.log`。内部模型 JSON 改为 `groups/topic/unitIds` 与 `reviewUnitIds`，仅 Worker 解释此私有协议；对商家接口仍返回原有 `summary/warnings`。80 个单元上限、长句分块及超密集文档回退限制模型计划大小，不减少 24000 字输入容量；跨句关联、覆盖遗漏、分错主题及来源文本本身仍需人工与试聊核对。新源码 CI、镜像端到端及实际生产发布仍未完成。
+
+编号分类提交 `451fbc6` 的三个实际千问探针均通过并完成原始输出的事实复核：清洗预约/安装限制和 79 元、零售 29/15/99 条件及截止日期、冲突营业时间双版本与来源保留。工具树 `grounding-qwen-451fbc6-result.json`、`grounding-qwen-451fbc6-reviewed.json` 保留实际结果及复核范围；清洗预约分类不理想已如实记录，不将这些有限案例写成通用语义证明或镜像验收。PR #19 已创建；CI `39836200663` 的质量步骤因依赖审计失败，其他任务状态须按具体 run 查询，不能视作全通过。
+
+## 发布期间新增 Next.js 安全修复
+
+CI 与本地 audit 发现锁定的 Next.js 16.3.8 被新增三条公告覆盖：[SVG 图像优化](https://github.com/vercel/next.js/security/advisories/GHSA-2464-fhr4-w9xw)、[Server Actions 拒绝服务](https://github.com/vercel/next.js/security/advisories/GHSA-p3m5-59mp-jv5r)、[use cache 类型数组](https://github.com/vercel/next.js/security/advisories/GHSA-673q-mjm6-r5xr)。已交叉核对官方公告与 [16.4.1 发布](https://github.com/vercel/next.js/releases/tag/v16.4.1)，将共享 catalog 的 next/eslint-config-next 升至 16.4.1 并重算锁文件。既有 sharp 0.35.5 override 保持；不扩展或延长 GHSA-vfj7-8cjw-p6xm 的原单条试运行例外，不宣称这些公告已被线上利用。
+
+更新后本地 `pnpm audit --audit-level=high --json` 退出 0，新增两条 critical 与一条 high 不再报告；原有一条受限 high 例外及五条 moderate 元数据仍在，不能表述为零漏洞。记录 `next-16-4-1-audit.json`。初次本机依赖安装使用环境 fallback pnpm 11.25.0，因 Windows 建链 EPERM 终止，未改源码或降级校验，不能写成本地全仓验证通过；安装及后续 CI 另行记录。此变化使三端 Web 同时需要新镜像，不能仅替换 Worker 或沿用 d34ad65 的 Web 镜像作为本轮最终版本。
+
+随后使用项目指定 `pnpm@11.19.0` 重新执行 frozen-lockfile 安装已成功，日志 `next-16-4-1-install-pinned.log`；未修改系统权限、全局配置或删除用户文件。旧源 `451fbc6` run 的真实 MySQL 与浏览器任务已明确成功，质量任务仍因旧依赖审计失败；不能将这两项套用为升级后版本的完整 CI 成功。
+
+升级后本机 `npx --yes pnpm@11.19.0 run check` 退出 0，40 个 workspace 任务成功；其中商家 303 项、Worker 92 项通过，包含实际 DOC/DOCX/PPT/PPTX/XLS/XLSX、文字 PDF/CSV/MD 提取及扫描/加密/损坏文件拒绝用例。日志 `next-16-4-1-workspace-check.log`。这些是本机真实解析器及应用检查，不代表 Linux 镜像上传链路或生产已经通过；新源 CI、制品、私有完整验收及公网复验仍须完成。
