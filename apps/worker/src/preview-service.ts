@@ -209,6 +209,8 @@ export class PreviewService {
         )
       )
         throw new Error('Invented number');
+      if (!isSourceGroundedOrganization(text, result))
+        throw new Error('Unsupported material assertion');
       return result;
     } finally {
       this.#writingBusy.delete(merchantId);
@@ -232,3 +234,4 @@ export function createPreviewService(
 }
 import { parseMaterialOrganization, type MaterialOrganization } from '@h5cs/contracts';
 import { buildKnowledgePrompt } from './knowledge-prompt.js';
+import { isSourceGroundedOrganization } from './knowledge-grounding.js';
