@@ -45,4 +45,36 @@ describe('source-grounded material organization', () => {
       }),
     ).toBe(false);
   });
+  it('accepts observed harmless empty-topic punctuation without accepting negative business policies', () => {
+    expect(
+      isSourceGroundedOrganization(source, {
+        summary:
+          '商品/服务：毛巾29元/条；新疆单件运费15元。\n规格：无原文提及；\n优惠：原文未提供。',
+        warnings: ['请对照原文核对适用条件与遗漏；'],
+      }),
+    ).toBe(true);
+    expect(
+      isSourceGroundedOrganization(source, {
+        summary: '商品/服务：毛巾29元/条；新疆单件运费15元。\n配送售后：不涉及配送；',
+        warnings: [],
+      }),
+    ).toBe(false);
+  });
+  it('accepts separately preserved conflicting hours and their original sources, not a chosen new schedule', () => {
+    const hours =
+      '【来源：旧说明.txt】\n营业时间为9点至18点。\n【来源：新说明.txt】\n营业时间为10点至20点。';
+    expect(
+      isSourceGroundedOrganization(hours, {
+        summary:
+          '营业时间：营业时间为9点至18点。\n【来源：旧说明.txt】\n营业时间：营业时间为10点至20点。\n【来源：新说明.txt】',
+        warnings: [knowledgeReviewNotices[2]],
+      }),
+    ).toBe(true);
+    expect(
+      isSourceGroundedOrganization(hours, {
+        summary: '营业时间：营业时间为9点至20点。',
+        warnings: [],
+      }),
+    ).toBe(false);
+  });
 });

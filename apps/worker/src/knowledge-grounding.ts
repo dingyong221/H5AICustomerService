@@ -7,6 +7,9 @@ export const knowledgeHeadings = [
   '优惠',
   '配送售后',
   '常见问答',
+  '营业时间',
+  '服务范围',
+  '联系方式',
   '其他已提供信息',
 ] as const;
 
@@ -14,6 +17,8 @@ export const knowledgeReviewNotices = [
   '需商家补充或确认。',
   '请对照原文核对适用条件与遗漏。',
   '请核对原文中的潜在冲突，不要直接作为已确认事实。',
+  '原文未提供。',
+  '无原文提及。',
 ] as const;
 
 /**
@@ -25,7 +30,9 @@ export function isSourceGroundedOrganization(
   result: MaterialOrganization,
 ): boolean {
   const normalizedSource = source.replace(/\r\n?/gu, '\n');
-  const notices = new Set<string>(knowledgeReviewNotices);
+  // Punctuation variants of fixed review metadata do not change a business fact.
+  const noticeKey = (value: string) => value.replace(/[。；;]$/u, '');
+  const notices = new Set<string>(knowledgeReviewNotices.map(noticeKey));
   let hasSourceExcerpt = false;
   for (const rawLine of result.summary.replace(/\r\n?/gu, '\n').split('\n')) {
     const line = rawLine.trim();
@@ -39,14 +46,14 @@ export function isSourceGroundedOrganization(
     );
     const excerpt = heading ? line.slice(heading.length + 1).trim() : line;
     if (!excerpt && heading) continue;
-    if (notices.has(excerpt)) continue;
+    if (notices.has(noticeKey(excerpt))) continue;
     if (!excerpt || !normalizedSource.includes(excerpt)) return false;
     hasSourceExcerpt = true;
   }
   return (
     hasSourceExcerpt &&
     result.warnings.every((warning) => {
-      if (notices.has(warning)) return true;
+      if (notices.has(noticeKey(warning))) return true;
       const excerpt = warning.startsWith('需核对原文：')
         ? warning.slice('需核对原文：'.length).trim()
         : warning;
