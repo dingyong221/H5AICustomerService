@@ -220,7 +220,7 @@ export class MySqlAssistantImprovementRepository implements AssistantImprovement
          JOIN merchant m ON m.id = a.merchant_id AND m.status = 'active'
          JOIN merchant_membership mm ON mm.merchant_id = a.merchant_id AND mm.merchant_user_id = ? AND mm.status = 'active'
          JOIN merchant_user u ON u.id = mm.merchant_user_id AND u.status = 'active'
-        WHERE a.merchant_id = ? AND a.id = ? LIMIT 1${lock ? ' FOR UPDATE' : ''}`,
+        WHERE a.merchant_id = ? AND a.id = ?${lock ? " AND mm.role IN ('owner','admin','editor')" : ''} LIMIT 1${lock ? ' FOR UPDATE' : ''}`,
       [id(input.merchantUserId), id(input.merchantId), id(input.assistantId)],
     );
     if (!rows[0]) throw new ImprovementConflictError('unavailable');

@@ -113,6 +113,7 @@ describe('real MySQL uploaded material soft deletion', () => {
     const other = await repository.saveWithResult({ ...input, ...b });
     expect(other.reused).toBe(false);
     expect(other.id).not.toBe(result[0]!.id);
+    await lifecycle.confirmDraftKnowledge({ ...a, expectedDraftRevision: 1, now: new Date() });
     await sql(
       "UPDATE merchant_membership SET role='viewer' WHERE merchant_id=? AND merchant_user_id=?",
       [bytes(a.merchantId), bytes(a.userId)],
@@ -120,6 +121,41 @@ describe('real MySQL uploaded material soft deletion', () => {
     await expect(
       repository.assertEditable(a.merchantId, a.assistantId, a.userId),
     ).rejects.toBeInstanceOf(KnowledgeMaterialAccessError);
+    const readonlyBefore = await lifecycle.findManagementSnapshot(a.merchantId, a.assistantId);
+    await expect(
+      lifecycle.saveDraft({
+        ...a,
+        draft: { ...draft, materialsSummary: 'viewer不得写入' },
+        expectedRevision: 1,
+        now: new Date(),
+      }),
+    ).rejects.toThrow();
+    await expect(
+      lifecycle.confirmDraftKnowledge({ ...a, expectedDraftRevision: 1, now: new Date() }),
+    ).rejects.toThrow();
+    await expect(
+      lifecycle.createManualDraft({
+        ...a,
+        displayName: 'viewer不得创建',
+        draft,
+        idempotency: idem(),
+        now: new Date(),
+      }),
+    ).rejects.toThrow();
+    await expect(
+      lifecycle.publish({
+        ...a,
+        expectedDraftRevision: 1,
+        promptTemplateVersion: 'material-ci-v1',
+        modelPolicyVersion: 'material-ci-v1',
+        retrievalPolicyVersion: 'material-ci-v1',
+        idempotency: idem(),
+        now: new Date(),
+      }),
+    ).rejects.toThrow();
+    expect(await lifecycle.findManagementSnapshot(a.merchantId, a.assistantId)).toEqual(
+      readonlyBefore,
+    );
     await sql(
       "UPDATE merchant_membership SET role='owner' WHERE merchant_id=? AND merchant_user_id=?",
       [bytes(a.merchantId), bytes(a.userId)],
