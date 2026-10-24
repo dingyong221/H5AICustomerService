@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef } from 'react';
+import { registerUnsavedNavigationGuard } from './unsaved-history-guard';
 
 /** Protect in-memory merchant text without persisting business material in browser storage. */
 export function useUnsavedForm(dirty: boolean) {
@@ -8,6 +9,7 @@ export function useUnsavedForm(dirty: boolean) {
   useEffect(() => {
     allowNavigation.current = false;
     if (!dirty) return;
+    const unregister = registerUnsavedNavigationGuard(() => !allowNavigation.current);
     function beforeUnload(event: BeforeUnloadEvent) {
       if (allowNavigation.current) return;
       event.preventDefault();
@@ -45,6 +47,7 @@ export function useUnsavedForm(dirty: boolean) {
     window.addEventListener('beforeunload', beforeUnload);
     document.addEventListener('click', beforeLink, true);
     return () => {
+      unregister();
       window.removeEventListener('beforeunload', beforeUnload);
       document.removeEventListener('click', beforeLink, true);
     };

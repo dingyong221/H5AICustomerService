@@ -590,6 +590,61 @@ describe('public assistant API client', () => {
         sessionRequestId,
         snapshot,
       }),
-    ).rejects.toMatchObject({ requestId: 'request_1234567890', retryable: true });
+    ).rejects.toMatchObject({
+      code: 'SERVICE_UNAVAILABLE',
+      requestId: 'request_1234567890',
+      retryable: true,
+    });
+  });
+
+  it('preserves the safe withdrawal code without exposing the upstream diagnostic text', async () => {
+    const client = createPublicAssistantApiClient({
+      apiBaseUrl: '/api/v1/public',
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
+        jsonResponse(
+          {
+            error: {
+              code: 'RELEASE_WITHDRAWN',
+              message: 'private diagnostic must stay hidden',
+              retryable: false,
+            },
+            request_id: 'request_1234567890',
+          },
+          409,
+        ),
+      ),
+      origin,
+    });
+    await expect(client.loadHistory({ sessionHandle })).rejects.toMatchObject({
+      code: 'RELEASE_WITHDRAWN',
+      retryable: false,
+      requestId: 'request_1234567890',
+    });
+    await expect(client.loadHistory({ sessionHandle })).rejects.not.toThrow('private diagnostic');
+  });
+
+  it('retains only the validated support reference for an unavailable entry', async () => {
+    const client = createPublicAssistantApiClient({
+      apiBaseUrl: '/api/v1/public',
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
+        jsonResponse(
+          {
+            error: {
+              code: 'SERVICE_UNAVAILABLE',
+              message: 'internal information',
+              retryable: true,
+            },
+            request_id: 'request_1234567890',
+          },
+          503,
+        ),
+      ),
+      origin,
+    });
+    await expect(client.loadAssistant('shop-help')).resolves.toEqual({
+      reason: 'api_unavailable',
+      status: 'unavailable',
+      requestId: 'request_1234567890',
+    });
   });
 });

@@ -1,9 +1,12 @@
 import type { AcceptedTurn, PublicMessage, PublicSession, TurnResult } from './public-api-client';
+import { consumerFailure } from './consumer-recovery';
 
 export type PendingMessage = Readonly<{
   clientMessageId: string;
   content: string;
   errorMessage?: string | undefined;
+  errorCode?: string | undefined;
+  requestId?: string | undefined;
   phase: 'sending' | 'waiting' | 'failed';
   retryable: boolean;
   sessionRequestId: string;
@@ -133,13 +136,15 @@ export function applyTurnResult(state: ConversationState, result: TurnResult): C
   const messages = mergeOrderedMessages(state.messages, result.messages);
   if (result.state === 'completed') return { messages, session: state.session };
   if (result.state === 'failed') {
+    const failure = consumerFailure(result.error.code, result.error.retryable);
     return {
       messages,
       pending: {
         ...state.pending,
-        errorMessage: '本次回复未完成。',
+        errorMessage: failure.message,
+        errorCode: result.error.code,
         phase: 'failed',
-        retryable: result.error.retryable,
+        retryable: failure.retryable,
       },
       session: state.session,
     };
@@ -149,7 +154,12 @@ export function applyTurnResult(state: ConversationState, result: TurnResult): C
 
 export function failPending(
   state: ConversationState,
-  input: { message: string; retryable: boolean },
+  input: {
+    message: string;
+    retryable: boolean;
+    code?: string | undefined;
+    requestId?: string | undefined;
+  },
 ): ConversationState {
   if (state.pending === undefined) return state;
   return {
@@ -157,6 +167,8 @@ export function failPending(
     pending: {
       ...state.pending,
       errorMessage: input.message,
+      errorCode: input.code,
+      requestId: input.requestId,
       phase: 'failed',
       retryable: input.retryable,
     },

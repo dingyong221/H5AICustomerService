@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const errorCodeSchema = z.enum([
+  'RELEASE_WITHDRAWN',
   'BAD_REQUEST',
   'UNAUTHORIZED',
   'FORBIDDEN',

@@ -90,6 +90,20 @@ const repositoryWith = (
   const connection = {
     execute: async (statement: string, values: readonly unknown[] = []) => {
       calls.push({ statement, values });
+      if (statement.includes('FROM assistant_publication_governance'))
+        return [
+          [
+            {
+              preview_id: Buffer.from('ab'.repeat(16), 'hex'),
+              preview_revision: 1,
+              preview_verdict: 'pass',
+              preview_facts_hash: createHash('sha256')
+                .update(JSON.stringify({ displayName: '蓝天服务客服', ...sampleDraft }))
+                .digest(),
+            },
+          ],
+          [],
+        ];
       return handler(statement, values);
     },
     beginTransaction,
@@ -453,14 +467,15 @@ describe('MySQL assistant lifecycle repository', () => {
 
     expect(calls[1]?.statement).toMatch(/merchant_membership[\s\S]*FOR UPDATE/u);
     expect(calls[2]?.statement).toMatch(/knowledge_revision[\s\S]*status = 'ready'/u);
-    expect(calls[3]?.statement).toMatch(/ORDER BY release_no DESC[\s\S]*FOR UPDATE/u);
-    expect(calls[5]?.statement).toMatch(/INSERT INTO assistant_release/u);
-    expect(calls[6]?.statement).toMatch(/INSERT INTO assistant_active_release/u);
-    expect(calls[7]?.statement).toMatch(/SET active_release_id = \?, status = 'active'/u);
-    expect(calls[8]?.statement).toContain('UPDATE assistant_improvement');
-    expect(calls[8]?.statement).toContain('r.task_version = i.version');
-    expect(calls[8]?.statement).toContain('r.facts_hash = ?');
-    expect(calls[8]?.values).toEqual([
+    expect(calls[3]?.statement).toContain('assistant_publication_governance');
+    expect(calls[4]?.statement).toMatch(/ORDER BY release_no DESC[\s\S]*FOR UPDATE/u);
+    expect(calls[6]?.statement).toMatch(/INSERT INTO assistant_release/u);
+    expect(calls[7]?.statement).toMatch(/INSERT INTO assistant_active_release/u);
+    expect(calls[8]?.statement).toMatch(/SET active_release_id = \?, status = 'active'/u);
+    expect(calls[9]?.statement).toContain('UPDATE assistant_improvement');
+    expect(calls[9]?.statement).toContain('r.task_version = i.version');
+    expect(calls[9]?.statement).toContain('r.facts_hash = ?');
+    expect(calls[9]?.values).toEqual([
       Buffer.from(releaseId, 'hex'),
       now,
       Buffer.from(merchantId, 'hex'),
@@ -470,8 +485,8 @@ describe('MySQL assistant lifecycle repository', () => {
       'prompt-v1',
       'model-v1',
     ]);
-    expect(calls[9]?.statement).toMatch(/state = 'succeeded'/u);
-    expect(calls[10]?.statement).toMatch(/INSERT INTO outbox_event/u);
+    expect(calls[10]?.statement).toMatch(/state = 'succeeded'/u);
+    expect(calls[11]?.statement).toMatch(/INSERT INTO outbox_event/u);
     expect(commit).toHaveBeenCalledOnce();
   });
 

@@ -11,6 +11,7 @@ import {
   MySqlPublicSessionRepository,
 } from '@h5cs/database';
 import { toAssistantId, toMerchantId, toMerchantUserId, toReleaseId } from '@h5cs/domain';
+import { approveSyntheticPreview } from './governance-fixture.js';
 
 // Fail closed: these synthetic fixtures may only use the disposable loopback CI database.
 const url = process.env['H5CS_INTEGRATION_MYSQL_URL'];
@@ -184,6 +185,7 @@ describe('real MySQL uploaded material soft deletion', () => {
       b = await fixture();
     const sourceA = await material(a, '商品A.txt'),
       sourceB = await material(a, '商品B.txt');
+    await approveSyntheticPreview(lifecycle, a, 1);
     await lifecycle.confirmDraftKnowledge({ ...a, expectedDraftRevision: 1, now: new Date() });
     await lifecycle.publish({
       ...a,
@@ -310,6 +312,7 @@ describe('real MySQL uploaded material soft deletion', () => {
 });
 
 async function publishHistoryFixture(f: Awaited<ReturnType<typeof fixture>>, revision: number) {
+  await approveSyntheticPreview(lifecycle, f, revision);
   await lifecycle.confirmDraftKnowledge({ ...f, expectedDraftRevision: revision, now: new Date() });
   return lifecycle.publish({
     ...f,

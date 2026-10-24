@@ -6,11 +6,12 @@ import {
   MySqlKnowledgeMaterialRepository,
   KnowledgeMaterialAccessError,
 } from '@h5cs/database';
-import { toAssistantId, toMerchantId } from '@h5cs/domain';
+import { toAssistantId, toMerchantId, toMerchantUserId } from '@h5cs/domain';
 import { headers } from 'next/headers';
+import { revalidatePath } from 'next/cache';
 
 import { currentMerchantForWrite } from '../account/merchant-actions';
-import { requestWorkerPreview } from './worker-preview';
+import { requestWorkerPreview, WorkerPreviewRateLimitError } from './worker-preview';
 import { previewEvidence, type PreviewEvidence } from './preview-evidence';
 
 export type PreviewChatState = Readonly<{
@@ -18,6 +19,7 @@ export type PreviewChatState = Readonly<{
   error: string | null;
   revision: number | null;
   evidence?: PreviewEvidence;
+  checkId?: string | null;
 }>;
 
 export async function previewChatAction(
@@ -70,15 +72,45 @@ export async function previewChatAction(
       draft: snapshot.draft,
       question: rawQuestion.trim(),
     });
+    let checkId: string;
+    try {
+      const recorded = await new MySqlAssistantLifecycleRepository(
+        database.config,
+      ).savePreviewCheck({
+        merchantUserId: toMerchantUserId(session.merchantUserId),
+        merchantId: toMerchantId(merchantId),
+        assistantId: toAssistantId(assistantId),
+        expectedDraftRevision: snapshot.draftRevision,
+        question: rawQuestion.trim(),
+        answer,
+        now: new Date(),
+      });
+      checkId = recorded.checkId;
+    } catch {
+      return {
+        answer,
+        revision: snapshot.draftRevision,
+        checkId: null,
+        evidence: previewEvidence(snapshot.draft),
+        error:
+          '回答已生成，但未能保存本修订的试聊记录，不能用于发布判定。请先刷新检查草稿修订，勿直接发布。',
+      };
+    }
+    revalidatePath(`/${merchantId}`);
+    revalidatePath(`/${merchantId}/preview/${assistantId}`);
+    revalidatePath(`/${merchantId}/publish/${assistantId}`);
     return {
       answer,
       error: null,
       revision: snapshot.draftRevision,
       evidence: previewEvidence(snapshot.draft),
+      checkId,
     };
   } catch (error) {
     if (error instanceof KnowledgeMaterialAccessError)
       return failed('登录已失效或无权试聊此客服。');
+    if (error instanceof WorkerPreviewRateLimitError)
+      return failed('试聊请求较频繁，请一分钟后重试。');
     return failed('试聊服务暂不可用，请稍后重试。');
   }
 }

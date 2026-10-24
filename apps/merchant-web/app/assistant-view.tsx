@@ -9,7 +9,7 @@ import {
   MySqlKnowledgeMaterialRepository,
   type KnowledgeMaterial,
 } from '@h5cs/database';
-import { toAssistantId, toMerchantId } from '@h5cs/domain';
+import { toAssistantId, toMerchantId, toMerchantUserId } from '@h5cs/domain';
 import { PageShell, StatusBadge } from '@h5cs/ui';
 
 import { merchantPath } from './tenant-paths';
@@ -35,6 +35,9 @@ import {
 } from './workspace/publication-policy';
 import { workerReady } from './workspace/worker-readiness';
 import { MaterialManager } from './knowledge/material-manager';
+import { PublicationGovernancePanel } from './workspace/governance-panel';
+import { EmergencyWithdrawForm, RenameAssistantForm } from './workspace/governance-controls';
+import type { PublicationGovernance } from './workspace/governance-model';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,6 +68,19 @@ export async function AssistantView({
     return <p role="alert">客服草稿暂不可用，请稍后重试。</p>;
   }
   if (!assistant) notFound();
+  let governance: PublicationGovernance | null = null;
+  try {
+    governance = await new MySqlAssistantLifecycleRepository(
+      database.config,
+    ).getPublicationGovernance({
+      merchantUserId: toMerchantUserId(session.merchantUserId),
+      merchantId: toMerchantId(merchantId),
+      assistantId: toAssistantId(assistantId),
+      now: new Date(),
+    });
+  } catch {
+    /* Missing/unavailable governance must never enable publication. */
+  }
   const policy = publicationPolicy();
   const [workerAvailable, publicApiAvailable] = policy.ready
     ? await Promise.all([workerReady(), publicApiReady()])
@@ -86,27 +102,43 @@ export async function AssistantView({
   // Only an actually persisted release earns a share link. Its address is not a
   // transient readiness result: editing or a Worker outage must not erase it.
   const persistedPublicUrl =
-    assistant.activeReleaseId && sharingOrigin
+    (assistant.activeReleaseId || governance?.hasPublishedHistory) && sharingOrigin
       ? publicAssistantUrl(sharingOrigin, assistant.publicSlug)
       : null;
   const publishReady =
-    policy.ready && assistant.status !== 'paused' && workerAvailable && publicApiAvailable;
-  const publishReason = !policy.ready
-    ? policy.reason
-    : assistant.status === 'paused'
-      ? '客服已暂停，需先恢复服务。'
-      : !workerAvailable
-        ? 'AI 对话服务尚未就绪，请稍后再试。'
-        : !publicApiAvailable
-          ? '公开会话服务尚未就绪，请稍后再试。'
-          : null;
+    policy.ready &&
+    assistant.status !== 'paused' &&
+    workerAvailable &&
+    publicApiAvailable &&
+    governance?.canManage === true &&
+    governance.quality.state === 'passed' &&
+    !governance.issues.some((issue) => issue.severity === 'blocking');
+  const publishReason = !governance
+    ? '发布检查暂不可用，请刷新核对。'
+    : !governance.canManage
+      ? '当前账号只读，请联系有管理权限的商家成员。'
+      : governance.issues.some((issue) => issue.severity === 'blocking')
+        ? '请先处理发布检查中的业务事实问题。'
+        : governance.quality.state !== 'passed'
+          ? '请成功试聊当前修订，并由商家核对判定回答合格。'
+          : !policy.ready
+            ? policy.reason
+            : assistant.status === 'paused'
+              ? '客服已暂停，需先恢复服务。'
+              : !workerAvailable
+                ? 'AI 对话服务尚未就绪，请稍后再试。'
+                : !publicApiAvailable
+                  ? '公开会话服务尚未就绪，请稍后再试。'
+                  : null;
   const publishPanel = (
     <section className="merchant-account-card assistant-detail-card" id="release">
       <h2>确认资料并发布</h2>
       <p>
         {assistant.activeReleaseId
           ? '已有已发布版本。发布当前修订后，新咨询使用新版，原固定链接不变。'
-          : '当前尚未发布。确认并发布后，即可获得发给消费者的固定链接。'}
+          : governance?.hasPublishedHistory
+            ? '当前已紧急撤回。修正资料、试聊并判定通过后重新发布，原固定链接恢复接待。'
+            : '当前尚未发布。确认并发布后，即可获得发给消费者的固定链接。'}
       </p>
       <PublishAssistantForm
         key={`${assistantId}:${assistant.draftRevision}`}
@@ -147,7 +179,11 @@ export async function AssistantView({
           </p>
           <span>草稿修订 {assistant.draftRevision}</span>
           <StatusBadge tone={assistant.activeReleaseId ? 'success' : 'warning'}>
-            {assistant.activeReleaseId ? '已有发布版本' : '尚未发布'}
+            {assistant.activeReleaseId
+              ? '已有发布版本'
+              : governance?.hasPublishedHistory
+                ? '已紧急撤回'
+                : '尚未发布'}
           </StatusBadge>
           <Link href={`${merchantPath(merchantId, 'help')}#${section}`}>本步帮助</Link>
         </div>
@@ -156,7 +192,12 @@ export async function AssistantView({
           assistantId={assistantId}
           section={section}
         />
-        {assistant.activeReleaseId ? (
+        <PublicationGovernancePanel
+          governance={governance}
+          merchantId={merchantId}
+          assistantId={assistantId}
+        />
+        {assistant.activeReleaseId || governance?.hasPublishedHistory ? (
           <section
             aria-labelledby="consumer-link-title"
             className="assistant-fixed-link"
@@ -165,7 +206,11 @@ export async function AssistantView({
           >
             <div className="assistant-fixed-link__heading">
               <h2 id="consumer-link-title">固定消费者链接</h2>
-              <span>已发布 · 新版本沿用此地址</span>
+              <span>
+                {assistant.activeReleaseId
+                  ? '已有发布版本 · 新版本沿用此地址'
+                  : '已紧急撤回 · 原地址保留，重新发布后恢复'}
+              </span>
             </div>
             <details open={section === 'publish'}>
               <summary>查看链接与二维码</summary>
@@ -177,9 +222,20 @@ export async function AssistantView({
                 </p>
               )}
             </details>
-            {!publishReady ? (
+            {!assistant.activeReleaseId ? (
               <p role="status">
-                固定地址仍保留，当前服务暂不可用，建议恢复后再分享。{publishReason}
+                资料已撤回，当前不能接待咨询。请修正资料、重新试聊判定并发布；不要重新创建客服或更换链接。
+              </p>
+            ) : null}
+            {assistant.activeReleaseId &&
+            (!workerAvailable || !publicApiAvailable || assistant.status === 'paused') ? (
+              <p role="status">
+                固定地址仍保留，当前服务暂不可用，建议恢复后再分享。
+                {assistant.status === 'paused'
+                  ? '客服已暂停。'
+                  : !workerAvailable
+                    ? 'AI 对话服务尚未就绪。'
+                    : '公开会话服务尚未就绪。'}
               </p>
             ) : null}
           </section>
@@ -187,6 +243,16 @@ export async function AssistantView({
         {section === 'drafts' ? (
           <section className="merchant-account-card assistant-detail-card" id="draft">
             <h2>填写业务资料</h2>
+            {governance?.canManage ? (
+              <RenameAssistantForm
+                key={`${assistantId}:${assistant.draftRevision}:rename`}
+                merchantId={merchantId}
+                assistantId={assistantId}
+                draftRevision={assistant.draftRevision}
+                csrfToken={csrfToken}
+                displayName={assistant.displayName}
+              />
+            ) : null}
             <p className="workflow-hint">
               保存本步后，继续上传商品表、说明文档或 FAQ。已有线上版本不受草稿编辑影响。
             </p>
@@ -218,6 +284,8 @@ export async function AssistantView({
               csrfToken={csrfToken}
               revision={assistant.draftRevision}
               materials={materials}
+              effectiveCharacters={assistant.draft.materialsSummary.length}
+              hasPublishedVersion={!!assistant.activeReleaseId}
             />
             <details className="workflow-disclosure">
               <summary>查看已保存的商品与服务资料</summary>
@@ -240,7 +308,10 @@ export async function AssistantView({
                 assistantId={assistantId}
                 draftRevision={assistant.draftRevision}
                 csrfToken={csrfToken}
-                available={workerAvailable && assistant.status !== 'paused'}
+                available={
+                  workerAvailable && assistant.status !== 'paused' && governance?.canManage === true
+                }
+                lastCheck={governance?.quality ?? null}
               />
             </section>
             <aside className="workflow-checklist" aria-label="试聊检查建议">
@@ -290,6 +361,16 @@ export async function AssistantView({
               <DraftReadinessPanel draft={assistant.draft} />
             </details>
             {publishPanel}
+            {governance?.canManage && assistant.activeReleaseId ? (
+              <EmergencyWithdrawForm
+                key={`${assistantId}:${assistant.activeReleaseId}:withdraw`}
+                merchantId={merchantId}
+                assistantId={assistantId}
+                draftRevision={assistant.draftRevision}
+                csrfToken={csrfToken}
+                expectedReleaseId={assistant.activeReleaseId}
+              />
+            ) : null}
           </>
         ) : null}
         {section === 'drafts' ? (

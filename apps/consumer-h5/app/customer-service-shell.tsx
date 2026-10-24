@@ -1,5 +1,7 @@
 import { OnlineCustomerService } from './online-customer-service';
 import type { PublicAssistantLoadResult } from './public-api-client';
+import { PageRecoveryActions } from './page-recovery-actions';
+import { supportReference } from './consumer-recovery';
 
 interface CustomerServiceShellProps {
   apiBaseUrl?: string | undefined;
@@ -18,7 +20,7 @@ function unavailableCopy(result: PublicAssistantLoadResult): {
       result.reason === 'unsafe_configuration')
   ) {
     return {
-      detail: '我们无法安全确认客服当前状态，请稍后刷新页面重试。',
+      detail: '暂时未能连接客服服务，请刷新重试。你也可以通过原购买渠道联系商家。',
       heading: '咨询服务暂时不可用',
     };
   }
@@ -57,7 +59,7 @@ export function CustomerServiceShell({
                 <h1>商家客服</h1>
                 <span className="ai-label">AI</span>
               </div>
-              <p>状态未确认</p>
+              <p>当前无法开始咨询</p>
             </div>
           </div>
         </header>
@@ -67,9 +69,12 @@ export function CustomerServiceShell({
           </span>
           <h2>{copy.heading}</h2>
           <p>{copy.detail}</p>
-          <p className="unavailable-panel__safety">
-            本页面不会根据链接参数或本地记录开启会话，也不会生成模拟回复。
-          </p>
+          <PageRecoveryActions />
+          {result.status === 'unavailable' && supportReference(result.requestId) ? (
+            <p className="unavailable-panel__safety">
+              联系商家时可提供支持编号：{supportReference(result.requestId)}
+            </p>
+          ) : null}
         </div>
         <footer className="composer-area">
           <form aria-label="发送咨询消息" className="composer">

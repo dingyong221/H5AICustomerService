@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { PageShell, StatusBadge } from '@h5cs/ui';
-import { merchantAssistants, requireMerchant } from '../tenant-data';
+import { merchantAssistants, merchantAssistantGovernance, requireMerchant } from '../tenant-data';
 import { merchantPath } from '../tenant-paths';
+import { governanceNextStep, qualityLabels } from '../workspace/governance-model';
 
 export default async function MerchantDashboard({
   params,
@@ -11,6 +12,10 @@ export default async function MerchantDashboard({
   const { merchantId } = await params;
   await requireMerchant(merchantId);
   const assistants = await merchantAssistants(merchantId);
+  const governance = await merchantAssistantGovernance(
+    merchantId,
+    assistants.slice(0, 5).map((item) => item.assistantId),
+  );
   const published = assistants.filter(
     (assistant) => assistant.activeReleaseId && assistant.status === 'active',
   );
@@ -32,7 +37,7 @@ export default async function MerchantDashboard({
           <Link href={merchantPath(merchantId, 'drafts')}>查看客服列表</Link>
         </section>
         <section className="merchant-account-card">
-          <span>服务中</span>
+          <span>有已发布版本</span>
           <h2>{published.length}</h2>
           <Link href={merchantPath(merchantId, 'publish')}>管理与分享</Link>
         </section>
@@ -50,7 +55,7 @@ export default async function MerchantDashboard({
         {assistants.length ? (
           <ul className="assistant-workspace-list">
             {assistants.slice(0, 5).map((assistant) => (
-              <li key={assistant.assistantId}>
+              <li key={assistant.assistantId} className="dashboard-assistant-task">
                 <Link href={merchantPath(merchantId, 'drafts', assistant.assistantId)}>
                   <strong>{assistant.displayName}</strong>
                 </Link>
@@ -61,14 +66,26 @@ export default async function MerchantDashboard({
                       ? '已发布'
                       : '待配置'}
                 </StatusBadge>
+                {governance.get(assistant.assistantId) ? (
+                  <p className="dashboard-assistant-task__state">
+                    草稿修订 {assistant.draftRevision} ·{' '}
+                    {governance.get(assistant.assistantId)!.hasUnpublishedChanges
+                      ? '有待发布修改'
+                      : '无待发布资料修改'}{' '}
+                    · {qualityLabels[governance.get(assistant.assistantId)!.quality.state]}
+                  </p>
+                ) : (
+                  <p>发布检查暂不可用，请进入客服后刷新核对。</p>
+                )}
+                <p>{governanceNextStep(governance.get(assistant.assistantId) ?? null).detail}</p>
                 <Link
                   href={merchantPath(
                     merchantId,
-                    assistant.activeReleaseId ? 'publish' : 'drafts',
+                    governanceNextStep(governance.get(assistant.assistantId) ?? null).section,
                     assistant.assistantId,
                   )}
                 >
-                  {assistant.activeReleaseId ? '发布与分享' : '继续配置'} →
+                  {governanceNextStep(governance.get(assistant.assistantId) ?? null).label} →
                 </Link>
               </li>
             ))}

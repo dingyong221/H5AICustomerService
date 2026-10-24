@@ -10,6 +10,7 @@ import {
   MySqlPublicSessionRepository,
 } from '@h5cs/database';
 import { toAssistantId, toMerchantId, toMerchantUserId } from '@h5cs/domain';
+import { approveSyntheticPreview } from './governance-fixture.js';
 
 // These assertions exercise genuine MySQL constraints and transactions. The answers below
 // are deterministic fixtures, not evidence of actual model quality or consumer resolution.
@@ -79,6 +80,7 @@ async function fixture() {
   const assistantId = toAssistantId(snapshot.assistantId);
   const actor = { merchantId, merchantUserId, assistantId };
   const publish = async (revision: number) => {
+    await approveSyntheticPreview(assistants, actor, revision);
     await assistants.confirmDraftKnowledge({
       ...actor,
       expectedDraftRevision: revision,

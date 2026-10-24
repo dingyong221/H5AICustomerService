@@ -11,6 +11,7 @@ import {
   type DatabaseConnectionConfig,
 } from '@h5cs/database';
 import { toAssistantId, toMerchantId, toMerchantUserId } from '@h5cs/domain';
+import { approveSyntheticPreview } from './governance-fixture.js';
 
 // Negative transaction/constraint coverage, never a model-quality or live-merchant test.
 // This independent guard intentionally does not import another executing integration suite.
@@ -106,6 +107,7 @@ async function fixture() {
     idempotency: idem(),
     now: new Date(),
   };
+  await approveSyntheticPreview(lifecycle, actor, 1);
   const release = await lifecycle.publish(publicationInput);
   return { actor, draft, snapshot, release, creationInput, publicationInput };
 }
@@ -463,6 +465,7 @@ describe('real MySQL improvement isolation and rollback invariants', () => {
   it('rolls back release, active pointer and improvement binding together after an injected post-binding failure', async () => {
     const f = await fixture();
     const ready = await verifiedTask(f);
+    await approveSyntheticPreview(lifecycle, f.actor, ready.revision);
     expect(
       (await improvements.detail({ ...f.actor, improvementId: ready.task.id }))?.improvement.state,
     ).toBe('ready_to_publish');

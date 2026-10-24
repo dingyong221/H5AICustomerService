@@ -18,6 +18,7 @@ import {
   MerchantStatusTransitionError,
 } from '@h5cs/database';
 import { toAssistantId, toMerchantId, toMerchantUserId } from '@h5cs/domain';
+import { approveSyntheticPreview } from './governance-fixture.js';
 
 import { AppModule } from '../src/app.module.js';
 
@@ -237,6 +238,11 @@ describe('real MySQL merchant-to-consumer flow', () => {
       expectedDraftRevision: created.draftRevision,
       now: new Date(),
     });
+    await approveSyntheticPreview(
+      assistants,
+      { merchantId, merchantUserId, assistantId: toAssistantId(created.assistantId) },
+      created.draftRevision,
+    );
     const release = await assistants.publish({
       merchantUserId,
       merchantId,

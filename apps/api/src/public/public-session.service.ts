@@ -10,6 +10,7 @@ import {
 import {
   loadDatabaseConfig,
   MySqlPublicSessionRepository,
+  PublicReleaseWithdrawnError,
   PublicSessionUnavailableError,
   PublicTurnConflictError,
 } from '@h5cs/database';
@@ -123,6 +124,12 @@ export class PublicSessionService {
             : null,
       };
     } catch (error) {
+      if (error instanceof PublicReleaseWithdrawnError)
+        throw new ConflictException({
+          code: 'RELEASE_WITHDRAWN',
+          message: '商家已撤回此前资料，请查看最新客服。',
+          retryable: false,
+        });
       if (error instanceof PublicSessionUnavailableError) {
         throw new NotFoundException('Assistant not available');
       }
@@ -150,6 +157,12 @@ export class PublicSessionService {
       if (!session) throw new NotFoundException('Session not available');
       return session;
     } catch (error) {
+      if (error instanceof PublicReleaseWithdrawnError)
+        throw new ConflictException({
+          code: 'RELEASE_WITHDRAWN',
+          message: '商家已撤回此前资料，请查看最新客服。',
+          retryable: false,
+        });
       if (error instanceof NotFoundException) throw error;
       throw new ServiceUnavailableException('Conversation service unavailable');
     }
@@ -169,6 +182,12 @@ export class PublicSessionService {
       if (!history) throw new NotFoundException('Session not available');
       return history;
     } catch (error) {
+      if (error instanceof PublicReleaseWithdrawnError)
+        throw new ConflictException({
+          code: 'RELEASE_WITHDRAWN',
+          message: '商家已撤回此前资料，请查看最新客服。',
+          retryable: false,
+        });
       if (error instanceof NotFoundException) throw error;
       throw new ServiceUnavailableException('Conversation service unavailable');
     }
@@ -186,6 +205,12 @@ export class PublicSessionService {
     try {
       return await this.issuer.endSession({ sessionHandle, visitorNonce: nonce, now: new Date() });
     } catch (error) {
+      if (error instanceof PublicReleaseWithdrawnError)
+        throw new ConflictException({
+          code: 'RELEASE_WITHDRAWN',
+          message: '商家已撤回此前资料，请查看最新客服。',
+          retryable: false,
+        });
       if (error instanceof PublicSessionUnavailableError)
         throw new NotFoundException('Session not available');
       if (error instanceof PublicTurnConflictError) throw new ConflictException(error.code);

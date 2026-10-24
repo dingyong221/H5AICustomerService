@@ -8,3 +8,4 @@ export * from './oauth-repository.js';
 export * from './release.js';
 export * from './session-turn.js';
 export * from './tenant-scope.js';
+export * from './publication-governance.js';

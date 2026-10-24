@@ -130,6 +130,52 @@ describe('configured Chat Completions generator', () => {
     expect(JSON.stringify(body)).not.toContain(modelEnvironment.MODEL_API_KEY);
   });
 
+  it.each([
+    {
+      productsAndServices: '清洗：79元/台，仅限壁挂机',
+      pricingAndConditions: '清洗：89元/台，仅限壁挂机',
+    },
+    { promotionsAndSalesPolicy: '活动有效期至2000-01-01' },
+  ])(
+    'refuses clearly conflicting or expired pinned facts without calling a provider: %j',
+    async (facts) => {
+      const configured = loadChatCompletionsConfig(modelEnvironment);
+      if (!configured.configured) throw new Error('test model configuration is invalid');
+      const fetchImpl = vi.fn<typeof fetch>();
+      const generator = new ChatCompletionsGenerator(configured.config, fetchImpl);
+      const answer = await generator.generate(
+        {
+          ...prompt,
+          confirmedFacts: JSON.stringify({ ...facts, humanContact: '请通过店铺客服窗口联系商家' }),
+        },
+        new AbortController().signal,
+      );
+      expect(answer).toContain('暂不能据此给出可靠报价或承诺');
+      expect(answer).toContain('店铺客服窗口');
+      expect(fetchImpl).not.toHaveBeenCalled();
+    },
+  );
+
+  it('allows different price conditions and supplies current trusted business time to the provider', async () => {
+    const configured = loadChatCompletionsConfig(modelEnvironment);
+    if (!configured.configured) throw new Error('test model configuration is invalid');
+    const fetchImpl = vi.fn<typeof fetch>(async () => response('请按机型查看报价。'));
+    const generator = new ChatCompletionsGenerator(configured.config, fetchImpl);
+    await generator.generate(
+      {
+        ...prompt,
+        confirmedFacts: JSON.stringify({
+          productsAndServices: '清洗：79元/台，仅限壁挂机',
+          pricingAndConditions: '清洗：99元/台，仅限柜机',
+        }),
+      },
+      new AbortController().signal,
+    );
+    const body = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body));
+    expect(body.messages[0].content).toContain('当前可信业务时间：');
+    expect(body.messages[0].content).toContain('Asia/Shanghai');
+  });
+
   it('rejects incomplete, refused, oversized and non-JSON answers', async () => {
     const configured = loadChatCompletionsConfig(modelEnvironment);
     if (!configured.configured) throw new Error('test model configuration is invalid');

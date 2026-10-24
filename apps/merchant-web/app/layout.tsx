@@ -10,6 +10,7 @@ import { MerchantLogoutForm } from './account/logout-form';
 import { MerchantNavigation } from './navigation';
 import { readImprovements } from './improvements/improvement-data';
 import { actionableImprovementCount } from './improvements/improvement-model';
+import { UnsavedNavigationBoundary } from './unsaved-navigation-boundary';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,6 +38,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   return (
     <html lang="zh-CN">
       <body>
+        <UnsavedNavigationBoundary />
         <a className="skip-link" href="#main-content">
           跳到主要内容
         </a>

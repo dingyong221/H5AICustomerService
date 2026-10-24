@@ -20,7 +20,7 @@ const tempPrefix = 'h5cs-ci-upgrade-';
 const expectedDatabase = 'h5cs_integration_ci';
 const expectedUser = 'h5cs_ci';
 const expectedBaselineCount = 12;
-const expectedFullCount = 13;
+const expectedFullCount = 14;
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
 export class UpgradeProbeError extends Error {
@@ -282,7 +282,23 @@ async function applicationTables(connection) {
   );
   return rows.map((row) => row.name).filter((name) => name !== migrationTable);
 }
-async function snapshotTables(connection, tables) {
+export function assertUpgradedTableSet(tables, baselineTables) {
+  const expected = [
+    ...baselineTables,
+    'assistant_improvement',
+    'assistant_evaluation_run',
+    'assistant_publication_governance',
+  ];
+  if (
+    expected.length !== 32 ||
+    new Set(expected).size !== 32 ||
+    tables.length !== 32 ||
+    new Set(tables).size !== 32 ||
+    tables.some((table) => !expected.includes(table))
+  )
+    throw new UpgradeProbeError('Upgrade produced an unexpected application-table set');
+}
+export async function snapshotTables(connection, tables) {
   const output = [];
   for (const table of tables) {
     const [rows] = await connection.query(`SELECT * FROM ${quote(table)}`);
@@ -321,7 +337,7 @@ export async function assertMigrationHistory(connection, expected) {
   }));
 }
 
-async function seedBaselineData(connection) {
+export async function seedBaselineData(connection) {
   const ids = Object.fromEntries(
     [
       'merchant',
@@ -833,14 +849,7 @@ export async function runUpgradeProbe(environment = process.env) {
       throw new UpgradeProbeError('Existing business rows or schema changed during 0012 upgrade');
     phase = 'verify_upgraded_schema';
     const fullTables = await applicationTables(connection);
-    if (
-      fullTables.length !== 31 ||
-      fullTables.some(
-        (table) =>
-          ![...tables, 'assistant_improvement', 'assistant_evaluation_run'].includes(table),
-      )
-    )
-      throw new UpgradeProbeError('Upgrade produced an unexpected application-table set');
+    assertUpgradedTableSet(fullTables, tables);
     phase = 'verify_new_table_constraints';
     const constraints = await assertNewTableConstraints(connection, ids);
     phase = 'seed_post_upgrade_data';

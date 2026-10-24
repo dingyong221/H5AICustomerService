@@ -106,6 +106,18 @@ async function publishCurrentDraft(
     ) {
       return { ...unavailable, error: '草稿或资料确认状态已变化，请刷新后重新检查。' };
     }
+    const governance = await repository.getPublicationGovernance({
+      merchantUserId: toMerchantUserId(merchant.merchantUserId),
+      merchantId: toMerchantId(merchantId),
+      assistantId: toAssistantId(assistantId),
+      now,
+    });
+    if (governance.draftRevision !== revision || !governance.canManage)
+      return { ...unavailable, error: '草稿或管理权限已变化，请刷新核对。' };
+    if (governance.issues.some((issue) => issue.severity === 'blocking'))
+      return { ...unavailable, error: '存在业务事实冲突或失效资料，请先处理发布检查中的问题。' };
+    if (governance.quality.state !== 'passed')
+      return { ...unavailable, error: '请先成功试聊当前修订，并由商家核对判定回答合格后发布。' };
     // Consent covers both operations. Each repository transaction rechecks the
     // current member, assistant ownership and exact revision under its own lock.
     // If publish fails after confirmation, never report a published version/link.
@@ -165,6 +177,10 @@ async function publishCurrentDraft(
       releaseNo: release.releaseNo,
     };
   } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'PREVIEW_REQUIRED')
+      return { ...unavailable, error: '当前修订尚未通过试聊判定，请返回效果试聊。' };
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'FACTS_BLOCKED')
+      return { ...unavailable, error: '业务事实检查未通过，请修正冲突或失效资料后重新试聊。' };
     if (
       error instanceof AssistantPublishValidationError ||
       error instanceof AssistantRevisionConflictError ||

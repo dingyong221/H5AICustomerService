@@ -15,7 +15,11 @@ export type OnlinePublicAssistantSnapshot = Readonly<{
 
 export type PublicAssistantLoadResult =
   | Readonly<{ status: 'online'; snapshot: OnlinePublicAssistantSnapshot }>
-  | Readonly<{ reason: PublicAssistantUnavailableReason; status: 'unavailable' }>;
+  | Readonly<{
+      reason: PublicAssistantUnavailableReason;
+      status: 'unavailable';
+      requestId?: string | undefined;
+    }>;
 
 export type PublicSession = Readonly<{
   createdAt: string;
@@ -87,17 +91,23 @@ export class PublicApiClientError extends Error {
     | 'request_failed';
   public readonly retryable: boolean;
   public readonly requestId: string | undefined;
+  public readonly code: string | undefined;
 
   public constructor(
     kind: PublicApiClientError['kind'],
     message: string,
-    options: { requestId?: string | undefined; retryable?: boolean } = {},
+    options: {
+      code?: string | undefined;
+      requestId?: string | undefined;
+      retryable?: boolean;
+    } = {},
   ) {
     super(message);
     this.name = 'PublicApiClientError';
     this.kind = kind;
     this.retryable = options.retryable ?? false;
     this.requestId = options.requestId;
+    this.code = options.code;
   }
 }
 
@@ -668,11 +678,11 @@ async function readJson(response: Response): Promise<unknown> {
 async function readFailureOptions(
   response: Response,
   fallbackRetryable: boolean,
-): Promise<{ requestId?: string | undefined; retryable: boolean }> {
+): Promise<{ code?: string | undefined; requestId?: string | undefined; retryable: boolean }> {
   const decoded = decodePublicApiErrorEnvelope(await readJson(response));
   return decoded === undefined
     ? { retryable: fallbackRetryable }
-    : { requestId: decoded.requestId, retryable: decoded.retryable };
+    : { code: decoded.code, requestId: decoded.requestId, retryable: decoded.retryable };
 }
 
 function decodeTurnEvent(
@@ -744,7 +754,14 @@ export function createPublicAssistantApiClient(
         return { reason: 'api_unavailable', status: 'unavailable' };
       }
       if (response.status === 404) return { reason: 'not_available', status: 'unavailable' };
-      if (response.status !== 200) return { reason: 'api_unavailable', status: 'unavailable' };
+      if (response.status !== 200) {
+        const failure = await readFailureOptions(response, false);
+        return {
+          reason: 'api_unavailable',
+          status: 'unavailable',
+          requestId: failure.requestId,
+        };
+      }
       const decoded = decodePublicAssistantSnapshot(await readJson(response));
       if (decoded === undefined) return { reason: 'invalid_response', status: 'unavailable' };
       if (decoded.availability === 'paused') {

@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   api: vi.fn(),
   configured: vi.fn(),
   snapshot: vi.fn(),
+  governance: vi.fn(),
   confirm: vi.fn(),
   publish: vi.fn(),
   publicSnapshot: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock('@h5cs/database', () => ({
   loadDatabaseConfig: mocks.configured,
   MySqlAssistantLifecycleRepository: class {
     findManagementSnapshot = mocks.snapshot;
+    getPublicationGovernance = mocks.governance;
     confirmDraftKnowledge = mocks.confirm;
     publish = mocks.publish;
     findPublicSnapshot = mocks.publicSnapshot;
@@ -87,10 +89,44 @@ describe('explicit single-step knowledge confirmation and publication', () => {
     mocks.api.mockResolvedValue(true);
     mocks.configured.mockReturnValue({ configured: true, config: {} });
     mocks.snapshot.mockResolvedValue(draft);
+    mocks.governance.mockReset().mockResolvedValue({
+      draftRevision: 4,
+      canManage: true,
+      issues: [],
+      quality: { state: 'passed' },
+    });
     mocks.confirm.mockResolvedValue({ knowledgeRevisionId: 'e'.repeat(32), draftRevision: 4 });
     mocks.publish.mockResolvedValue(release);
   });
   afterEach(() => vi.unstubAllEnvs());
+  it.each(['not_tested', 'needs_review', 'failed'])(
+    'rejects current draft without an explicit passed review: %s',
+    async (state) => {
+      mocks.governance.mockResolvedValue({
+        draftRevision: 4,
+        canManage: true,
+        issues: [],
+        quality: { state },
+      });
+      const result = await confirmAndPublishAssistantAction(initial, form());
+      expect(result.published).toBe(false);
+      expect(result.error).toContain('判定');
+      expect(mocks.confirm).not.toHaveBeenCalled();
+      expect(mocks.publish).not.toHaveBeenCalled();
+    },
+  );
+  it('rejects blocking facts before confirmation and never publishes by UI readiness alone', async () => {
+    mocks.governance.mockResolvedValue({
+      draftRevision: 4,
+      canManage: true,
+      issues: [{ severity: 'blocking' }],
+      quality: { state: 'passed' },
+    });
+    const result = await confirmAndPublishAssistantAction(initial, form());
+    expect(result.published).toBe(false);
+    expect(result.error).toContain('事实');
+    expect(mocks.publish).not.toHaveBeenCalled();
+  });
   it('confirms the exact authorized revision and then actually publishes with stable persisted slug', async () => {
     const state = await confirmAndPublishAssistantAction(initial, form());
     expect(mocks.current).toHaveBeenCalledWith(merchantId, 'owned-csrf');
@@ -200,6 +236,12 @@ describe('explicit single-step knowledge confirmation and publication', () => {
     const first = await confirmAndPublishAssistantAction(initial, form());
     mocks.publish.mockResolvedValue({ ...release, releaseId: 'f'.repeat(32), releaseNo: 2 });
     mocks.snapshot.mockResolvedValue({ ...draft, draftRevision: 5, knowledgeConfirmed: false });
+    mocks.governance.mockResolvedValue({
+      draftRevision: 5,
+      canManage: true,
+      issues: [],
+      quality: { state: 'passed' },
+    });
     const f = form();
     f.set('draftRevision', '5');
     const second = await confirmAndPublishAssistantAction(initial, f);
