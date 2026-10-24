@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   editAccess: vi.fn(),
   record: vi.fn(),
   AccessError: class extends Error {},
+  RateLimitError: class extends Error {},
 }));
 vi.mock('next/headers', () => ({ headers: async () => ({ get: mocks.origin }) }));
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
@@ -23,7 +24,10 @@ vi.mock('@h5cs/database', () => ({
   },
   KnowledgeMaterialAccessError: mocks.AccessError,
 }));
-vi.mock('./worker-preview', () => ({ requestWorkerPreview: mocks.generate }));
+vi.mock('./worker-preview', () => ({
+  requestWorkerPreview: mocks.generate,
+  WorkerPreviewRateLimitError: mocks.RateLimitError,
+}));
 import { previewChatAction } from './preview-chat-action';
 import { retailDefaultDraft } from './retail-preset';
 const origin = 'https://h5cs.1rying.com',
@@ -108,6 +112,14 @@ describe('real draft input evidence boundary', () => {
     expect(result.error).toBe('试聊服务暂不可用，请稍后重试。');
     expect(result.evidence).toBeUndefined();
     expect(JSON.stringify(result)).not.toContain('private');
+  });
+  it('explains a confirmed Worker rate limit without recording a passing trial or retrying it', async () => {
+    mocks.generate.mockRejectedValue(new mocks.RateLimitError());
+    const result = await previewChatAction(previous, form());
+    expect(result).toMatchObject({ answer: null, error: '试聊请求较频繁，请一分钟后重试。' });
+    expect(result.checkId).toBeUndefined();
+    expect(mocks.generate).toHaveBeenCalledOnce();
+    expect(mocks.record).not.toHaveBeenCalled();
   });
   it('requires exact assistant edit permission before reading draft or invoking a paid model', async () => {
     mocks.editAccess.mockRejectedValue(new mocks.AccessError());

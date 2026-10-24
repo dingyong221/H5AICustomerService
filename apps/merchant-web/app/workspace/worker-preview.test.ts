@@ -2,7 +2,11 @@ import { randomBytes } from 'node:crypto';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { previewWorkerUrl, requestWorkerPreview } from './worker-preview';
+import {
+  previewWorkerUrl,
+  requestWorkerPreview,
+  WorkerPreviewRateLimitError,
+} from './worker-preview';
 
 describe('merchant preview Worker boundary', () => {
   it('accepts only the exact configured internal endpoint in production', () => {
@@ -68,6 +72,13 @@ describe('merchant preview Worker boundary', () => {
         ),
       ).rejects.toThrow();
     }
+    const limitedFetch = vi.fn<typeof fetch>(
+      async () => new Response('upstream detail', { status: 429 }),
+    );
+    await expect(requestWorkerPreview(input, environment, limitedFetch)).rejects.toBeInstanceOf(
+      WorkerPreviewRateLimitError,
+    );
+    expect(limitedFetch).toHaveBeenCalledOnce();
   });
 
   it('forwards the full 2000-character question and rejects overflow before any request', async () => {

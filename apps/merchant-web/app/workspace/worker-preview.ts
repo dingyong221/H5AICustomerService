@@ -4,6 +4,13 @@ import type { AssistantDraftConfig } from '@h5cs/domain';
 
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/u;
 
+export class WorkerPreviewRateLimitError extends Error {
+  public constructor() {
+    super('Preview rate limit reached');
+    this.name = 'WorkerPreviewRateLimitError';
+  }
+}
+
 export function previewToken(environment: NodeJS.ProcessEnv): string | null {
   const inline = environment['PREVIEW_AUTH_TOKEN'];
   const path = environment['PREVIEW_AUTH_TOKEN_FILE'];
@@ -85,6 +92,7 @@ export async function requestWorkerPreview(
       facts: { assistantName: input.assistantName, ...input.draft },
     }),
   });
+  if (response.status === 429) throw new WorkerPreviewRateLimitError();
   if (
     response.status !== 200 ||
     !response.headers.get('content-type')?.includes('application/json')

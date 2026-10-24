@@ -5,6 +5,44 @@ import { expect, test, type Page } from '@playwright/test';
 
 type PublishedReleaseReadback = { status: number; releaseRef: string | null };
 
+// Worker preview, writing, material organization and improvement retests share
+// five requests per merchant in a rolling minute. Record successful completion
+// (later than admission) so CI waits conservatively before the next UI submission.
+const merchantModelRequests = new WeakMap<Page, number[]>();
+async function waitForMerchantModelSlot(page: Page): Promise<void> {
+  const now = Date.now();
+  const recent = (merchantModelRequests.get(page) ?? []).filter((time) => now - time < 60_000);
+  if (recent.length >= 5) {
+    const waitMs = Math.max(0, recent[0]! + 60_000 - now) + 1_000;
+    process.stdout.write(
+      JSON.stringify({ code: 'E2E_SHARED_MODEL_WINDOW_WAIT', priorCalls: recent.length, waitMs }) +
+        '\n',
+    );
+    await page.waitForTimeout(waitMs);
+  }
+  merchantModelRequests.set(
+    page,
+    recent.filter((time) => Date.now() - time < 60_000),
+  );
+}
+function recordMerchantModelRequest(page: Page): void {
+  merchantModelRequests.set(page, [...(merchantModelRequests.get(page) ?? []), Date.now()]);
+}
+
+async function expectPreviewResult(page: Page): Promise<void> {
+  const form = page.locator('.assistant-preview-form');
+  const answer = form.locator('.assistant-preview-answer > p');
+  const errors = form.getByRole('alert');
+  await expect(answer.or(errors).first()).toBeVisible({ timeout: 60_000 });
+  const alerts = await errors.allTextContents();
+  if (alerts.length) {
+    // Preserve the visible error, including an explicit rate-limit message.
+    // Never infer HTTP 429 from a generic failure or automatically retry an
+    // unknown provider/database outcome.
+    throw new Error('E2E_PREVIEW_FAILED: ' + alerts.map(safePublicationAlert).join(' | '));
+  }
+}
+
 async function openMerchantDetails(page: Page, label: string): Promise<void> {
   const summary = page.locator('summary').filter({ hasText: label });
   await expect(summary).toHaveCount(1);
@@ -49,11 +87,14 @@ async function previewAndApproveCurrentRevision(
 ): Promise<void> {
   await expectMerchantStep(page, '效果试聊');
   await page.getByLabel('试聊问题').fill(question);
+  await waitForMerchantModelSlot(page);
   await page.getByRole('button', { name: '发送测试问题', exact: true }).click();
+  await expectPreviewResult(page);
   await expect(page.locator('.assistant-preview-form .assistant-preview-answer > p')).toContainText(
     expectedAnswer,
     { timeout: 60_000 },
   );
+  recordMerchantModelRequest(page);
   await approveCurrentPreview(page);
 }
 
@@ -398,6 +439,7 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
     materialPanel.getByRole('button', { name: 'AI 整理所选材料', exact: true }),
   ).toBeDisabled();
   await materialPanel.getByRole('checkbox', { name: /我同意将所选材料的文字/u }).check();
+  await waitForMerchantModelSlot(merchantPage);
   const organizationRequest = merchantPage.waitForRequest(
     (request) =>
       request.method() === 'POST' &&
@@ -411,6 +453,7 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
     /预约需提前1天/u,
     { timeout: 30000 },
   );
+  recordMerchantModelRequest(merchantPage);
   await mkdir('artifacts/ops-enhancement', { recursive: true });
   await materialPanel.screenshot({
     path: `artifacts/ops-enhancement/materials-desktop-${pathMode ?? 'root'}.png`,
@@ -443,7 +486,9 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await expect(merchantPage.getByRole('img', { name: '扫码打开消费者 AI 客服' })).toHaveCount(0);
   await expect(merchantPage.locator('a[href^="http://127.0.0.1:3001/a/"]')).toHaveCount(0);
   await merchantPage.getByLabel('试聊问题').fill('你们提供什么服务？');
+  await waitForMerchantModelSlot(merchantPage);
   await merchantPage.getByRole('button', { name: '发送测试问题' }).click();
+  await expectPreviewResult(merchantPage);
   const previewAnswer = merchantPage.locator('.assistant-preview-answer');
   await expect(previewAnswer.locator('.preview-evidence')).toContainText(
     '不是向量检索结果或模型逐句引用',
@@ -453,6 +498,7 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
     '我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。',
     { timeout: 60_000 },
   );
+  recordMerchantModelRequest(merchantPage);
   await approveCurrentPreview(merchantPage);
   await expect(merchantPage.locator('a[href^="http://127.0.0.1:3001/a/"]')).toHaveCount(0);
   await expect(merchantPage.getByRole('img', { name: '扫码打开消费者 AI 客服' })).toHaveCount(0);
@@ -553,10 +599,12 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
     '你们提供什么服务？',
   );
   await merchantPage.getByLabel(/同意将当前草稿的业务资料和本条问题/u).check();
+  await waitForMerchantModelSlot(merchantPage);
   await merchantPage.getByRole('button', { name: '发送问题并记录复测', exact: true }).click();
   await expect(
     merchantPage.getByRole('button', { name: '符合预期，判定通过', exact: true }),
   ).toBeEnabled({ timeout: 60_000 });
+  recordMerchantModelRequest(merchantPage);
   await merchantPage.getByRole('button', { name: '符合预期，判定通过', exact: true }).click();
   await expect(merchantPage.getByText('商家已判定通过。', { exact: true })).toBeVisible();
   await merchantPage.getByRole('link', { name: '核对并确认知识资料', exact: true }).click();
@@ -1219,12 +1267,15 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await expectMerchantStep(merchantPage, '知识补充');
   await merchantPage.getByRole('link', { name: '下一步：效果试聊', exact: true }).click();
   await merchantPage.getByLabel('试聊问题').fill('预约需提前几天，是否提供安装服务？');
+  await waitForMerchantModelSlot(merchantPage);
   await merchantPage.getByRole('button', { name: '发送测试问题', exact: true }).click();
+  await expectPreviewResult(merchantPage);
   const restoredPreview = merchantPage.locator('.assistant-preview-answer > p');
   await expect(restoredPreview).toContainText('预约需提前1天；不提供安装服务。', {
     timeout: 60000,
   });
   await expect(restoredPreview).not.toContainText('也提供洗衣机清洁咨询');
+  recordMerchantModelRequest(merchantPage);
   await approveCurrentPreview(merchantPage);
   await merchantPage.getByRole('link', { name: '下一步：发布分享', exact: true }).click();
   await merchantPage.getByLabel(/我已核对以上资料，并确认向消费者公开发布当前修订/u).check();

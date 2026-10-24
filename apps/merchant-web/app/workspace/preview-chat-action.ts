@@ -11,7 +11,7 @@ import { headers } from 'next/headers';
 import { revalidatePath } from 'next/cache';
 
 import { currentMerchantForWrite } from '../account/merchant-actions';
-import { requestWorkerPreview } from './worker-preview';
+import { requestWorkerPreview, WorkerPreviewRateLimitError } from './worker-preview';
 import { previewEvidence, type PreviewEvidence } from './preview-evidence';
 
 export type PreviewChatState = Readonly<{
@@ -109,6 +109,8 @@ export async function previewChatAction(
   } catch (error) {
     if (error instanceof KnowledgeMaterialAccessError)
       return failed('登录已失效或无权试聊此客服。');
+    if (error instanceof WorkerPreviewRateLimitError)
+      return failed('试聊请求较频繁，请一分钟后重试。');
     return failed('试聊服务暂不可用，请稍后重试。');
   }
 }
