@@ -26,5 +26,19 @@ describe('published human contact UI', () => {
     expect(html).toContain('&lt;script&gt;');
     expect(html).not.toContain('<script>');
     expect(html).not.toContain('<a ');
+    expect(html).toContain('复制联系说明');
+  });
+
+  it('offers safe telephone actions and keeps configured contact visible without promising transfer', () => {
+    const html = renderToStaticMarkup(
+      createElement(HumanContactNotice, {
+        instructions: '工作日9—18点 电话：13812345678',
+      }),
+    );
+    expect(html).toContain('open=""');
+    expect(html).toContain('href="tel:13812345678"');
+    expect(html).toContain('复制联系说明');
+    expect(html).toContain('不实时转接');
+    expect(html).not.toContain('https://');
   });
 });

@@ -19,6 +19,7 @@ import {
   type ConversationState,
 } from './conversation-model';
 import { pollDelayMilliseconds, shouldSubmitComposerKey } from './interaction-policy';
+import { consumerFailure, replyProgress, supportReference } from './consumer-recovery';
 import {
   createPublicAssistantApiClient,
   PublicApiClientError,
@@ -62,11 +63,23 @@ function wait(milliseconds: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-function failureDetails(error: unknown): { message: string; retryable: boolean } {
+function failureDetails(error: unknown): {
+  message: string;
+  retryable: boolean;
+  code?: string | undefined;
+  requestId?: string | undefined;
+} {
   if (error instanceof PublicApiClientError) {
-    return { message: error.message, retryable: error.retryable };
+    return {
+      ...consumerFailure(error.code, error.retryable),
+      ...(error.kind === 'invalid_response'
+        ? { message: '客服资料或连接状态发生变化。请刷新客服状态后再试，原问题仍显示在本页。' }
+        : {}),
+      code: error.code,
+      requestId: error.requestId,
+    };
   }
-  return { message: '未能确认服务端状态，请稍后重试。', retryable: true };
+  return consumerFailure(undefined, true);
 }
 
 interface OnlineCustomerServiceProps {
@@ -87,6 +100,12 @@ export function OnlineCustomerService({
   const [restoreStatus, setRestoreStatus] = useState<'restoring' | 'ready' | 'failed'>('restoring');
   const [restoreAttempt, setRestoreAttempt] = useState(0);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
+  const [recoveryCode, setRecoveryCode] = useState<string | undefined>(undefined);
+  const [previousQuestion, setPreviousQuestion] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ id: string | null; seconds: number }>({
+    id: null,
+    seconds: 0,
+  });
   const sessionRequestIdRef = useRef<string | null>(null);
   const activeController = useRef<AbortController | undefined>(undefined);
   const running = useRef(false);
@@ -96,6 +115,22 @@ export function OnlineCustomerService({
   );
 
   useEffect(() => () => activeController.current?.abort(), []);
+
+  const waitingId =
+    conversation.pending && conversation.pending.phase !== 'failed'
+      ? conversation.pending.clientMessageId
+      : null;
+  useEffect(() => {
+    if (!waitingId) {
+      return;
+    }
+    const started = Date.now();
+    const timer = window.setInterval(
+      () => setProgress({ id: waitingId, seconds: Math.floor((Date.now() - started) / 1000) }),
+      1000,
+    );
+    return () => window.clearInterval(timer);
+  }, [waitingId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -171,9 +206,13 @@ export function OnlineCustomerService({
         setRestoreStatus('ready');
       } catch (error) {
         if (controller.signal.aborted) return;
+        const failure = failureDetails(error);
         setRecoveryNotice(
-          error instanceof PublicApiClientError ? error.message : '暂时无法恢复咨询，请重试。',
+          failure.code === 'RELEASE_WITHDRAWN'
+            ? failure.message
+            : '暂时未能恢复上次咨询。请重试恢复；不会因此重新发送你的问题。',
         );
+        setRecoveryCode(failure.code);
         setRestoreStatus('failed');
       } finally {
         running.current = false;
@@ -294,6 +333,23 @@ export function OnlineCustomerService({
     setConversation(nextState);
   }
 
+  function viewLatestAssistant(): void {
+    activeController.current?.abort();
+    try {
+      clearSessionReference(window.sessionStorage, publicSlug);
+    } catch {
+      // No message or new session is submitted by this action.
+    }
+    sessionRequestIdRef.current = null;
+    window.location.reload();
+  }
+
+  function continueQuestion(): void {
+    if (conversation.pending?.phase !== 'failed') return;
+    setPreviousQuestion(conversation.pending.content);
+    setConversation((current) => dismissFailed(current));
+  }
+
   async function startNewConsultation(): Promise<void> {
     const session = conversation.session;
     if (
@@ -330,6 +386,10 @@ export function OnlineCustomerService({
 
   const pending = conversation.pending;
   const inputDisabled = restoreStatus !== 'ready' || pending !== undefined || ending;
+  const releaseWithdrawn =
+    pending?.errorCode === 'RELEASE_WITHDRAWN' || recoveryCode === 'RELEASE_WITHDRAWN';
+  const earlierVersion =
+    conversation.session !== undefined && activeSnapshot.releaseRef !== snapshot.releaseRef;
 
   return (
     <main className="consumer-page">
@@ -359,12 +419,26 @@ export function OnlineCustomerService({
           ) : null}
         </header>
 
-        <aside className="scope-notice">
-          <strong>这是 AI 客服</strong>
-          <span>{activeSnapshot.businessScope}</span>
-        </aside>
-
-        <HumanContactNotice instructions={activeSnapshot.humanContact} />
+        <div className="conversation-notices">
+          <aside className="scope-notice">
+            <strong>这是 AI 客服</strong>
+            <span>
+              {releaseWithdrawn ? '此前资料已撤回，请查看最新客服。' : activeSnapshot.businessScope}
+            </span>
+          </aside>
+          {conversation.session ? (
+            <aside className="version-notice" role="status">
+              {releaseWithdrawn
+                ? '本次咨询已结束。历史消息仅供回顾，不代表商家当前资料。'
+                : earlierVersion
+                  ? '商家资料已有新版。本次咨询仍使用开始时的资料；如需最新资料，请新建咨询。'
+                  : '本次咨询使用开始时的资料；商家更新后，新建咨询才会使用新版。'}
+            </aside>
+          ) : null}
+          <HumanContactNotice
+            instructions={releaseWithdrawn ? undefined : activeSnapshot.humanContact}
+          />
+        </div>
 
         <div
           aria-busy={pending?.phase === 'sending' || pending?.phase === 'waiting'}
@@ -388,8 +462,8 @@ export function OnlineCustomerService({
                 {message.status !== undefined || message.role === 'assistant' ? (
                   <p className={`message-status${message.status === 'failed' ? ' is-failed' : ''}`}>
                     {message.status === 'sending' ? '发送中…' : null}
-                    {message.status === 'waiting' ? '已发送，等待 AI 回复…' : null}
-                    {message.status === 'failed' ? '发送或回复失败' : null}
+                    {message.status === 'waiting' ? 'AI 正在整理回答…' : null}
+                    {message.status === 'failed' ? '本次回复未完成，问题已保留' : null}
                     {message.status === undefined ? (message.sourceLabel ?? 'AI 客服') : null}
                   </p>
                 ) : null}
@@ -399,12 +473,21 @@ export function OnlineCustomerService({
         </div>
 
         <footer className="composer-area">
+          {pending && pending.phase !== 'failed' ? (
+            <p className="reply-progress" role="status">
+              {replyProgress(
+                pending.phase,
+                progress.id === pending.clientMessageId ? progress.seconds : 0,
+              )}
+            </p>
+          ) : null}
           {restoreStatus === 'restoring' ? <p role="status">正在恢复上次咨询…</p> : null}
           {recoveryNotice ? <p role="status">{recoveryNotice}</p> : null}
-          {restoreStatus === 'failed' ? (
+          {restoreStatus === 'failed' && !releaseWithdrawn ? (
             <button
               onClick={() => {
                 setRecoveryNotice(null);
+                setRecoveryCode(undefined);
                 setRestoreStatus('restoring');
                 setRestoreAttempt((value) => value + 1);
               }}
@@ -413,23 +496,43 @@ export function OnlineCustomerService({
               重试恢复上次咨询
             </button>
           ) : null}
-          {pending?.phase === 'failed' ? (
+          {releaseWithdrawn ? (
+            <div className="send-failure" role="alert">
+              <p>{consumerFailure('RELEASE_WITHDRAWN', false).message}</p>
+              <button onClick={viewLatestAssistant} type="button">
+                查看最新客服
+              </button>
+              <p>不会自动重发旧问题；商家尚未重新发布时，最新页面仍会显示服务未开放。</p>
+            </div>
+          ) : null}
+          {pending?.phase === 'failed' && !releaseWithdrawn ? (
             <div className="send-failure" role="alert">
               <p>{pending.errorMessage}</p>
               <div>
                 {pending.retryable ? (
                   <button onClick={retryMessage} type="button">
-                    使用同一消息编号重试
+                    重试回复
                   </button>
                 ) : null}
-                <button
-                  onClick={() => setConversation((current) => dismissFailed(current))}
-                  type="button"
-                >
-                  结束本条
+                <button onClick={continueQuestion} type="button">
+                  继续提问
+                </button>
+                <button onClick={() => window.location.reload()} type="button">
+                  刷新客服状态
                 </button>
               </div>
+              <p>重试会继续确认同一条问题，不会作为新问题重复提交。</p>
+              {supportReference(pending.requestId ?? pending.turn?.traceId) ? (
+                <p>支持编号：{supportReference(pending.requestId ?? pending.turn?.traceId)}</p>
+              ) : null}
             </div>
+          ) : null}
+          {previousQuestion ? (
+            <details className="previous-question">
+              <summary>上次未完成的问题（仅保留在本页）</summary>
+              <p>{previousQuestion}</p>
+              <p>继续输入不会自动重发上面的问题。</p>
+            </details>
           ) : null}
           <form
             aria-label="发送咨询消息"

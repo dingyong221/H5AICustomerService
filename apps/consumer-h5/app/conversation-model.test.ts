@@ -4,6 +4,7 @@ import {
   applyTurnResult,
   attachSession,
   beginMessage,
+  dismissFailed,
   failPending,
   initialConversationState,
   markAccepted,
@@ -120,5 +121,38 @@ describe('conversation model', () => {
     });
     expect(state.pending).toBeUndefined();
     expect(state.messages).toEqual([visitorMessage, assistantMessage]);
+  });
+
+  it('keeps withdrawn questions visible, refuses retry and never migrates the session', () => {
+    let state = markAccepted(attachSession(pendingState(), session), accepted);
+    state = applyTurnResult(state, {
+      messages: [visitorMessage],
+      sessionHandle: session.sessionHandle,
+      state: 'failed',
+      traceId: accepted.traceId,
+      turnId: accepted.turnId,
+      error: { code: 'RELEASE_WITHDRAWN', retryable: true },
+    });
+    expect(state.pending).toMatchObject({
+      content: '多久发货？',
+      errorCode: 'RELEASE_WITHDRAWN',
+      retryable: false,
+    });
+    expect(state.pending?.errorMessage).toContain('商家已撤回');
+    expect(retryPending(state)).toBe(state);
+    expect(state.session).toBe(session);
+    expect(state.messages).toEqual([visitorMessage]);
+  });
+
+  it('dismisses a failed item without submitting it or changing any session identity', () => {
+    const state = failPending(attachSession(pendingState(), session), {
+      message: '请稍后重试',
+      retryable: true,
+      requestId: 'request_1234567890',
+    });
+    const continued = dismissFailed(state);
+    expect(continued.pending).toBeUndefined();
+    expect(continued.session).toBe(session);
+    expect(continued.messages).toEqual([]);
   });
 });

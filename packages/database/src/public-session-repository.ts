@@ -147,6 +147,21 @@ export class PublicSessionUnavailableError extends Error {
   }
 }
 
+export class PublicReleaseWithdrawnError extends Error {
+  public constructor() {
+    super('RELEASE_WITHDRAWN');
+    this.name = 'PublicReleaseWithdrawnError';
+  }
+}
+
+async function assertNotWithdrawn(connection: Connection, sessionId: Buffer, visitorId: Buffer) {
+  const [rows] = await connection.execute<(RowDataPacket & { status: string })[]>(
+    `SELECT status FROM conversation_session WHERE id=? AND visitor_credential_id=? LIMIT 1`,
+    [sessionId, visitorId],
+  );
+  if (rows[0]?.status === 'withdrawn') throw new PublicReleaseWithdrawnError();
+}
+
 export class PublicTurnConflictError extends Error {
   public constructor(public readonly code: 'TURN_IN_PROGRESS' | 'IDEMPOTENCY_KEY_REUSED') {
     super(code);
@@ -319,6 +334,7 @@ export class MySqlPublicSessionRepository {
 
     try {
       return await this.#withTransaction(async (connection) => {
+        await assertNotWithdrawn(connection, sessionId, visitorCredentialId);
         const existing = await readExisting(connection, true);
         if (existing) return responseFrom(existing);
         const [targets] = await connection.execute<TargetRow[]>(
@@ -392,6 +408,7 @@ export class MySqlPublicSessionRepository {
     }
     const connection = await this.#database.openConnection();
     try {
+      await assertNotWithdrawn(connection, material.sessionId, material.visitorCredentialId);
       const [rows] = await connection.execute<ExistingRow[]>(
         `SELECT cs.release_id, cs.created_at, cs.expires_at, cs.status
            FROM conversation_session cs
@@ -425,6 +442,7 @@ export class MySqlPublicSessionRepository {
     if (!handle || !Number.isFinite(now.getTime())) return null;
     const connection = await this.#database.openConnection();
     try {
+      await assertNotWithdrawn(connection, handle.sessionId, handle.visitorCredentialId);
       const [sessions] = await connection.execute<HistorySessionRow[]>(
         `SELECT cs.merchant_id, cs.assistant_id, cs.release_id, cs.created_at,
                 cs.active_turn_id, a.public_slug,
@@ -496,6 +514,7 @@ export class MySqlPublicSessionRepository {
           content: active.content,
         };
       }
+      await assertNotWithdrawn(connection, handle.sessionId, handle.visitorCredentialId);
       return {
         sessionHandle,
         releaseRef,
@@ -519,6 +538,7 @@ export class MySqlPublicSessionRepository {
     if (!handle || !Number.isFinite(now.getTime())) return null;
     const connection = await this.#database.openConnection();
     try {
+      await assertNotWithdrawn(connection, handle.sessionId, handle.visitorCredentialId);
       const [rows] = await connection.execute<SessionRow[]>(
         `SELECT cs.merchant_id, cs.assistant_id, cs.release_id, cs.expires_at,
                 r.config_snapshot
@@ -559,6 +579,7 @@ export class MySqlPublicSessionRepository {
       throw new PublicSessionUnavailableError();
     }
     return this.#withTransaction(async (connection) => {
+      await assertNotWithdrawn(connection, handle.sessionId, handle.visitorCredentialId);
       const [rows] = await connection.execute<EndSessionRow[]>(
         `SELECT status, active_turn_id
            FROM conversation_session
@@ -604,6 +625,7 @@ export class MySqlPublicSessionRepository {
     )
       throw new PublicSessionUnavailableError();
     return this.#withTransaction(async (connection) => {
+      await assertNotWithdrawn(connection, handle.sessionId, handle.visitorCredentialId);
       const [sessions] = await connection.execute<ActiveSessionRow[]>(
         `SELECT cs.merchant_id, cs.assistant_id, cs.release_id,
                 cs.active_turn_id, cs.next_sequence
@@ -710,6 +732,7 @@ export class MySqlPublicSessionRepository {
     if (!handle || !turnBuffer || !Number.isFinite(now.getTime())) return null;
     const connection = await this.#database.openConnection();
     try {
+      await assertNotWithdrawn(connection, handle.sessionId, handle.visitorCredentialId);
       const [sessions] = await connection.execute<ActiveSessionRow[]>(
         `SELECT cs.merchant_id, cs.assistant_id
            FROM conversation_session cs
@@ -755,6 +778,7 @@ export class MySqlPublicSessionRepository {
             : {}),
         };
       });
+      await assertNotWithdrawn(connection, handle.sessionId, handle.visitorCredentialId);
       return {
         sessionHandle,
         turnId,

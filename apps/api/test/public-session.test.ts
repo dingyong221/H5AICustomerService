@@ -2,7 +2,7 @@ import { HttpStatus, Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { describe, expect, it, vi } from 'vitest';
 
-import { PublicTurnConflictError } from '@h5cs/database';
+import { PublicReleaseWithdrawnError, PublicTurnConflictError } from '@h5cs/database';
 
 import { AppModule } from '../src/app.module.js';
 import type { EventStreamResponseLike } from '../src/http-types.js';
@@ -20,6 +20,39 @@ const session = {
 };
 
 describe('public visitor session issuance', () => {
+  it('returns the non-retryable withdrawal code only for a repository-verified visitor session', async () => {
+    const withdrawn = vi.fn(async () => {
+      throw new PublicReleaseWithdrawnError();
+    });
+    const service = new PublicSessionService(
+      {
+        createSession: withdrawn,
+        resumeSession: withdrawn,
+        readHistory: withdrawn,
+        endSession: withdrawn,
+      },
+      false,
+    );
+    const expected = {
+      status: HttpStatus.CONFLICT,
+      response: { code: 'RELEASE_WITHDRAWN', retryable: false },
+    };
+    const cookieHeader = `h5cs_visitor=${'A'.repeat(43)}`;
+    await expect(
+      service.create({ publicSlug, idempotencyKey: sessionRequestId, cookieHeader }),
+    ).rejects.toMatchObject(expected);
+    await expect(
+      service.resume({ publicSlug, sessionRequestId, cookieHeader }),
+    ).rejects.toMatchObject(expected);
+    await expect(service.history(session.sessionHandle, cookieHeader)).rejects.toMatchObject(
+      expected,
+    );
+    await expect(service.end(session.sessionHandle, cookieHeader)).rejects.toMatchObject(expected);
+    await expect(service.history(session.sessionHandle, undefined)).rejects.toMatchObject({
+      status: HttpStatus.NOT_FOUND,
+    });
+    expect(withdrawn).toHaveBeenCalledTimes(4);
+  });
   it('sets an HttpOnly secure nonce cookie and reuses it on idempotent retries', async () => {
     const createSession = vi.fn(async (_input: { visitorNonce: string }) => session);
     const service = new PublicSessionService({ createSession }, true);
@@ -196,6 +229,29 @@ describe('public conversation turn contract', () => {
   const nonce = 'A'.repeat(43);
   const messageId = `message_${'55'.repeat(16)}`;
   const turnId = `t_${'88'.repeat(16)}`;
+
+  it('maps withdrawn turn reads and sends to a non-retryable conflict', async () => {
+    const withdrawn = vi.fn(async () => {
+      throw new PublicReleaseWithdrawnError();
+    });
+    const service = new PublicTurnService(
+      { acceptTurn: withdrawn, readTurn: withdrawn },
+      'https://h5cs.1rying.com',
+    );
+    const expected = {
+      status: HttpStatus.CONFLICT,
+      response: { code: 'RELEASE_WITHDRAWN', retryable: false },
+    };
+    await expect(
+      service.send({
+        sessionHandle: handle,
+        visitorNonce: nonce,
+        idempotencyKey: messageId,
+        body: { clientMessageId: messageId, content: '合成问题' },
+      }),
+    ).rejects.toMatchObject(expected);
+    await expect(service.read(handle, nonce, turnId)).rejects.toMatchObject(expected);
+  });
 
   it('returns same-origin poll URLs only after a durable turn has been accepted', async () => {
     const acceptTurn = vi.fn(async () => ({ turnId, traceId: `trace_${'88'.repeat(16)}` }));

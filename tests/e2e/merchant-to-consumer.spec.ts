@@ -21,6 +21,42 @@ async function expectMerchantStep(page: Page, title: string): Promise<void> {
   ).toHaveAttribute('aria-current', 'step');
 }
 
+async function approveCurrentPreview(page: Page): Promise<void> {
+  const currentRevision = await page
+    .locator('.assistant-preview-form input[name="draftRevision"]')
+    .inputValue();
+  expect(currentRevision).toMatch(/^[1-9][0-9]{0,9}$/u);
+  const verdictForm = page.locator('.preview-verdict-form');
+  await expect(verdictForm.locator('input[name="draftRevision"]')).toHaveValue(currentRevision);
+  await expect(verdictForm.locator('input[name="checkId"]')).toHaveValue(/^[0-9a-f]{32}$/u);
+  const publicationChecks = page.getByRole('region', { name: '当前修订发布检查', exact: true });
+  await expect(publicationChecks.getByText('等待商家判定', { exact: true })).toBeVisible();
+  const reviewedAnswer = verdictForm.getByRole('checkbox', {
+    name: '我已核对本修订的真实试聊回答、价格、优惠与适用条件',
+    exact: true,
+  });
+  await expect(reviewedAnswer).not.toBeChecked();
+  await expect(reviewedAnswer).toHaveAttribute('required', '');
+  await reviewedAnswer.check();
+  await verdictForm.getByRole('button', { name: '回答合格，允许发布本修订', exact: true }).click();
+  await expect(publicationChecks.getByText('本修订试聊已判定通过', { exact: true })).toBeVisible();
+}
+
+async function previewAndApproveCurrentRevision(
+  page: Page,
+  question: string,
+  expectedAnswer: string,
+): Promise<void> {
+  await expectMerchantStep(page, '效果试聊');
+  await page.getByLabel('试聊问题').fill(question);
+  await page.getByRole('button', { name: '发送测试问题', exact: true }).click();
+  await expect(page.locator('.assistant-preview-form .assistant-preview-answer > p')).toContainText(
+    expectedAnswer,
+    { timeout: 60_000 },
+  );
+  await approveCurrentPreview(page);
+}
+
 async function readPublishedRelease(
   page: Page,
   publicUrl: string,
@@ -293,6 +329,7 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await materialPanel.getByRole('button', { name: '直接使用提取文字', exact: true }).click();
   await expect(materialPanel.getByLabel('知识整理稿', { exact: true })).toHaveValue(/合成旧材料A/u);
   await materialPanel.getByRole('checkbox', { name: /我已核对整理稿/u }).check();
+  await materialPanel.getByRole('button', { name: '1. 选择与整理材料', exact: true }).click();
   const deleteButton = materialPanel.getByRole('button', {
     name: `删除材料：${deletedMaterialName}`,
     exact: true,
@@ -320,7 +357,7 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await expect(materialA).toHaveCount(0);
   await expect(materialB).toBeChecked();
   await expect(materialPanel.getByLabel('知识整理稿', { exact: true })).toHaveValue('');
-  // Deletion clears the summary and collapses its editor. Inspect the retained
+  // Deletion clears the summary while its review zone is hidden. Inspect the retained
   // input itself so an inaccessible, hidden role is not mistaken for a stale
   // confirmation. The confirmation must still have been revoked.
   await expect(
@@ -416,6 +453,7 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
     '我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。',
     { timeout: 60_000 },
   );
+  await approveCurrentPreview(merchantPage);
   await expect(merchantPage.locator('a[href^="http://127.0.0.1:3001/a/"]')).toHaveCount(0);
   await expect(merchantPage.getByRole('img', { name: '扫码打开消费者 AI 客服' })).toHaveCount(0);
   await merchantPage.getByRole('link', { name: '下一步：发布分享', exact: true }).click();
@@ -454,7 +492,7 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   const consumerPage = sharedContext ? await sharedContext.newPage() : await browser.newPage();
   await consumerPage.goto(publicUrl!);
   await expect(consumerPage.getByRole('heading', { name: assistantName })).toBeVisible();
-  await consumerPage.getByText('联系商家 / 人工服务', { exact: true }).click();
+  await openMerchantDetails(consumerPage, '联系商家 / 人工服务');
   await expect(
     consumerPage.getByText('工作日9:00至18:00，请通过测试店铺订单页联系人工。', { exact: true }),
   ).toBeVisible();
@@ -525,6 +563,13 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await expect(merchantPage).toHaveURL(`${managementUrl}/knowledge/${assistantId}`);
   await merchantPage.getByRole('link', { name: '下一步：效果试聊', exact: true }).click();
   await expectMerchantStep(merchantPage, '效果试聊');
+  // An improvement-task retest has its own verdict. Publication additionally
+  // requires a trusted preview and an explicit verdict for this current revision.
+  await previewAndApproveCurrentRevision(
+    merchantPage,
+    '你们提供什么服务？',
+    '我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。',
+  );
   await merchantPage.getByRole('link', { name: '下一步：发布分享', exact: true }).click();
   await expectMerchantStep(merchantPage, '发布分享');
   await merchantPage.getByLabel(/我已核对以上资料，并确认向消费者公开发布当前修订/u).check();
@@ -609,6 +654,11 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   );
   expect(beforeConcurrentEdit).toBe(beforeManualEdit + 2);
   await merchantPage.getByRole('link', { name: '下一步：效果试聊', exact: true }).click();
+  await previewAndApproveCurrentRevision(
+    merchantPage,
+    '洗衣机清洁可以咨询吗？',
+    '也提供洗衣机清洁咨询。',
+  );
   await merchantPage.getByRole('link', { name: '下一步：发布分享', exact: true }).click();
   await expectMerchantStep(merchantPage, '发布分享');
   await merchantPage.getByLabel(/我已核对以上资料，并确认向消费者公开发布当前修订/u).check();
@@ -654,8 +704,19 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await expect(
     merchantPage.getByLabel(/我已核对以上资料，并确认向消费者公开发布当前修订/u),
   ).not.toBeChecked();
+  await expect(
+    merchantPage.getByRole('button', { name: '确认资料并发布 AI 客服', exact: true }),
+  ).toBeDisabled();
   await expect(publicLink).toHaveAttribute('href', publicUrl!);
-  await merchantPage.reload();
+  // The concurrent edit invalidated both the old consent and old preview pass.
+  // Re-test the actual new revision before attempting the third publication.
+  await merchantPage.goto(`${managementUrl}/preview/${assistantId}`);
+  await previewAndApproveCurrentRevision(
+    merchantPage,
+    '洗衣机清洁可以咨询吗，价格如何确认？',
+    '也提供洗衣机清洁咨询。',
+  );
+  await merchantPage.getByRole('link', { name: '下一步：发布分享', exact: true }).click();
   const preV3Release = await readPublishedRelease(merchantPage, publicUrl!);
   expect(preV3Release.status).toBe(200);
   expect(preV3Release.releaseRef).toMatch(/^[0-9a-f]{32}$/u);
@@ -1164,6 +1225,7 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
     timeout: 60000,
   });
   await expect(restoredPreview).not.toContainText('也提供洗衣机清洁咨询');
+  await approveCurrentPreview(merchantPage);
   await merchantPage.getByRole('link', { name: '下一步：发布分享', exact: true }).click();
   await merchantPage.getByLabel(/我已核对以上资料，并确认向消费者公开发布当前修订/u).check();
   await merchantPage.getByRole('button', { name: '确认资料并发布 AI 客服', exact: true }).click();

@@ -60,7 +60,7 @@ export function PublishAssistantForm({
       <input name="idempotencyKey" type="hidden" value={idempotencyKey} />
       <p>
         勾选表示你已核对草稿修订 {draftRevision}。提交后会确认资料并实际发布 AI
-        客服，提供固定消费者链接。
+        客服，提供固定消费者链接。服务端会再次检查本修订试聊判定和业务事实；修改资料后必须重新试聊。
         新咨询使用本次内容，现有会话继续使用建立时的版本；后续发布新版不更换链接。
       </p>
       <label>

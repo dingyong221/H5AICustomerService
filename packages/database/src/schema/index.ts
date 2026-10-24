@@ -550,6 +550,49 @@ export const assistants = mysqlTable(
   ],
 );
 
+export const assistantPublicationGovernance = mysqlTable(
+  'assistant_publication_governance',
+  {
+    merchantId: id('merchant_id').notNull(),
+    assistantId: id('assistant_id').notNull(),
+    previewId: id('preview_id'),
+    previewRevision: int('preview_revision', { unsigned: true }),
+    previewFactsHash: digest('preview_facts_hash'),
+    previewQuestion: text('preview_question'),
+    previewAnswer: text('preview_answer'),
+    previewVerdict: varchar('preview_verdict', { length: 16 }),
+    previewedAt: utcDateTime('previewed_at'),
+    judgedBy: id('judged_by'),
+    judgedAt: utcDateTime('judged_at'),
+    withdrawnThroughNo: int('withdrawn_through_no', { unsigned: true }).notNull().default(0),
+    withdrawalReason: varchar('withdrawal_reason', { length: 500 }),
+    withdrawnBy: id('withdrawn_by'),
+    withdrawnAt: utcDateTime('withdrawn_at'),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.merchantId, table.assistantId],
+      name: 'pk_assistant_publication_governance',
+    }),
+    foreignKey({
+      columns: [table.merchantId, table.assistantId],
+      foreignColumns: [assistants.merchantId, assistants.id],
+      name: 'fk_publication_governance_assistant',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.judgedBy],
+      foreignColumns: [merchantUsers.id],
+      name: 'fk_publication_governance_judge',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.withdrawnBy],
+      foreignColumns: [merchantUsers.id],
+      name: 'fk_publication_governance_withdrawer',
+    }).onDelete('restrict'),
+  ],
+);
+
 export const onboardingSessions = mysqlTable(
   'onboarding_session',
   {

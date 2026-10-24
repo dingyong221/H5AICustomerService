@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   snapshot: vi.fn(),
+  governance: vi.fn(),
   materials: vi.fn(),
   worker: vi.fn(),
   api: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock('@h5cs/database', () => ({
   loadDatabaseConfig: () => ({ configured: true, config: {} }),
   MySqlAssistantLifecycleRepository: class {
     findManagementSnapshot = mocks.snapshot;
+    getPublicationGovernance = mocks.governance;
   },
   MySqlKnowledgeMaterialRepository: class {
     list = mocks.materials;
@@ -84,6 +86,10 @@ vi.mock('./workspace/draft-revision-notice', () => ({ DraftRevisionNotice: () =>
 vi.mock('./workspace/preview-chat-form', () => ({
   PreviewChatForm: () => React.createElement('form', { 'data-preview': true }),
 }));
+vi.mock('./workspace/governance-controls', () => ({
+  RenameAssistantForm: () => React.createElement('form', { 'data-rename': true }),
+  EmergencyWithdrawForm: () => React.createElement('form', { 'data-withdraw': true }),
+}));
 vi.mock('./improvements/improvement-summary', () => ({ ImprovementSummaryPanel: () => null }));
 vi.mock('./knowledge/material-manager', () => ({
   MaterialManager: ({ assistantId }: { assistantId: string }) =>
@@ -112,12 +118,30 @@ const assistant = {
     humanContact: '',
   },
 };
+const governance = {
+  draftRevision: 3,
+  activeReleaseNo: null,
+  activeDraftRevision: null,
+  hasUnpublishedChanges: true,
+  hasPublishedHistory: false,
+  canManage: true,
+  quality: { state: 'passed', checkId: null, question: null, answer: null, testedAt: null },
+  issues: [],
+  capacity: {
+    effectiveCharacters: 10,
+    maximumCharacters: 4000,
+    uploadedMaterialCount: 0,
+    sourceCoverage: 'not_tracked',
+  },
+  withdrawal: { withdrawnThroughReleaseNo: 0, withdrawnAt: null, reason: null },
+};
 
 describe('assistant publication flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubGlobal('React', React);
     mocks.snapshot.mockResolvedValue(assistant);
+    mocks.governance.mockReset().mockResolvedValue(governance);
     mocks.materials.mockResolvedValue([]);
     mocks.worker.mockResolvedValue(true);
     mocks.api.mockResolvedValue(true);
@@ -172,12 +196,49 @@ describe('assistant publication flow', () => {
 
   it('uses the latest revision when editing invalidates an earlier confirmation', async () => {
     mocks.snapshot.mockResolvedValue({ ...assistant, draftRevision: 4 });
+    mocks.governance.mockResolvedValue({
+      ...governance,
+      draftRevision: 4,
+      quality: { ...governance.quality, state: 'not_tested' },
+    });
     const html = renderToStaticMarkup(
       await AssistantView({ merchantId, assistantId, section: 'publish' }),
     );
     expect(html).toContain('data-publish-revision="4"');
     expect(html).not.toContain('data-publish-revision="3"');
-    expect(html).toContain('data-publish-ready="true"');
+    expect(html).toContain('data-publish-ready="false"');
+    expect(html).toContain('请成功试聊当前修订');
+  });
+  it('keeps the permanent address visible after emergency withdrawal without claiming it can take new consultations', async () => {
+    mocks.governance.mockResolvedValue({
+      ...governance,
+      hasPublishedHistory: true,
+      withdrawal: {
+        withdrawnThroughReleaseNo: 2,
+        withdrawnAt: '2026-10-24T00:00:00Z',
+        reason: '发现价格错误',
+      },
+    });
+    const html = renderToStaticMarkup(
+      await AssistantView({ merchantId, assistantId, section: 'publish' }),
+    );
+    expect(html).toContain('href="https://example.test/a/test-assistant"');
+    expect(html).toContain('已紧急撤回');
+    expect(html).toContain('当前不能接待咨询');
+    expect(html).not.toContain('data-withdraw');
+  });
+  it('does not bypass unavailable publication checks and does not render management controls to a viewer', async () => {
+    mocks.governance.mockRejectedValueOnce(new Error('unavailable'));
+    const failed = renderToStaticMarkup(
+      await AssistantView({ merchantId, assistantId, section: 'publish' }),
+    );
+    expect(failed).toContain('data-publish-ready="false"');
+    expect(failed).toContain('发布检查暂不可用');
+    mocks.governance.mockResolvedValue({ ...governance, canManage: false });
+    const viewer = renderToStaticMarkup(
+      await AssistantView({ merchantId, assistantId, section: 'drafts' }),
+    );
+    expect(viewer).not.toContain('data-rename');
   });
 
   it.each(['drafts', 'knowledge', 'preview', 'publish'] as const)(

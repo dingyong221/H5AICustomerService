@@ -15,6 +15,7 @@ import type {
 } from '@h5cs/domain';
 import {
   AssistantGenerationUnavailableError,
+  AssistantGovernanceError,
   AssistantIdempotencyConflictError,
   AssistantLifecyclePersistenceError,
   AssistantPublishValidationError,
@@ -29,6 +30,13 @@ import type { Connection, ResultSetHeader, RowDataPacket } from 'mysql2/promise'
 import type { DatabaseConnectionConfig } from './config.js';
 import { probeDatabase } from './config.js';
 import { bindVerifiedImprovementsToRelease } from './assistant-improvement-release.js';
+import {
+  assertPublicationGovernance,
+  governanceAudit,
+  governanceFactsHash,
+  publicationGovernanceStatus,
+  readGovernance,
+} from './publication-governance.js';
 
 type OnboardingGenerationRow = RowDataPacket & {
   answers: string | Record<string, unknown>;
@@ -697,6 +705,320 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
     });
   }
 
+  public async getPublicationGovernance(input: {
+    merchantUserId: MerchantUserId;
+    merchantId: MerchantId;
+    assistantId: AssistantId;
+    now: Date;
+  }) {
+    validDate(input.now, 'now');
+    const scope = {
+      merchant: idBuffer(input.merchantId, 'merchantId'),
+      assistant: idBuffer(input.assistantId, 'assistantId'),
+      user: idBuffer(input.merchantUserId, 'merchantUserId'),
+    };
+    return this.#withConnection(async (connection) => {
+      const [rows] = await connection.execute<(PublishRow & { membership_role: string })[]>(
+        `SELECT a.id AS assistant_id,a.merchant_id,a.display_name,a.public_slug,a.status,
+          a.draft_revision,d.config,d.validation,a.active_release_id,a.created_at,a.updated_at,
+          mm.role AS membership_role FROM assistant a
+          JOIN assistant_draft d ON d.merchant_id=a.merchant_id AND d.assistant_id=a.id
+          JOIN merchant m ON m.id=a.merchant_id
+          JOIN merchant_user u ON u.id=?
+          JOIN merchant_membership mm ON mm.merchant_id=a.merchant_id AND mm.merchant_user_id=u.id
+          WHERE a.merchant_id=? AND a.id=? AND u.status='active' AND mm.status='active' AND m.status='active' LIMIT 1`,
+        [scope.user, scope.merchant, scope.assistant],
+      );
+      const current = rows[0];
+      if (!current) throw new AssistantGovernanceError('GOVERNANCE_CONFLICT');
+      return publicationGovernanceStatus(
+        connection,
+        scope,
+        current,
+        parseDraft(current.config),
+        ['owner', 'admin', 'editor'].includes(current.membership_role),
+        input.now,
+      );
+    });
+  }
+
+  /** Called only by the trusted server preview action after a successful Worker response. */
+  public async savePreviewCheck(input: {
+    merchantUserId: MerchantUserId;
+    merchantId: MerchantId;
+    assistantId: AssistantId;
+    expectedDraftRevision: number;
+    question: string;
+    answer: string;
+    now: Date;
+  }): Promise<{ checkId: string; draftRevision: number }> {
+    validDate(input.now, 'now');
+    const question = paragraphText(input.question, 'question', 2000);
+    const answer = paragraphText(input.answer, 'answer', 8000);
+    const scope = {
+      merchant: idBuffer(input.merchantId, 'merchantId'),
+      assistant: idBuffer(input.assistantId, 'assistantId'),
+      user: idBuffer(input.merchantUserId, 'merchantUserId'),
+    };
+    return this.#withTransaction(async (connection) => {
+      const current = await this.#lockManagement(
+        connection,
+        scope.user,
+        scope.merchant,
+        scope.assistant,
+      );
+      if (
+        !current ||
+        current.status === 'paused' ||
+        current.draft_revision !== input.expectedDraftRevision
+      )
+        throw new AssistantRevisionConflictError();
+      const checkId = randomBytes(16);
+      const hash = governanceFactsHash(current.display_name, parseDraft(current.config));
+      await connection.execute(
+        `INSERT INTO assistant_publication_governance
+        (merchant_id,assistant_id,preview_id,preview_revision,preview_facts_hash,preview_question,
+         preview_answer,preview_verdict,previewed_at,judged_by,judged_at,withdrawn_through_no,updated_at)
+        VALUES (?,?,?,?,?,?,?,'pending',?,NULL,NULL,0,?) ON DUPLICATE KEY UPDATE
+         preview_id=VALUES(preview_id),preview_revision=VALUES(preview_revision),
+         preview_facts_hash=VALUES(preview_facts_hash),preview_question=VALUES(preview_question),
+         preview_answer=VALUES(preview_answer),preview_verdict='pending',previewed_at=VALUES(previewed_at),
+         judged_by=NULL,judged_at=NULL,updated_at=VALUES(updated_at)`,
+        [
+          scope.merchant,
+          scope.assistant,
+          checkId,
+          current.draft_revision,
+          hash,
+          question,
+          answer,
+          input.now,
+          input.now,
+        ],
+      );
+      await governanceAudit(connection, scope, 'assistant.preview_recorded', input.now, {
+        checkId: checkId.toString('hex'),
+        draftRevision: current.draft_revision,
+        questionHash: createHash('sha256').update(question).digest('hex'),
+        answerHash: createHash('sha256').update(answer).digest('hex'),
+      });
+      return { checkId: checkId.toString('hex'), draftRevision: current.draft_revision };
+    });
+  }
+
+  public async judgePreviewCheck(input: {
+    merchantUserId: MerchantUserId;
+    merchantId: MerchantId;
+    assistantId: AssistantId;
+    expectedDraftRevision: number;
+    checkId: string;
+    verdict: 'pass' | 'fail';
+    now: Date;
+  }): Promise<void> {
+    validDate(input.now, 'now');
+    const check = idBuffer(input.checkId, 'checkId');
+    if (!['pass', 'fail'].includes(input.verdict))
+      throw new AssistantGovernanceError('GOVERNANCE_CONFLICT');
+    const scope = {
+      merchant: idBuffer(input.merchantId, 'merchantId'),
+      assistant: idBuffer(input.assistantId, 'assistantId'),
+      user: idBuffer(input.merchantUserId, 'merchantUserId'),
+    };
+    await this.#withTransaction(async (connection) => {
+      const current = await this.#lockManagement(
+        connection,
+        scope.user,
+        scope.merchant,
+        scope.assistant,
+      );
+      if (
+        !current ||
+        current.status === 'paused' ||
+        current.draft_revision !== input.expectedDraftRevision
+      )
+        throw new AssistantRevisionConflictError();
+      const record = await readGovernance(connection, scope, true);
+      if (
+        !record?.preview_id?.equals(check) ||
+        record.preview_revision !== current.draft_revision ||
+        !record.preview_facts_hash?.equals(
+          governanceFactsHash(current.display_name, parseDraft(current.config)),
+        )
+      )
+        throw new AssistantGovernanceError('GOVERNANCE_CONFLICT');
+      await connection.execute(
+        `UPDATE assistant_publication_governance SET preview_verdict=?,judged_by=?,
+        judged_at=?,updated_at=? WHERE merchant_id=? AND assistant_id=? AND preview_id=? AND preview_revision=?`,
+        [
+          input.verdict,
+          scope.user,
+          input.now,
+          input.now,
+          scope.merchant,
+          scope.assistant,
+          check,
+          current.draft_revision,
+        ],
+      );
+      await governanceAudit(connection, scope, 'assistant.preview_judged', input.now, {
+        checkId: input.checkId,
+        draftRevision: current.draft_revision,
+        verdict: input.verdict,
+      });
+    });
+  }
+
+  public async renameAssistant(input: {
+    merchantUserId: MerchantUserId;
+    merchantId: MerchantId;
+    assistantId: AssistantId;
+    expectedRevision: number;
+    displayName: string;
+    now: Date;
+  }): Promise<AssistantManagementSnapshot> {
+    const displayName = text(input.displayName, 'displayName', 200);
+    validDate(input.now, 'now');
+    const scope = {
+      merchant: idBuffer(input.merchantId, 'merchantId'),
+      assistant: idBuffer(input.assistantId, 'assistantId'),
+      user: idBuffer(input.merchantUserId, 'merchantUserId'),
+    };
+    return this.#withTransaction(async (connection) => {
+      const current = await this.#lockManagement(
+        connection,
+        scope.user,
+        scope.merchant,
+        scope.assistant,
+      );
+      if (!current || current.draft_revision !== input.expectedRevision)
+        throw new AssistantRevisionConflictError();
+      if (current.display_name === displayName) return this.#managementFromRow(current);
+      const updated = await this.#persistDraft(
+        connection,
+        current,
+        { ...input, draft: parseDraft(current.config) },
+        parseDraft(current.config),
+      );
+      await connection.execute(
+        `UPDATE assistant SET display_name=? WHERE merchant_id=? AND id=? AND draft_revision=?`,
+        [displayName, scope.merchant, scope.assistant, updated.draftRevision],
+      );
+      await governanceAudit(connection, scope, 'assistant.renamed', input.now, {
+        draftRevision: updated.draftRevision,
+        previousName: current.display_name,
+        displayName,
+      });
+      return { ...updated, displayName };
+    });
+  }
+
+  public async emergencyWithdraw(input: {
+    merchantUserId: MerchantUserId;
+    merchantId: MerchantId;
+    assistantId: AssistantId;
+    expectedReleaseId: ReleaseId;
+    reason: string;
+    now: Date;
+  }): Promise<{ withdrawnReleaseCount: number; endedSessionCount: number }> {
+    validDate(input.now, 'now');
+    const reason = paragraphText(input.reason, 'reason', 500);
+    const expected = idBuffer(input.expectedReleaseId, 'releaseId');
+    const scope = {
+      merchant: idBuffer(input.merchantId, 'merchantId'),
+      assistant: idBuffer(input.assistantId, 'assistantId'),
+      user: idBuffer(input.merchantUserId, 'merchantUserId'),
+    };
+    return this.#withTransaction(async (connection) => {
+      const current = await this.#lockManagement(
+        connection,
+        scope.user,
+        scope.merchant,
+        scope.assistant,
+      );
+      if (!current?.active_release_id?.equals(expected))
+        throw new AssistantGovernanceError('WITHDRAWAL_CONFLICT');
+      const [releases] = await connection.execute<(RowDataPacket & { release_no: number })[]>(
+        `SELECT release_no FROM assistant_release WHERE merchant_id=? AND assistant_id=? AND id=? LIMIT 1 FOR UPDATE`,
+        [scope.merchant, scope.assistant, expected],
+      );
+      const through = releases[0]?.release_no;
+      if (!Number.isSafeInteger(through) || !through)
+        throw new AssistantGovernanceError('WITHDRAWAL_CONFLICT');
+      // A preview issued before withdrawal must never become a new passing check
+      // when its Worker response returns after this transaction commits.
+      const nextDraft = await this.#persistDraft(
+        connection,
+        current,
+        { ...input, expectedRevision: current.draft_revision, draft: parseDraft(current.config) },
+        parseDraft(current.config),
+      );
+      const [releaseCount] = await connection.execute<(RowDataPacket & { total: number })[]>(
+        `SELECT COUNT(*) AS total FROM assistant_release WHERE merchant_id=? AND assistant_id=? AND release_no<=?`,
+        [scope.merchant, scope.assistant, through],
+      );
+      await connection.execute(
+        `INSERT INTO assistant_publication_governance
+        (merchant_id,assistant_id,withdrawn_through_no,withdrawal_reason,withdrawn_by,withdrawn_at,updated_at)
+        VALUES (?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE withdrawn_through_no=VALUES(withdrawn_through_no),
+        withdrawal_reason=VALUES(withdrawal_reason),withdrawn_by=VALUES(withdrawn_by),withdrawn_at=VALUES(withdrawn_at),updated_at=VALUES(updated_at),
+        preview_id=NULL,preview_revision=NULL,preview_facts_hash=NULL,preview_verdict=NULL,
+        previewed_at=NULL,judged_by=NULL,judged_at=NULL`,
+        [scope.merchant, scope.assistant, through, reason, scope.user, input.now, input.now],
+      );
+      // The assistant lock serializes createSession/publish; session rows serialize in-flight completion.
+      const [sessions] = await connection.execute<ResultSetHeader>(
+        `UPDATE conversation_session cs
+        JOIN assistant_release r ON r.merchant_id=cs.merchant_id AND r.assistant_id=cs.assistant_id AND r.id=cs.release_id
+        SET cs.status='withdrawn',cs.active_turn_id=NULL,cs.version=cs.version+1,cs.updated_at=?,
+          cs.ended_at=?,cs.ended_reason='emergency_withdrawal'
+        WHERE cs.merchant_id=? AND cs.assistant_id=? AND r.release_no<=? AND cs.status<>'withdrawn'`,
+        [input.now, input.now, scope.merchant, scope.assistant, through],
+      );
+      await connection.execute(
+        `UPDATE message m JOIN conversation_session cs
+        ON cs.merchant_id=m.merchant_id AND cs.assistant_id=m.assistant_id AND cs.id=m.session_id
+        SET m.state='failed',m.error_code='RELEASE_WITHDRAWN',m.completed_at=?
+        WHERE cs.merchant_id=? AND cs.assistant_id=? AND cs.status='withdrawn' AND m.state IN ('accepted','processing')`,
+        [input.now, scope.merchant, scope.assistant],
+      );
+      await connection.execute(
+        `UPDATE job SET state='failed',last_error_code='RELEASE_WITHDRAWN',
+        lease_owner=NULL,lease_until=NULL,updated_at=?,completed_at=? WHERE merchant_id=?
+        AND type='conversation.turn' AND state IN ('pending','processing')
+        AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.assistantId'))=?`,
+        [input.now, input.now, scope.merchant, input.assistantId],
+      );
+      await connection.execute(
+        `UPDATE assistant_release SET status='retired' WHERE merchant_id=? AND assistant_id=? AND status='active'`,
+        [scope.merchant, scope.assistant],
+      );
+      await connection.execute(
+        `DELETE FROM assistant_active_release WHERE merchant_id=? AND assistant_id=?`,
+        [scope.merchant, scope.assistant],
+      );
+      await connection.execute(
+        `UPDATE assistant SET active_release_id=NULL,status=CASE WHEN status='paused' THEN 'paused' ELSE 'draft_only' END,updated_at=? WHERE merchant_id=? AND id=?`,
+        [input.now, scope.merchant, scope.assistant],
+      );
+      await governanceAudit(
+        connection,
+        scope,
+        'assistant.emergency_withdrawn',
+        input.now,
+        {
+          throughReleaseNo: through,
+          draftRevision: nextDraft.draftRevision,
+          endedSessionCount: sessions.affectedRows,
+        },
+        reason,
+      );
+      return {
+        withdrawnReleaseCount: Number(releaseCount[0]?.total ?? 0),
+        endedSessionCount: sessions.affectedRows,
+      };
+    });
+  }
+
   public async listReleaseHistory(input: {
     merchantUserId: MerchantUserId;
     merchantId: MerchantId;
@@ -1004,6 +1326,14 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
           ))
         )
           throw new AssistantPublishValidationError();
+        await assertPublicationGovernance(
+          connection,
+          { merchant: merchantId, assistant: assistantId, user: merchantUserId },
+          draft,
+          current.display_name,
+          input.expectedDraftRevision,
+          input.now,
+        );
         const [releaseRows] = await connection.execute<(RowDataPacket & { release_no: number })[]>(
           `SELECT release_no
              FROM assistant_release
@@ -1144,7 +1474,8 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
       const snapshot = parseObject(row.config_snapshot, 'release config');
       const draft = parseDraft(snapshot);
       const assistantName = text(snapshot['displayName'], 'displayName', 200);
-      if (assistantName !== row.display_name) return null;
+      // The published name is immutable until a new release is explicitly published.
+      // Renaming the editable assistant must not make the fixed public link unavailable.
       return {
         publicAssistantId: row.public_slug,
         releaseRef: idString(row.release_id, 'releaseId'),

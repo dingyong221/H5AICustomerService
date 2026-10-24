@@ -7,10 +7,13 @@ const mocks = vi.hoisted(() => ({
   cursor: 0,
   effects: [] as (() => unknown)[],
   refresh: vi.fn(),
+  push: vi.fn(),
   fetch: vi.fn(),
   confirm: vi.fn(),
 }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh }) }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ refresh: mocks.refresh, push: mocks.push }),
+}));
 vi.mock('../workspace/use-unsaved-form', () => ({ useUnsavedForm: () => () => {} }));
 vi.mock('react', async (load) => ({
   ...(await load<typeof import('react')>()),
@@ -47,6 +50,7 @@ type Props = {
   role?: string;
   checked?: boolean;
   disabled?: boolean;
+  hidden?: boolean;
   value?: string;
   'aria-label'?: string;
   onClick?: () => unknown;
@@ -406,5 +410,55 @@ describe('material deletion merchant experience', () => {
     button(render(), '直接使用提取文字').props.onClick!();
     expect(summary(render()).props.value).toContain(first.text);
     expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
+  it('explains uploaded versus effective knowledge and moves to review without another model request', () => {
+    let tree = render();
+    expect(text(tree)).toContain('上传不等于生效');
+    expect(text(tree)).toContain('草稿有效资料：0 / 4000 字');
+    checkbox(tree, first.name).props.onChange!({ target: { checked: true } });
+    tree = render();
+    button(tree, '直接使用提取文字').props.onClick!();
+    tree = render();
+    expect(summary(tree).props.value).toContain(first.text);
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(
+      nodes(tree).find(
+        (node) =>
+          node.type === 'div' &&
+          node.props.hidden === false &&
+          nodes(node).some((child) => child.type === 'textarea'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('only continues to preview after a verified save and keeps an unknown save on this page', async () => {
+    let tree = render();
+    summary(tree).props.onChange!({ target: { checked: false, value: '核对后的商品事实' } });
+    tree = render();
+    checkbox(tree, '我已核对整理稿').props.onChange!({ target: { checked: true } });
+    tree = render();
+    mocks.fetch.mockResolvedValue({ ok: true, json: async () => ({ saved: true }) });
+    button(tree, '保存并进入效果试聊').props.onClick!();
+    const saveForm = nodes(tree).find(
+      (node) => node.type === 'form' && nodes(node).some((child) => child.type === 'textarea'),
+    )!;
+    saveForm.props.onSubmit!({ preventDefault: () => {}, currentTarget: {} });
+    await vi.waitFor(() =>
+      expect(mocks.push).toHaveBeenCalledWith(`/${merchantId}/preview/${assistantId}`),
+    );
+    mocks.push.mockClear();
+    summary(render()).props.onChange!({ target: { checked: false, value: '仍需保存的新资料' } });
+    tree = render();
+    checkbox(tree, '我已核对整理稿').props.onChange!({ target: { checked: true } });
+    tree = render();
+    mocks.fetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+    button(tree, '保存并进入效果试聊').props.onClick!();
+    nodes(tree).find(
+      (node) => node.type === 'form' && nodes(node).some((child) => child.type === 'textarea'),
+    )!.props.onSubmit!({ preventDefault: () => {}, currentTarget: {} });
+    await vi.waitFor(() => expect(text(render())).toContain('未能确认保存结果'));
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(summary(render()).props.value).toBe('仍需保存的新资料');
   });
 });

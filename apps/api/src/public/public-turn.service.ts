@@ -8,6 +8,7 @@ import {
 import {
   loadDatabaseConfig,
   MySqlPublicSessionRepository,
+  PublicReleaseWithdrawnError,
   PublicSessionUnavailableError,
   PublicTurnConflictError,
 } from '@h5cs/database';
@@ -119,6 +120,12 @@ export class PublicTurnService {
         resultUrl: `${this.origin}${path}`,
       };
     } catch (error) {
+      if (error instanceof PublicReleaseWithdrawnError)
+        throw new ConflictException({
+          code: 'RELEASE_WITHDRAWN',
+          message: '商家已撤回此前资料，请查看最新客服。',
+          retryable: false,
+        });
       if (error instanceof PublicTurnConflictError) throw new ConflictException(error.code);
       if (error instanceof PublicSessionUnavailableError)
         throw new NotFoundException('Session not available');
@@ -138,6 +145,12 @@ export class PublicTurnService {
       if (!result) throw new NotFoundException('Turn not available');
       return result;
     } catch (error) {
+      if (error instanceof PublicReleaseWithdrawnError)
+        throw new ConflictException({
+          code: 'RELEASE_WITHDRAWN',
+          message: '商家已撤回此前资料，请查看最新客服。',
+          retryable: false,
+        });
       if (error instanceof NotFoundException) throw error;
       throw new ServiceUnavailableException('Conversation service unavailable');
     }

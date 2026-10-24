@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ effects: [] as (() => unknown)[] }));
+const mocks = vi.hoisted(() => ({
+  effects: [] as (() => unknown)[],
+  cleanups: [] as (() => unknown)[],
+}));
 vi.mock('react', async (load) => ({
   ...(await load<typeof import('react')>()),
   useRef: (initial: unknown) => ({ current: initial }),
@@ -38,6 +41,8 @@ function click(changed: Record<string, unknown> = {}) {
 function Activate(dirty = true) {
   const permit = useUnsavedForm(dirty);
   const cleanup = mocks.effects.splice(0).map((effect) => effect());
+  for (const callback of cleanup)
+    if (typeof callback === 'function') mocks.cleanups.push(callback as () => unknown);
   return { permit, cleanup };
 }
 describe('merchant unsaved-text navigation protection', () => {
@@ -66,7 +71,10 @@ describe('merchant unsaved-text navigation protection', () => {
       removeEventListener: (name: string) => documentListeners.delete(name),
     });
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    for (const callback of mocks.cleanups.splice(0)) callback();
+    vi.unstubAllGlobals();
+  });
   it('guards only dirty forms and removes listeners when the form unmounts', () => {
     Activate(false);
     expect(windowListeners.size + documentListeners.size).toBe(0);

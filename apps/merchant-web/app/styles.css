@@ -2833,3 +2833,134 @@ a {
     justify-self: start;
   }
 }
+.publication-governance,
+.knowledge-coverage {
+  background: #edf7f2;
+  border: 1px solid #c8dfd2;
+  border-radius: 1rem;
+  margin: 1rem 0;
+  padding: 1rem 1.15rem;
+}
+.publication-governance h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+.publication-state-grid,
+.knowledge-coverage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1.2rem;
+}
+.publication-state-grid span,
+.knowledge-coverage > span {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.knowledge-coverage p {
+  flex-basis: 100%;
+  margin: 0;
+}
+.fact-review-issues {
+  margin: 0.85rem 0 0;
+  padding-left: 1.3rem;
+}
+.fact-review-issues [data-severity='blocking'] {
+  color: #a33420;
+}
+.knowledge-stage-switch {
+  display: flex;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+.knowledge-stage-switch button,
+.knowledge-manager button,
+.preview-verdict-form button,
+.assistant-rename button,
+.emergency-withdrawal button {
+  border: 1px solid #bfd1c7;
+  border-radius: 0.65rem;
+  min-height: 2.7rem;
+  padding: 0.65rem 0.9rem;
+  cursor: pointer;
+}
+.knowledge-stage-switch button[aria-pressed='true'] {
+  background: #18714e;
+  color: white;
+  border-color: #18714e;
+}
+.knowledge-manager button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.knowledge-manager button[type='submit'] {
+  font-weight: 650;
+}
+.knowledge-manager .knowledge-manual-entry {
+  margin: 1rem 0;
+}
+.knowledge-material-list {
+  max-height: 28rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  margin: 0.75rem 0;
+}
+.knowledge-material-list:focus-visible {
+  outline: 2px solid #18714e;
+  outline-offset: 3px;
+}
+.preview-verdict-form {
+  border-top: 1px solid #dce5df;
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+.preview-verdict-form label,
+.emergency-withdrawal label,
+.assistant-rename label {
+  display: block;
+  margin: 0.75rem 0;
+}
+.assistant-rename input:not([type='hidden']),
+.emergency-withdrawal textarea {
+  display: block;
+  width: 100%;
+  margin-top: 0.45rem;
+  padding: 0.75rem;
+  border: 1px solid #b7cac0;
+  border-radius: 0.65rem;
+  font: inherit;
+}
+.emergency-withdrawal {
+  border-color: #d9aaa1;
+}
+.emergency-withdrawal summary {
+  color: #a33420;
+}
+.emergency-withdrawal button.danger {
+  background: #a33420;
+  color: #fff;
+  border-color: #a33420;
+}
+.dashboard-assistant-task__state {
+  font-weight: 600;
+  color: #176347;
+}
+.assistant-workspace-list .dashboard-assistant-task > p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+@media (max-width: 720px) {
+  .knowledge-material-list {
+    max-height: 22rem;
+  }
+  .knowledge-stage-switch {
+    flex-direction: column;
+  }
+  .publication-state-grid {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .publication-governance .section-heading {
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+}

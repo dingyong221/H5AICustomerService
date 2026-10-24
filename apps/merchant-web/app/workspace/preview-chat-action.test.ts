@@ -6,14 +6,17 @@ const mocks = vi.hoisted(() => ({
   generate: vi.fn(),
   config: vi.fn(),
   editAccess: vi.fn(),
+  record: vi.fn(),
   AccessError: class extends Error {},
 }));
 vi.mock('next/headers', () => ({ headers: async () => ({ get: mocks.origin }) }));
+vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 vi.mock('../account/merchant-actions', () => ({ currentMerchantForWrite: mocks.member }));
 vi.mock('@h5cs/database', () => ({
   loadDatabaseConfig: mocks.config,
   MySqlAssistantLifecycleRepository: class {
     findManagementSnapshot = mocks.snapshot;
+    savePreviewCheck = mocks.record;
   },
   MySqlKnowledgeMaterialRepository: class {
     assertEditable = mocks.editAccess;
@@ -55,11 +58,13 @@ describe('real draft input evidence boundary', () => {
     mocks.config.mockReturnValue({ configured: true, config: {} });
     mocks.snapshot.mockResolvedValue(snapshot);
     mocks.generate.mockResolvedValue('保温杯39元/件。');
+    mocks.record.mockReset().mockResolvedValue({ checkId: 'dd'.repeat(16), draftRevision: 2 });
   });
   afterEach(() => vi.unstubAllEnvs());
   it('returns only the actually requested revision and its exact persisted facts after the provider succeeds', async () => {
     const result = await previewChatAction(previous, form());
     expect(result).toMatchObject({ answer: '保温杯39元/件。', error: null, revision: 2 });
+    expect(result.checkId).toBe('dd'.repeat(16));
     expect(result.evidence).toContainEqual({
       label: '商品与服务资料（含已保存的来源标记）',
       text: snapshot.draft.materialsSummary,
@@ -70,6 +75,14 @@ describe('real draft input evidence boundary', () => {
       draft: snapshot.draft,
       question: '保温杯多少钱？',
     });
+  });
+  it('retains a generated answer but never grants a review ID when the trusted record cannot be persisted', async () => {
+    mocks.record.mockRejectedValue(new Error('private database detail'));
+    const result = await previewChatAction(previous, form());
+    expect(result.answer).toBe('保温杯39元/件。');
+    expect(result.checkId).toBeNull();
+    expect(result.error).toContain('不能用于发布判定');
+    expect(JSON.stringify(result)).not.toContain('private');
   });
   it('does not call models or disclose facts for foreign origin, denied member, unavailable DB, stale revision or paused assistant', async () => {
     mocks.origin.mockReturnValue('https://untrusted.invalid');

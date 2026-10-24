@@ -28,6 +28,10 @@ const repositoryWith = (
   const rollback = vi.fn(async () => undefined);
   const connection = {
     execute: async (statement: string, values: readonly unknown[] = []) => {
+      // Existing cases assume a non-withdrawn visitor session. Withdrawal paths
+      // and the authenticated guard query are covered by the new governance suite.
+      if (statement.startsWith('SELECT status FROM conversation_session WHERE id='))
+        return [[], []];
       calls.push({ statement, values });
       return handler(statement, values);
     },
