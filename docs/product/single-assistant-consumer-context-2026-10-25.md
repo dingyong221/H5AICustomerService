@@ -30,4 +30,4 @@
 
 ## 当前状态
 
-用户已恢复工作。本轮已实现并完成本地数据库、桌面/手机模拟闭环及独立恢复；全仓检查通过。尚未完成远程CI、候选与部署。实施及证据见../development/single-assistant-context-2026-10-25.md。实现复用工作树`F:/WorkStation/CODEX/worktrees/materials-publish-integration/H5AICustomerService`，新分支`codex/one-assistant-context`；主区旧分支与脏修改保留。后续完成阶段及时更新本节、资料索引和HANDOFF。
+已实现、验证并部署，业务源码89beba5、PR #22，2026-10-25 18:58:21（Asia/Shanghai）开闸。唯一绑定、并发复用、单客服导航、消费者隔离/返回续聊/主动新咨询以及原链接保持均已验。真实千问A/B与公网对话通过，详细证据和限制见../operations/2026-10-25-single-assistant-context-release.md。实现树R在发布记录分支codex/one-assistant-release-record，主工作区用户修改保留。

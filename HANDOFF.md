@@ -1,23 +1,21 @@
 # 当前工作交接
 
-更新时间：2026-10-25（Asia/Shanghai）。用户已恢复工作，当前准备远程CI与测试发布；本轮尚未部署。
+更新时间：2026-10-25 19:09（Asia/Shanghai）。本轮“每商家唯一客服与消费者独立上下文”已完成实现、验证和服务器发布，不要重复旧发布或旧失败动作。
 
-## 目标与验收
+## 已部署及验收
 
-每商家一个AI客服，管理/修订/发布保持同一身份和消费者固定链接；消费者各自上下文独立，可在同浏览器有效期内恢复。需求见docs/product/single-assistant-consumer-context-2026-10-25.md，实施/证据/失败历史见docs/development/single-assistant-context-2026-10-25.md。
+业务源码89beba52a3152af54e322d6fab6402bff6f0e452，PR #22已合并；主线CI40182086836四项、同域候选40182089583八项、离线导出40183086663成功。18:58:21开闸，五服务healthy、15迁移、33业务表+tracker；队列/在途0/0。实际结果/备份/收据见docs/operations/2026-10-25-single-assistant-context-release.md。
 
-## 已验证与当前状态
+每商家只有一个当前客服绑定；手工/引导、重复/并发请求复用原身份，管理/知识/改善/发布均围绕它。全部原17地址及发布指针保留，原13在线/4未发布状态保持；原32业务表在迁移前后行/结构摘要保持。当前17绑定、18历史assistant行，1个旧未发布草稿保留原始行、不再作为第二客服。
 
-唯一绑定、商家锁、重复/并发复用、管理/知识/改善/公开会话范围、直接管理菜单、浏览器恢复引用及模型12完整轮/16000字符预算已实现。历史行不删除，多个已发布历史歧义须在DDL前停下。普通发布保留旧会话快照，紧急撤回保留。
+本地新增MySQL4项、治理8项、API25项、桌面/手机模拟各14阶段、34表独立实例恢复及全仓检查通过。服务器备份在隔离schema恢复，32旧表摘要一致。真实千问通过A/B独立上下文、关标签后恢复、主动新咨询重置及公网问答。最终私有7条审阅结果，另1条首轮已完成探针结果，公网1条；无供应商逐请求账单，不称精确扣费。
 
-本地run-1792919142511通过：新增MySQL4项、原治理8项、API25项、桌面/390px手机各14阶段；14→15迁移前后32旧表行/结构保持，浏览器后原行仍在，34表独立恢复摘要一致。回环模型28次，真实供应商0次。最终全仓lint/typecheck/unit/format通过；质量工具57通过/1个Windows跳过，数据库259通过/1跳过。原暂停/失败日志保留，手机是Chrome模拟，未验iOS/微信真机。
+## 文件与工作区
 
-现网仍979c9c25c04ed17153fb44d9407eadae0a221cd6（PR #21），14迁移；上次只读五服务健康、17条历史客服、队列/在途0/0。本轮未写服务器。新增0014即第15迁移，33业务表+tracker；不能运行旧979/14硬编码发布控制器。
+入口仍AGENTS→本文件→docs/README。需求docs/product/single-assistant-consumer-context-2026-10-25.md；实现docs/development/single-assistant-context-2026-10-25.md；详细发布记录如上。R=F:/WorkStation/CODEX/worktrees/materials-publish-integration/H5AICustomerService；业务main89，当前记录分支codex/one-assistant-release-record。证据R/artifacts/single-assistant-context-20261025/，重点final-production-verification.json、private/public-smoke-result.json。服务器发布根/导入根及备份路径均见发布记录。
 
-## 工作区与下一步
+主区仍旧codex/platform-provisioning，用户脏修改保留，不作为线上源码。旧交接已归档。5个停用旧验收容器及aee镜像已按用户既有清理授权精确清理；原979和其他运行栈保留。一次性迁移容器及本轮RAM已清理，数据库卷未删除；最终磁盘约3.6GB。SSH实际来源114.92.10.197，连接失败仍先核实时出口和专属安全组。
 
-实现树R：F:/WorkStation/CODEX/worktrees/materials-publish-integration/H5AICustomerService；codex/one-assistant-context，基线979。证据R/artifacts/single-assistant-context-20261025/。主区旧codex/platform-provisioning和用户脏修改保留；主区AGENTS/HANDOFF/docs/README为跨线程入口。
+## 约束与下一步
 
-下一步提交中文PR、远程CI、同域候选，再按既有测试发布授权复核现场重复记录/原链接、备份与迁移、更新服务，完成真实千问的两消费者和续聊验证。当前只做了只读连通：GHCR可达401，SSH实际来源114.92.10.197；重连失败仍先核出口/专属安全组。
-
-遵循现有Web/同域分路径/MySQL/千问、专属SSH、正式HTTPS和数据保留；不新增收费资源/支付/短信/WorkBuddy。无离机备份仅限原受控试运行，不晚于11月3日。A6独立副本未合并，后续追加迁移并复用唯一绑定；真实超市联通仍待相关资料。本轮完成发布前不可称已上线。
+同域Web/MySQL/千问和专属SSH/正式TLS不变；不新增收费资源、支付、短信或WorkBuddy。会话30分钟无新提问到期，同浏览器可恢复，跨设备不自动关联。固定客服链接不因会话结束变化。无离机备份受控试运行不晚于11月3日；未验iOS/微信真机及总体语义质量。A6独立副本未合并，须追加到15迁移后并复用唯一绑定，仍待超市资料/身份权益/预算。后续按新需求推进，本轮没有待部署事项。
