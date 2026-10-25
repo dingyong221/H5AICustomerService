@@ -92,7 +92,8 @@ test('merchant governance, fixed consumer URL, emergency withdrawal and real Nex
     await page.getByLabel('密码', { exact: true }).fill(fixture.password);
     await page.getByRole('button', { name: '登录商家后台', exact: true }).click();
     await expect(page).toHaveURL(merchantBase + '/' + fixture.merchantId);
-    await page.getByRole('link', { name: '新建客服', exact: true }).first().click();
+    await page.getByRole('link', { name: '开通我的AI客服', exact: true }).first().click();
+    await expect(page).toHaveURL(new RegExp('/drafts/new$'));
     await page.getByLabel('客服名称', { exact: true }).fill('本地验收清洗客服 ' + device);
     await page.getByLabel('细分行业', { exact: true }).fill('家用电器清洗');
     await page.getByLabel('业务范围', { exact: true }).fill('提供上门空调清洗；不提供安装服务。');
@@ -142,10 +143,40 @@ test('merchant governance, fixed consumer URL, emergency withdrawal and real Nex
     await step(page, '效果试聊');
     await trial(page);
     const publicUrl = await publish(page);
-    const old = await context.newPage();
+    let old = await context.newPage();
     await old.goto(publicUrl);
     await ask(old, '清洗如何收费？', '79元');
     await mark('firstPublishedConsumerReply');
+    await page.goto(merchantBase + '/' + fixture.merchantId + '/drafts/new');
+    await expect(page).toHaveURL(new RegExp('/drafts/' + assistantId + '$'));
+    await expect(page.getByRole('link', { name: '新建客服', exact: true })).toHaveCount(0);
+    await mark('legacyCreationUrlReusesCurrentAssistant');
+    await ask(old, '上下文验收：请记住我的称呼是小林', '记住');
+    const separate = await browser.newContext({
+      viewport: device === 'mobile' ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
+    });
+    try {
+      const b = await separate.newPage();
+      await b.goto(publicUrl);
+      await ask(b, '上下文验收：我叫什么？', '尚未提供');
+      await old.close();
+      old = await context.newPage();
+      await old.goto(publicUrl);
+      await expect(old.locator('.message-row--visitor')).toContainText([
+        '清洗如何收费？',
+        '上下文验收：请记住我的称呼是小林',
+      ]);
+      await ask(old, '上下文验收：我叫什么？', '小林');
+      await ask(b, '上下文验收：请记住我的称呼是小林', '记住');
+      b.once('dialog', (dialog) => dialog.accept());
+      await b.getByRole('button', { name: '新建咨询', exact: true }).click();
+      await expect(b.locator('.message-row--visitor')).toHaveCount(0);
+      await ask(b, '上下文验收：我叫什么？', '尚未提供');
+      await mark('consumerIsolationTabReopenAndExplicitRestart');
+    } finally {
+      await separate.close();
+    }
+    await step(page, '发布分享');
 
     // Actual Next links + history restore, not only the isolated router guard test.
     await step(page, '基础资料');
@@ -218,9 +249,10 @@ test('merchant governance, fixed consumer URL, emergency withdrawal and real Nex
     await trial(page);
     expect(await publish(page)).toBe(publicUrl);
     await ask(old, '旧咨询清洗价格再确认？', '79元');
-    const fresh = await context.newPage();
+    const fresh = await browser.newPage();
     await fresh.goto(publicUrl);
     await ask(fresh, '新咨询清洗价格是多少？', '89元');
+    await fresh.close();
     await mark('newVersionSameUrlAndOldSessionSnapshot');
 
     await step(page, '基础资料');
@@ -232,7 +264,7 @@ test('merchant governance, fixed consumer URL, emergency withdrawal and real Nex
     await page.getByRole('button', { name: '保存客服名称', exact: true }).click();
     await expect(page.getByLabel('当前修订发布检查')).toContainText('尚未试聊本修订');
     // A draft rename must not invalidate the already published public snapshot.
-    const unchanged = await context.newPage();
+    const unchanged = await browser.newPage();
     await unchanged.goto(publicUrl);
     await expect(unchanged.getByRole('heading', { level: 1 })).toHaveText(
       '本地验收清洗客服 ' + device,
@@ -241,7 +273,7 @@ test('merchant governance, fixed consumer URL, emergency withdrawal and real Nex
     await step(page, '效果试聊');
     await trial(page);
     expect(await publish(page)).toBe(publicUrl);
-    const named = await context.newPage();
+    const named = await browser.newPage();
     await named.goto(publicUrl);
     await expect(named.getByRole('heading', { level: 1 })).toHaveText(
       '本地验收新客服名称 ' + device,
@@ -264,7 +296,7 @@ test('merchant governance, fixed consumer URL, emergency withdrawal and real Nex
     await expect(old.getByText('商家已撤回此前的客服资料', { exact: false })).toBeVisible();
     await expect(old.getByRole('button', { name: '查看最新客服', exact: true })).toBeVisible();
     await expect(old.getByRole('button', { name: '重试回复', exact: true })).toHaveCount(0);
-    const withdrawn = await context.newPage();
+    const withdrawn = await browser.newPage();
     await withdrawn.goto(publicUrl);
     await expect(withdrawn.getByRole('heading', { name: /咨询服务未开放/ })).toBeVisible();
     await withdrawn.close();

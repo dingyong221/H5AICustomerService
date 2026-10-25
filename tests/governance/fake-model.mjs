@@ -49,6 +49,18 @@ createServer(async (request, response) => {
         groups: [{ topic: '商品/服务', unitIds: units.map((unit) => unit.id) }],
         reviewUnitIds: [],
       });
+    } else if (payload.messages?.at(-1)?.content?.startsWith('上下文验收：')) {
+      const question = payload.messages.at(-1).content;
+      const prior = payload.messages
+        .slice(2, -1)
+        .filter((message) => message.role === 'user')
+        .map((message) => message.content)
+        .join('\n');
+      content = question.includes('请记住')
+        ? '已记住你提供的称呼。'
+        : prior.includes('称呼是小林')
+          ? '你刚才说你的称呼是小林。'
+          : '你尚未提供称呼。';
     } else {
       content =
         '本地模型测试回复：提供上门空调清洗服务；' +
