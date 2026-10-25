@@ -9,7 +9,7 @@ export default async function DraftsPage({ params }: { params: Promise<{ merchan
   if (assistant) redirect(merchantPath(merchantId, 'drafts', assistant.assistantId));
   return (
     <PageShell
-      title="我的AI客服"
+      title="AI客服管理"
       eyebrow="Merchant Assistant"
       description={<p>每个商家只有一个AI客服。开通后，资料、知识和发布都在这个客服上持续维护。</p>}
     >

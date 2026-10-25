@@ -37,12 +37,7 @@ export function MerchantNavigation({
       title: 'AI 客服',
       short: '客',
       items: [
-        { href: path('drafts'), label: '我的AI客服', short: '列' },
-        {
-          href: authorizedMerchant ? `${path('drafts')}/new` : path(),
-          label: '创建客服',
-          short: '+',
-        },
+        { href: path('drafts'), label: 'AI客服管理', short: '管' },
         ...(reference
           ? assistantWorkflowSteps.map((step, index) => ({
               href: path(step.section, reference),

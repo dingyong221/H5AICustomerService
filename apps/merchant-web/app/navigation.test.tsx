@@ -35,8 +35,8 @@ describe('merchant navigation hierarchy', () => {
     expect(html).toContain('AI 客服');
     expect(html).toContain('日常运营');
     expect(html).toContain('支持工具');
-    expect(html).toContain('我的AI客服');
-    expect(html).toContain(`href="/${merchantId}/drafts/new"`);
+    expect(html).toContain('AI客服管理');
+    expect(html).not.toContain(`href="/${merchantId}/drafts/new"`);
     expect(html).toContain(`href="/${merchantId}/preview/${assistantId}"`);
     expect(html).toMatch(/aria-label="知识补充" aria-current="page"/u);
     expect(html.match(/aria-current="page"/gu)).toHaveLength(1);
@@ -47,7 +47,7 @@ describe('merchant navigation hierarchy', () => {
     navigation.params = { merchantId };
     navigation.pathname = `/${merchantId}/drafts`;
     const html = renderToStaticMarkup(<MerchantNavigation merchantId={merchantId} />);
-    expect(html).toMatch(/aria-label="我的AI客服" aria-current="page"/u);
+    expect(html).toMatch(/aria-label="AI客服管理" aria-current="page"/u);
     expect(html).not.toContain('基础资料');
     expect(html).not.toContain('知识补充');
     expect(html).not.toContain('效果试聊');
