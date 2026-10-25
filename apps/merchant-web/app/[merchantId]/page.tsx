@@ -31,7 +31,7 @@ export default async function MerchantDashboard({
       }
       aside={
         <Link className="tenant-feature-link" href={path('drafts')}>
-          {assistant ? '管理我的客服' : '开通我的AI客服'}
+          {assistant ? 'AI客服管理' : '开通我的AI客服'}
         </Link>
       }
     >

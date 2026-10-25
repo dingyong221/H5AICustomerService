@@ -168,7 +168,7 @@ export async function AssistantView({
   return (
     <div className="assistant-workflow-layout">
       <PageShell
-        aside={<Link href={merchantPath(merchantId, 'drafts')}>我的AI客服</Link>}
+        aside={<Link href={merchantPath(merchantId, 'drafts')}>AI客服管理</Link>}
         description={<p>{step.description}</p>}
         eyebrow="AI 客服 / 配置与发布"
         title={step.title}
@@ -376,7 +376,7 @@ export async function AssistantView({
         {section === 'drafts' ? (
           <AssistantWorkflowActions
             backHref={merchantPath(merchantId, 'drafts')}
-            backLabel="我的AI客服"
+            backLabel="AI客服管理"
           />
         ) : section === 'knowledge' ? (
           <AssistantWorkflowActions

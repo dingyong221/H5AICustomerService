@@ -12,7 +12,7 @@ describe('material deletion and permanent consumer-link help', () => {
     expect(publish.steps.join('\n')).not.toContain('知识库与测试发布页均提供确认并发布入口');
   });
   it('documents the explicit combined publish action instead of the old dead end', () => {
-    expect(manualUpdated).toBe('2026-10-25');
+    expect(manualUpdated).toBe('2026-10-26');
     for (const id of ['start', 'knowledge', 'publish']) {
       const topic = helpTopics.find((entry) => entry.id === id)!;
       expect(topic.steps.join('\n')).toContain('确认资料并发布 AI 客服');

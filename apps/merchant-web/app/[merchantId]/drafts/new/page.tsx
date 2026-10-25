@@ -37,10 +37,10 @@ export default async function CreateAssistantPage({
   }
   return (
     <PageShell
-      title="开通我的AI客服"
+      title="AI客服管理"
       eyebrow="Step 1 / 4"
       description={<p>每个商家只有一个AI客服。首次开通后，所有资料和发布都在这个客服中维护。</p>}
-      aside={<Link href={merchantPath(merchantId, 'drafts')}>我的AI客服</Link>}
+      aside={<Link href={merchantPath(merchantId, 'drafts')}>AI客服管理</Link>}
     >
       <section className="merchant-account-card assistant-create-card">
         {database.configured ? (
