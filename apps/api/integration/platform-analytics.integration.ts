@@ -49,6 +49,10 @@ async function assistant(connection: Connection, merchantId: Buffer) {
     `UPDATE assistant SET status = 'active', active_release_id = ? WHERE id = ?`,
     [release, id],
   );
+  await connection.execute(
+    'INSERT INTO merchant_assistant (merchant_id,assistant_id) VALUES (?,?)',
+    [merchantId, id],
+  );
   return { id, merchantId, release };
 }
 type Assistant = Awaited<ReturnType<typeof assistant>>;
@@ -101,7 +105,7 @@ describe('real MySQL platform reporting', () => {
       aId = await merchant(connection, `${prefix}_A`);
       bId = await merchant(connection, `${prefix}_B`);
       const a1 = await assistant(connection, aId),
-        a2 = await assistant(connection, aId),
+        a2 = a1,
         b = await assistant(connection, bId);
       const old = await session(connection, a1, '2026-10-14 12:00:00');
       const fresh = await session(connection, a2, '2026-10-16 00:00:00');
@@ -195,7 +199,7 @@ describe('real MySQL platform reporting', () => {
 
     const repository = new MySqlPlatformAnalyticsRepository(database);
     const scoped = await repository.analytics(range, aId!.toString('hex'));
-    expect(scoped.inventory).toMatchObject({ merchants: 1, assistants: 2, publishedAssistants: 2 });
+    expect(scoped.inventory).toMatchObject({ merchants: 1, assistants: 1, publishedAssistants: 1 });
     expect(scoped.usage).toEqual({
       sessions: 1,
       questions: 4,
@@ -245,8 +249,8 @@ describe('real MySQL platform reporting', () => {
     expect(list.items[0]?.questions).toBe(4);
     expect(list.items[0]?.sessions).toBe(1);
     const assistants = await repository.assistants(range, aId!.toString('hex'));
-    expect(assistants.total).toBe(2);
-    expect(assistants.items.map((item) => item.questions)).toEqual([3, 1]);
+    expect(assistants.total).toBe(1);
+    expect(assistants.items.map((item) => item.questions)).toEqual([4]);
     const other = await repository.analytics(range, bId!.toString('hex'));
     expect(other.usage.questions).toBe(1);
     expect(other.quality.evaluations).toBe(0);

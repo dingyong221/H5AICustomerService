@@ -1,3 +1,4 @@
+import { seedHistoricalSibling } from './legacy-assistant-fixture.js';
 import { createHash, randomBytes, randomInt } from 'node:crypto';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { describe, expect, it } from 'vitest';
@@ -207,13 +208,7 @@ describe('real MySQL uploaded material soft deletion', () => {
     await expect(repository.archive({ ...b, sourceId: sourceA })).rejects.toBeInstanceOf(
       KnowledgeMaterialAccessError,
     );
-    const sibling = await lifecycle.createManualDraft({
-      ...a,
-      displayName: '同商家另一客服',
-      draft,
-      idempotency: idem(),
-      now: new Date(),
-    });
+    const sibling = await seedHistoricalSibling(database, a);
     await expect(
       repository.archive({ ...a, assistantId: sibling.assistantId, sourceId: sourceA }),
     ).rejects.toBeInstanceOf(KnowledgeMaterialAccessError);
@@ -452,15 +447,8 @@ describe('real MySQL published business-history recovery', () => {
       other = await fixture();
     const ownRelease = await publishHistoryFixture(f, 1);
     const foreignRelease = await publishHistoryFixture(other, 1);
-    const sibling = await lifecycle.createManualDraft({
-      ...f,
-      displayName: '同商家历史隔离客服',
-      draft,
-      idempotency: idem(),
-      now: new Date(),
-    });
-    const siblingFixture = { ...f, assistantId: sibling.assistantId };
-    const siblingRelease = await publishHistoryFixture(siblingFixture, 1);
+    const sibling = await seedHistoricalSibling(database, f, ownRelease.releaseId);
+    const siblingRelease = { releaseId: sibling.releaseId };
     const before = await lifecycle.findManagementSnapshot(f.merchantId, f.assistantId);
     for (const release of [foreignRelease, siblingRelease]) {
       expect(

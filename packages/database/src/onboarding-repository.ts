@@ -294,6 +294,7 @@ export class MySqlOnboardingRepository implements OnboardingRepository {
       >(
         `SELECT a.id, a.display_name, a.status
            FROM assistant a
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
            JOIN merchant m ON m.id = a.merchant_id
            JOIN merchant_membership mm ON mm.merchant_id = m.id
            JOIN merchant_user u ON u.id = mm.merchant_user_id

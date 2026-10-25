@@ -81,6 +81,10 @@ const managementRow = (overrides: Record<string, unknown> = {}) => ({
 const repositoryWith = (
   handler: (statement: string, values: readonly unknown[]) => Promise<unknown>,
   ids: readonly Buffer[] = [],
+  current: { assistant_id: Buffer | null; has_history: number } = {
+    assistant_id: null,
+    has_history: 0,
+  },
 ) => {
   const calls: SqlCall[] = [];
   const beginTransaction = vi.fn(async () => undefined);
@@ -90,6 +94,9 @@ const repositoryWith = (
   const connection = {
     execute: async (statement: string, values: readonly unknown[] = []) => {
       calls.push({ statement, values });
+      if (statement.startsWith('SELECT id FROM merchant WHERE'))
+        return [[{ id: Buffer.from(merchantId, 'hex') }], []];
+      if (statement.includes('AS has_history')) return [[current], []];
       if (statement.includes('FROM assistant_publication_governance'))
         return [
           [
@@ -204,17 +211,86 @@ describe('MySQL assistant lifecycle repository', () => {
     });
     expect(publicSlug).toMatch(/^[a-z0-9-]{1,63}$/u);
 
-    expect(calls[0]?.statement).toMatch(/INSERT INTO idempotency_record/u);
-    expect(calls[1]?.statement).toMatch(/state = 'generating'[\s\S]*FOR UPDATE/u);
-    expect(calls[2]?.statement).toMatch(/INSERT INTO assistant/u);
-    expect(calls[3]?.statement).toMatch(/INSERT INTO assistant_draft/u);
-    expect(calls[3]?.values).toContain(
+    expect(calls[0]?.statement).toMatch(/SELECT id FROM merchant[\s\S]*FOR UPDATE/u);
+    expect(
+      calls.filter((call) => call.statement.includes('INSERT INTO merchant_assistant')),
+    ).toHaveLength(1);
+    const creationCalls = calls.filter(
+      (call) =>
+        !call.statement.startsWith('SELECT id FROM merchant WHERE') &&
+        !call.statement.includes('AS has_history') &&
+        !call.statement.includes('INSERT INTO merchant_assistant'),
+    );
+    expect(creationCalls[0]?.statement).toMatch(/INSERT INTO idempotency_record/u);
+    expect(creationCalls[1]?.statement).toMatch(/state = 'generating'[\s\S]*FOR UPDATE/u);
+    expect(creationCalls[2]?.statement).toMatch(/INSERT INTO assistant/u);
+    expect(creationCalls[3]?.statement).toMatch(/INSERT INTO assistant_draft/u);
+    expect(creationCalls[3]?.values).toContain(
       JSON.stringify({ publishable: false, reason: 'knowledge_not_verified' }),
     );
-    expect(calls[4]?.statement).toMatch(/state = 'manageable'/u);
-    expect(calls[5]?.statement).toMatch(/state = 'succeeded'/u);
-    expect(calls[6]?.statement).toMatch(/INSERT INTO outbox_event/u);
+    expect(creationCalls[4]?.statement).toMatch(/state = 'manageable'/u);
+    expect(creationCalls[5]?.statement).toMatch(/state = 'succeeded'/u);
+    expect(creationCalls[6]?.statement).toMatch(/INSERT INTO outbox_event/u);
     expect(commit).toHaveBeenCalledOnce();
+  });
+
+  it('reuses the current assistant and never overwrites a different incoming draft', async () => {
+    const { repository, calls, commit } = repositoryWith(
+      async (statement) => {
+        if (statement.includes('FROM merchant_membership mm'))
+          return [[{ merchant_id: Buffer.from(merchantId, 'hex') }], []];
+        if (statement.includes('FROM assistant a')) return [[managementRow()], []];
+        return [resultHeader(), []];
+      },
+      [],
+      { assistant_id: Buffer.from(assistantId, 'hex'), has_history: 1 },
+    );
+    const result = await repository.createManualDraft({
+      merchantId,
+      merchantUserId,
+      displayName: '另一个名称',
+      draft: { ...sampleDraft, pricingSummary: '不同的新价格' },
+      idempotency: idem,
+      now,
+    });
+    expect(result).toMatchObject({
+      assistantId,
+      displayName: '蓝天服务客服',
+      draft: sampleDraft,
+      reusedExisting: true,
+    });
+    expect(
+      calls.some((call) =>
+        /INSERT INTO assistant(?:\s|_draft)|UPDATE assistant(?:\s|_draft)|INSERT INTO outbox_event/u.test(
+          call.statement,
+        ),
+      ),
+    ).toBe(false);
+    expect(commit).toHaveBeenCalledOnce();
+  });
+
+  it('stops creation when retained assistant rows have no reviewed current binding', async () => {
+    const { repository, calls, rollback } = repositoryWith(
+      async (statement) => {
+        if (statement.includes('FROM merchant_membership mm'))
+          return [[{ merchant_id: Buffer.from(merchantId, 'hex') }], []];
+        return [resultHeader(), []];
+      },
+      [],
+      { assistant_id: null, has_history: 1 },
+    );
+    await expect(
+      repository.createManualDraft({
+        merchantId,
+        merchantUserId,
+        displayName: '不能新增',
+        draft: sampleDraft,
+        idempotency: idem,
+        now,
+      }),
+    ).rejects.toBeInstanceOf(AssistantLifecyclePersistenceError);
+    expect(calls.some((call) => call.statement.startsWith('INSERT INTO assistant'))).toBe(false);
+    expect(rollback).toHaveBeenCalledOnce();
   });
 
   it('creates a merchant-scoped manual draft but keeps it unpublishable', async () => {
@@ -242,10 +318,20 @@ describe('MySQL assistant lifecycle repository', () => {
       }),
     ).resolves.toMatchObject({ assistantId, status: 'draft_only', draftRevision: 1 });
 
-    expect(calls[0]?.statement).toMatch(/merchant_membership[\s\S]*FOR UPDATE/u);
-    expect(calls[1]?.statement).toMatch(/INSERT INTO idempotency_record/u);
-    expect(calls[2]?.statement).toMatch(/INSERT INTO assistant/u);
-    expect(calls[3]?.values).toContain(
+    expect(calls[0]?.statement).toMatch(/SELECT id FROM merchant[\s\S]*FOR UPDATE/u);
+    expect(
+      calls.filter((call) => call.statement.includes('INSERT INTO merchant_assistant')),
+    ).toHaveLength(1);
+    const creationCalls = calls.filter(
+      (call) =>
+        !call.statement.startsWith('SELECT id FROM merchant WHERE') &&
+        !call.statement.includes('AS has_history') &&
+        !call.statement.includes('INSERT INTO merchant_assistant'),
+    );
+    expect(creationCalls[0]?.statement).toMatch(/merchant_membership[\s\S]*FOR UPDATE/u);
+    expect(creationCalls[1]?.statement).toMatch(/INSERT INTO idempotency_record/u);
+    expect(creationCalls[2]?.statement).toMatch(/INSERT INTO assistant/u);
+    expect(creationCalls[3]?.values).toContain(
       JSON.stringify({ publishable: false, reason: 'knowledge_not_verified' }),
     );
     expect(commit).toHaveBeenCalledOnce();

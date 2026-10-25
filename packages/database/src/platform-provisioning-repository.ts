@@ -307,6 +307,7 @@ export class MySqlPlatformProvisioningRepository {
         `SELECT a.id, a.merchant_id, m.name AS merchant_name, a.display_name,
                 a.status, a.active_release_id, a.updated_at
            FROM assistant a
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id=a.merchant_id AND current_assistant.assistant_id=a.id
            JOIN merchant m ON m.id = a.merchant_id
           ORDER BY a.updated_at DESC, a.id DESC
           LIMIT ?`,

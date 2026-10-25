@@ -1,9 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   clearSessionReference,
   readSessionReference,
   saveSessionReference,
+  readBrowserSessionReference,
+  saveBrowserSessionReference,
+  clearBrowserSessionReference,
 } from './session-reference';
 
 const storage = () => {
@@ -20,6 +23,42 @@ const storage = () => {
 };
 
 describe('session reference storage', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it('restores the same reference after closing a tab while keeping merchant scopes separate', () => {
+    const persistent = storage();
+    vi.stubGlobal('window', { localStorage: persistent, sessionStorage: storage() });
+    const ref = `session_request_${'12'.repeat(16)}`;
+    saveBrowserSessionReference('merchant-a', ref);
+    vi.stubGlobal('window', { localStorage: persistent, sessionStorage: storage() });
+    expect(readBrowserSessionReference('merchant-a')).toBe(ref);
+    expect(readBrowserSessionReference('merchant-b')).toBeNull();
+    clearBrowserSessionReference('merchant-a');
+    expect(readBrowserSessionReference('merchant-a')).toBeNull();
+  });
+  it('migrates a valid legacy tab reference but never persists a bearer session handle', () => {
+    const persistent = storage(),
+      tab = storage(),
+      ref = `session_request_${'34'.repeat(16)}`;
+    saveSessionReference(tab, 'merchant-a', ref);
+    vi.stubGlobal('window', { localStorage: persistent, sessionStorage: tab });
+    expect(readBrowserSessionReference('merchant-a')).toBe(ref);
+    expect(readSessionReference(persistent, 'merchant-a')).toBe(ref);
+    saveBrowserSessionReference('merchant-b', `s_${'ab'.repeat(16)}`);
+    expect(readBrowserSessionReference('merchant-b')).toBeNull();
+  });
+  it('continues with per-tab storage when persistent storage is blocked', () => {
+    const ref = `session_request_${'56'.repeat(16)}`;
+    vi.stubGlobal('window', {
+      get localStorage() {
+        throw Error('blocked');
+      },
+      sessionStorage: storage(),
+    });
+    saveBrowserSessionReference('merchant-a', ref);
+    expect(readBrowserSessionReference('merchant-a')).toBe(ref);
+    clearBrowserSessionReference('merchant-a');
+    expect(readBrowserSessionReference('merchant-a')).toBeNull();
+  });
   it('stores only the scoped request ID, not the session handle', () => {
     const store = storage();
     const requestId = `session_request_${'11'.repeat(16)}`;

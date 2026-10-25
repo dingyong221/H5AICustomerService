@@ -20,7 +20,7 @@ const tempPrefix = 'h5cs-ci-upgrade-';
 const expectedDatabase = 'h5cs_integration_ci';
 const expectedUser = 'h5cs_ci';
 const expectedBaselineCount = 12;
-const expectedFullCount = 14;
+const expectedFullCount = 15;
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
 export class UpgradeProbeError extends Error {
@@ -149,10 +149,11 @@ export async function reviewedUpgradePlan(folder = sourceFolder) {
   if (
     inventory.entries.length !== expectedFullCount ||
     journal.entries.length !== expectedFullCount ||
-    !/^0012_/u.test(journal.entries[12]?.tag ?? '')
+    !/^0012_/u.test(journal.entries[12]?.tag ?? '') ||
+    journal.entries[14]?.tag !== '0014_flimsy_swarm'
   ) {
     throw new UpgradeProbeError(
-      'Probe requires the reviewed twelve-to-thirteen migration plan; review the probe when the plan changes',
+      'Probe requires the reviewed twelve-to-fifteen migration plan; review the probe when the plan changes',
     );
   }
   const entries = inventory.entries.map((entry, index) => {
@@ -288,12 +289,13 @@ export function assertUpgradedTableSet(tables, baselineTables) {
     'assistant_improvement',
     'assistant_evaluation_run',
     'assistant_publication_governance',
+    'merchant_assistant',
   ];
   if (
-    expected.length !== 32 ||
-    new Set(expected).size !== 32 ||
-    tables.length !== 32 ||
-    new Set(tables).size !== 32 ||
+    expected.length !== 33 ||
+    new Set(expected).size !== 33 ||
+    tables.length !== 33 ||
+    new Set(tables).size !== 33 ||
     tables.some((table) => !expected.includes(table))
   )
     throw new UpgradeProbeError('Upgrade produced an unexpected application-table set');

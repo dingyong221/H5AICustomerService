@@ -31,9 +31,9 @@ vi.mock('react', async (load) => ({
   useEffect: () => undefined,
 }));
 vi.mock('./session-reference', () => ({
-  clearSessionReference: mocks.clear,
-  readSessionReference: vi.fn(),
-  saveSessionReference: vi.fn(),
+  clearBrowserSessionReference: mocks.clear,
+  readBrowserSessionReference: vi.fn(),
+  saveBrowserSessionReference: vi.fn(),
 }));
 import { OnlineCustomerService } from './online-customer-service';
 import { HumanContactNotice } from './human-contact-notice';
@@ -145,7 +145,7 @@ describe('consumer recovery controls', () => {
     const contact = nodes(tree).find((node) => node.type === HumanContactNotice);
     expect((contact?.props as { instructions?: string }).instructions).toBeUndefined();
     button(tree, '查看最新客服').props.onClick!();
-    expect(mocks.clear).toHaveBeenCalledExactlyOnceWith({}, 'test-customer');
+    expect(mocks.clear).toHaveBeenCalledExactlyOnceWith('test-customer');
     expect(mocks.reload).toHaveBeenCalledOnce();
     expect((mocks.hooks[0] as ConversationState).session).toBe(session);
   });

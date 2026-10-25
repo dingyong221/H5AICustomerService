@@ -37,7 +37,7 @@ export function MerchantNavigation({
       title: 'AI 客服',
       short: '客',
       items: [
-        { href: path('drafts'), label: '客服列表', short: '列' },
+        { href: path('drafts'), label: '我的AI客服', short: '列' },
         {
           href: authorizedMerchant ? `${path('drafts')}/new` : path(),
           label: '创建客服',

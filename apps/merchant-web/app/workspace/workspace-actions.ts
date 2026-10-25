@@ -12,7 +12,7 @@ import { parseAssistantDraftForm } from './draft-form';
 
 export type CreateAssistantState = Readonly<{
   error: string | null;
-  created: { assistantId: string; displayName: string } | null;
+  created: { assistantId: string; displayName: string; reusedExisting?: boolean } | null;
 }>;
 
 const digest = (value: string): Uint8Array => createHash('sha256').update(value, 'utf8').digest();
@@ -80,7 +80,11 @@ export async function createAssistantDraft(
     revalidatePath(`/${merchantId}/publish`);
     return {
       error: null,
-      created: { assistantId: created.assistantId, displayName: created.displayName },
+      created: {
+        assistantId: created.assistantId,
+        displayName: created.displayName,
+        reusedExisting: created.reusedExisting,
+      },
     };
   } catch {
     return { error: '客服草稿创建失败，请检查资料并稍后重试。', created: null };

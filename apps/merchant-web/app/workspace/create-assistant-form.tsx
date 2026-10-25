@@ -129,7 +129,7 @@ export function CreateAssistantForm({
     }
   }
   useEffect(() => {
-    if (!state.created || navigated.current) return;
+    if (!state.created || state.created.reusedExisting || navigated.current) return;
     navigated.current = true;
     permitNavigation();
     router.push(merchantPath(merchantId, 'knowledge', state.created.assistantId));
@@ -192,7 +192,10 @@ export function CreateAssistantForm({
           </p>
         </details>
       ) : null}
-      <fieldset disabled={pending || state.created !== null} className="draft-form-fields">
+      <fieldset
+        disabled={pending || (state.created !== null && !state.created.reusedExisting)}
+        className="draft-form-fields"
+      >
         <DraftFields
           merchantId={merchantId}
           csrfToken={csrfToken}
@@ -223,10 +226,18 @@ export function CreateAssistantForm({
       ) : null}
       {state.created ? (
         <div className="assistant-created-result" role="status">
-          <strong>已创建客服草稿「{state.created.displayName}」。</strong>
-          <p>正在进入知识补充；当前尚未发布。</p>
+          {state.created.reusedExisting ? (
+            <strong>你已开通客服「{state.created.displayName}」。</strong>
+          ) : (
+            <strong>已创建客服草稿「{state.created.displayName}」。</strong>
+          )}
+          <p>
+            {state.created.reusedExisting
+              ? '每个商家只有一个 AI 客服。本次填写未覆盖原资料，请复制需要的内容，再进入原客服修改。'
+              : '正在进入知识补充；当前尚未发布。'}
+          </p>
           <Link href={merchantPath(merchantId, 'knowledge', state.created.assistantId)}>
-            下一步：上传与补充知识
+            {state.created.reusedExisting ? '进入我的 AI 客服' : '下一步：上传与补充知识'}
           </Link>
         </div>
       ) : null}

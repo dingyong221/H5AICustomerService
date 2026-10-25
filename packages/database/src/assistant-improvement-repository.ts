@@ -216,7 +216,8 @@ export class MySqlAssistantImprovementRepository implements AssistantImprovement
   async #context(connection: Connection, input: ImprovementActor, lock: boolean): Promise<Context> {
     const [rows] = await connection.execute<Row[]>(
       `SELECT a.display_name, a.status, a.draft_revision, a.active_release_id, d.config
-         FROM assistant a JOIN assistant_draft d ON d.merchant_id = a.merchant_id AND d.assistant_id = a.id
+         FROM assistant a
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id JOIN assistant_draft d ON d.merchant_id = a.merchant_id AND d.assistant_id = a.id
          JOIN merchant m ON m.id = a.merchant_id AND m.status = 'active'
          JOIN merchant_membership mm ON mm.merchant_id = a.merchant_id AND mm.merchant_user_id = ? AND mm.status = 'active'
          JOIN merchant_user u ON u.id = mm.merchant_user_id AND u.status = 'active'
@@ -376,6 +377,7 @@ export class MySqlAssistantImprovementRepository implements AssistantImprovement
         `SELECT i.*, a.draft_revision, a.active_release_id, a.display_name, a.status AS assistant_status, d.config
            FROM assistant_improvement i
            JOIN assistant a ON a.merchant_id = i.merchant_id AND a.id = i.assistant_id
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
            JOIN assistant_draft d ON d.merchant_id = a.merchant_id AND d.assistant_id = a.id
            JOIN merchant m ON m.id = i.merchant_id AND m.status = 'active'
            JOIN merchant_membership mm ON mm.merchant_id = i.merchant_id AND mm.merchant_user_id = ? AND mm.status = 'active'
