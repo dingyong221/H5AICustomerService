@@ -19,7 +19,6 @@ jobs:
       CI: "true"
       SOURCE_SHA: 580d5050541919078c9419eb57670b7c68388b7b
       IMAGE_TAG: h5cs-merchant-web:ci
-      DELIVERY_DIR: ${{ runner.temp }}/merchant-menu-delivery
 
     steps:
       - name: Check out the frozen business source without persisted credentials
@@ -65,6 +64,8 @@ jobs:
 
       - name: Save, round-trip and describe the single immutable image
         shell: bash
+        env:
+          DELIVERY_DIR: ${{ runner.temp }}/merchant-menu-delivery
         run: |
           set -euo pipefail
           mkdir -p "$DELIVERY_DIR"
@@ -187,8 +188,8 @@ jobs:
         with:
           name: merchant-management-image-${{ env.SOURCE_SHA }}
           path: |
-            ${{ env.DELIVERY_DIR }}/candidate-image.tar.gz
-            ${{ env.DELIVERY_DIR }}/delivery.json
+            ${{ runner.temp }}/merchant-menu-delivery/candidate-image.tar.gz
+            ${{ runner.temp }}/merchant-menu-delivery/delivery.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
