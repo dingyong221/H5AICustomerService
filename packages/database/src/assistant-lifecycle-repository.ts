@@ -120,6 +120,7 @@ type DraftWrite = Parameters<AssistantLifecycleRepository['saveDraft']>[0];
 
 const historyScope = `FROM assistant_release r
   JOIN assistant a ON a.id = r.assistant_id AND a.merchant_id = r.merchant_id
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
   JOIN merchant m ON m.id = a.merchant_id
   JOIN merchant_user u ON u.id = ?
   JOIN merchant_membership mm ON mm.merchant_id = a.merchant_id AND mm.merchant_user_id = u.id
@@ -417,6 +418,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
                 a.status, a.draft_revision, d.config, d.validation, a.active_release_id,
                 a.created_at, a.updated_at
            FROM assistant a
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
            JOIN assistant_draft d ON d.merchant_id = a.merchant_id AND d.assistant_id = a.id
            JOIN merchant m ON m.id = a.merchant_id
            JOIN merchant_membership mm ON mm.merchant_id = m.id
@@ -436,7 +438,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
     draft: AssistantDraftConfig;
     idempotency: AssistantLifecycleIdempotency;
     now: Date;
-  }): Promise<AssistantManagementSnapshot> {
+  }): Promise<AssistantManagementSnapshot & { reusedExisting: boolean }> {
     validDate(input.now, 'now');
     const merchantUserId = idBuffer(input.merchantUserId, 'merchantUserId');
     const merchantId = idBuffer(input.merchantId, 'merchantId');
@@ -445,6 +447,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
     const idem = validateIdempotency(input.idempotency, input.now);
     try {
       return await this.#withTransaction(async (connection) => {
+        await this.#lockMerchant(connection, merchantId);
         const [memberships] = await connection.execute<RowDataPacket[]>(
           `SELECT mm.merchant_id
              FROM merchant_membership mm
@@ -466,6 +469,19 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
           idem,
           input.idempotency.expiresAt,
         );
+        const existing = await this.#findCurrentAssistant(connection, merchantId);
+        if (existing) {
+          const existingId = idBuffer(existing.assistantId, 'assistantId');
+          await this.#completeIdempotency(
+            connection,
+            idempotencyId,
+            existingId,
+            'assistant',
+            { assistantId: existing.assistantId, merchantId: input.merchantId },
+            input.now,
+          );
+          return { ...existing, reusedExisting: true };
+        }
         const assistantId = this.#newId('assistantId');
         const slug = this.#newSlug();
         await connection.execute(
@@ -488,6 +504,10 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
             input.now,
           ],
         );
+        await connection.execute(
+          `INSERT INTO merchant_assistant (merchant_id, assistant_id, created_at) VALUES (?, ?, ?)`,
+          [merchantId, assistantId, input.now],
+        );
         await this.#completeIdempotency(
           connection,
           idempotencyId,
@@ -506,6 +526,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
           input.now,
         );
         return {
+          reusedExisting: false,
           assistantId: toAssistantId(assistantId.toString('hex')),
           merchantId: input.merchantId,
           displayName,
@@ -521,7 +542,10 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
       });
     } catch (error) {
       if (!isDuplicateKey(error)) throw error;
-      return this.#recoverCreated(OPERATION_CREATE_MANUAL, input, idem);
+      return {
+        ...(await this.#recoverCreated(OPERATION_CREATE_MANUAL, input, idem)),
+        reusedExisting: true,
+      };
     }
   }
 
@@ -539,6 +563,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
     const idem = validateIdempotency(input.idempotency, input.now);
     try {
       return await this.#withTransaction(async (connection) => {
+        await this.#lockMerchant(connection, merchantId);
         const idempotencyId = this.#newId('idempotencyId');
         await this.#insertIdempotency(
           connection,
@@ -586,28 +611,37 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
               ? '当前资料不足，请联系商家确认。'
               : '当前资料尚未确认，我会明确说明未知信息。',
         });
-        const assistantId = this.#newId('assistantId');
-        const slug = this.#newSlug();
-        await connection.execute(
-          `INSERT INTO assistant
+        const existing = await this.#findCurrentAssistant(connection, merchantId);
+        const assistantId = existing
+          ? idBuffer(existing.assistantId, 'assistantId')
+          : this.#newId('assistantId');
+        const slug = existing?.publicSlug ?? this.#newSlug();
+        if (!existing) {
+          await connection.execute(
+            `INSERT INTO assistant
              (id, merchant_id, display_name, public_slug, public_slug_digest, status,
               active_release_id, draft_revision, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, 'draft_only', NULL, 1, ?, ?)`,
-          [assistantId, merchantId, displayName, slug, slugDigest(slug), input.now, input.now],
-        );
-        await connection.execute(
-          `INSERT INTO assistant_draft
+            [assistantId, merchantId, displayName, slug, slugDigest(slug), input.now, input.now],
+          );
+          await connection.execute(
+            `INSERT INTO assistant_draft
              (assistant_id, merchant_id, revision, config, validation, updated_by, updated_at)
            VALUES (?, ?, 1, ?, ?, ?, ?)`,
-          [
-            assistantId,
-            merchantId,
-            JSON.stringify(draft),
-            JSON.stringify({ publishable: false, reason: 'knowledge_not_verified' }),
-            merchantUserId,
-            input.now,
-          ],
-        );
+            [
+              assistantId,
+              merchantId,
+              JSON.stringify(draft),
+              JSON.stringify({ publishable: false, reason: 'knowledge_not_verified' }),
+              merchantUserId,
+              input.now,
+            ],
+          );
+          await connection.execute(
+            `INSERT INTO merchant_assistant (merchant_id, assistant_id, created_at) VALUES (?, ?, ?)`,
+            [merchantId, assistantId, input.now],
+          );
+        }
         const [sessionResult] = await connection.execute<ResultSetHeader>(
           `UPDATE onboarding_session
               SET assistant_id = ?, state = 'manageable', missing_items = JSON_ARRAY(),
@@ -637,28 +671,31 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
           response,
           input.now,
         );
-        await this.#writeOutbox(
-          connection,
-          merchantId,
-          'assistant.created',
-          'assistant',
-          assistantId,
-          { draftRevision: 1 },
-          input.now,
+        if (!existing)
+          await this.#writeOutbox(
+            connection,
+            merchantId,
+            'assistant.created',
+            'assistant',
+            assistantId,
+            { draftRevision: 1 },
+            input.now,
+          );
+        return (
+          existing ?? {
+            assistantId: toAssistantId(assistantId.toString('hex')),
+            merchantId: input.merchantId,
+            displayName,
+            publicSlug: slug,
+            status: 'draft_only',
+            draftRevision: 1,
+            draft,
+            knowledgeConfirmed: false,
+            activeReleaseId: null,
+            createdAt: input.now,
+            updatedAt: input.now,
+          }
         );
-        return {
-          assistantId: toAssistantId(assistantId.toString('hex')),
-          merchantId: input.merchantId,
-          displayName,
-          publicSlug: slug,
-          status: 'draft_only',
-          draftRevision: 1,
-          draft,
-          knowledgeConfirmed: false,
-          activeReleaseId: null,
-          createdAt: input.now,
-          updatedAt: input.now,
-        };
       });
     } catch (error) {
       if (!isDuplicateKey(error)) throw error;
@@ -722,6 +759,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
         `SELECT a.id AS assistant_id,a.merchant_id,a.display_name,a.public_slug,a.status,
           a.draft_revision,d.config,d.validation,a.active_release_id,a.created_at,a.updated_at,
           mm.role AS membership_role FROM assistant a
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
           JOIN assistant_draft d ON d.merchant_id=a.merchant_id AND d.assistant_id=a.id
           JOIN merchant m ON m.id=a.merchant_id
           JOIN merchant_user u ON u.id=?
@@ -1456,6 +1494,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
         `SELECT a.public_slug, r.id AS release_id, m.name AS merchant_name,
                 a.display_name, r.config_snapshot
            FROM assistant a
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
            JOIN assistant_active_release ar
              ON ar.merchant_id = a.merchant_id AND ar.assistant_id = a.id
             AND ar.release_id = a.active_release_id
@@ -1490,6 +1529,38 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
     });
   }
 
+  async #lockMerchant(connection: Connection, merchantId: Buffer): Promise<void> {
+    const [rows] = await connection.execute<RowDataPacket[]>(
+      "SELECT id FROM merchant WHERE id = ? AND status = 'active' LIMIT 1 FOR UPDATE",
+      [merchantId],
+    );
+    if (rows.length !== 1) throw new AssistantGenerationUnavailableError();
+  }
+
+  async #findCurrentAssistant(
+    connection: Connection,
+    merchantId: Buffer,
+  ): Promise<AssistantManagementSnapshot | null> {
+    const [rows] = await connection.execute<
+      (RowDataPacket & { assistant_id: Buffer | null; has_history: number })[]
+    >(
+      `SELECT ma.assistant_id, EXISTS(SELECT 1 FROM assistant historical WHERE historical.merchant_id = m.id) AS has_history
+         FROM merchant m LEFT JOIN merchant_assistant ma ON ma.merchant_id = m.id
+        WHERE m.id = ? LIMIT 1`,
+      [merchantId],
+    );
+    const current = rows[0];
+    if (!current) throw new AssistantLifecyclePersistenceError();
+    if (current.assistant_id === null) {
+      if (Number(current.has_history) !== 0)
+        throw new AssistantLifecyclePersistenceError('Current assistant binding is missing');
+      return null;
+    }
+    const snapshot = await this.#findManagement(connection, merchantId, current.assistant_id);
+    if (!snapshot) throw new AssistantLifecyclePersistenceError();
+    return snapshot;
+  }
+
   async #findManagement(
     connection: Connection,
     merchantId: Buffer,
@@ -1500,6 +1571,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
               a.status, a.draft_revision, d.config, d.validation, a.active_release_id,
               a.created_at, a.updated_at
          FROM assistant a
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
          JOIN assistant_draft d
            ON d.merchant_id = a.merchant_id AND d.assistant_id = a.id
         WHERE a.merchant_id = ? AND a.id = ?
@@ -1522,6 +1594,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
               a.created_at, a.updated_at, mm.status AS membership_status,
               m.status AS merchant_status
          FROM assistant a
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
          JOIN assistant_draft d
            ON d.merchant_id = a.merchant_id AND d.assistant_id = a.id
          JOIN merchant m ON m.id = a.merchant_id

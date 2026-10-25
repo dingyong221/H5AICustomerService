@@ -280,7 +280,7 @@ export function OnboardingForm({ apiBaseUrl, authorization }: OnboardingFormProp
           <h2>已找到这个商家的 AI 客服</h2>
           <p>
             {existingManagement.action === 'select_assistant'
-              ? `当前有 ${existingManagement.assistants.length} 个客服，请明确选择要管理的客服。`
+              ? '每个商家仅管理一个 AI 客服，请进入已有客服继续维护。'
               : '无需再次生成。请在现有后台核对资料、管理知识和发布版本。'}
           </p>
           {existingManagement.action === 'select_assistant' ? (
@@ -300,7 +300,7 @@ export function OnboardingForm({ apiBaseUrl, authorization }: OnboardingFormProp
                 ))}
               </ul>
               {selectionError ? <p role="alert">{selectionError}</p> : null}
-              <a href={existingManagement.url}>或在商家工作台选择</a>
+              <a href={existingManagement.url}>打开商家工作台</a>
             </>
           ) : (
             <a href={existingManagement.url}>
@@ -314,7 +314,7 @@ export function OnboardingForm({ apiBaseUrl, authorization }: OnboardingFormProp
         <section className="onboarding-step-card" role="status">
           <h2>AI 客服草稿已生成</h2>
           <p>请进入管理后台核对资料、测试并明确发布；当前草稿尚未向消费者开放。</p>
-          <a href={serverViewModel.managementUrl}>打开新客服的管理后台</a>
+          <a href={serverViewModel.managementUrl}>打开我的客服管理后台</a>
         </section>
       ) : null}
 

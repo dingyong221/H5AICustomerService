@@ -550,6 +550,24 @@ export const assistants = mysqlTable(
   ],
 );
 
+/** One current assistant per merchant; older records remain immutable history. */
+export const merchantAssistants = mysqlTable(
+  'merchant_assistant',
+  {
+    merchantId: id('merchant_id').notNull(),
+    assistantId: id('assistant_id').notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.merchantId], name: 'pk_merchant_assistant' }),
+    foreignKey({
+      columns: [table.merchantId, table.assistantId],
+      foreignColumns: [assistants.merchantId, assistants.id],
+      name: 'fk_merchant_assistant_scope',
+    }).onDelete('restrict'),
+  ],
+);
+
 export const assistantPublicationGovernance = mysqlTable(
   'assistant_publication_governance',
   {

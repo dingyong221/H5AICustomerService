@@ -309,7 +309,7 @@ export class MySqlPlatformAnalyticsRepository {
           connection,
           `SELECT COUNT(*) AS assistants,
         COALESCE(SUM(status = 'active' AND active_release_id IS NOT NULL), 0) AS published_assistants
-        FROM assistant WHERE 1 = 1${scope}`,
+        FROM assistant WHERE EXISTS (SELECT 1 FROM merchant_assistant current_assistant WHERE current_assistant.merchant_id=assistant.merchant_id AND current_assistant.assistant_id=assistant.id) AND 1 = 1${scope}`,
           scopeValues,
         ),
       );
@@ -467,7 +467,7 @@ export class MySqlPlatformAnalyticsRepository {
           COALESCE(q.completed, 0) AS completed, COALESCE(q.failed, 0) AS failed, COALESCE(q.pending, 0) AS pending,
           q.mean_response_ms, ${utc('last_question.at')} AS last_consultation_at
         FROM merchant m
-        LEFT JOIN (SELECT merchant_id, COUNT(*) AS assistants, SUM(status = 'active' AND active_release_id IS NOT NULL) AS published_assistants FROM assistant GROUP BY merchant_id) a ON a.merchant_id = m.id
+        LEFT JOIN (SELECT merchant_id, COUNT(*) AS assistants, SUM(status = 'active' AND active_release_id IS NOT NULL) AS published_assistants FROM assistant WHERE EXISTS (SELECT 1 FROM merchant_assistant current_assistant WHERE current_assistant.merchant_id=assistant.merchant_id AND current_assistant.assistant_id=assistant.id) GROUP BY merchant_id) a ON a.merchant_id = m.id
         LEFT JOIN (SELECT merchant_id, COUNT(*) AS sessions FROM conversation_session WHERE created_at >= ? AND created_at < ? GROUP BY merchant_id) s ON s.merchant_id = m.id
         LEFT JOIN (SELECT merchant_id, ${questionAggregates} FROM message WHERE role = 'visitor' AND created_at >= ? AND created_at < ? GROUP BY merchant_id) q ON q.merchant_id = m.id
         LEFT JOIN (SELECT merchant_id, MAX(created_at) AS at FROM message WHERE role = 'visitor' GROUP BY merchant_id) last_question ON last_question.merchant_id = m.id
@@ -506,7 +506,11 @@ export class MySqlPlatformAnalyticsRepository {
     return this.snapshot(async (connection, generatedAt) => {
       const total = count(
         first(
-          await select(connection, `SELECT COUNT(*) AS total FROM assistant a ${scope}`, values),
+          await select(
+            connection,
+            `SELECT COUNT(*) AS total FROM assistant a JOIN merchant_assistant current_assistant ON current_assistant.merchant_id=a.merchant_id AND current_assistant.assistant_id=a.id ${scope}`,
+            values,
+          ),
         )['total'],
       );
       const rows = await select(
@@ -514,7 +518,7 @@ export class MySqlPlatformAnalyticsRepository {
         `SELECT a.id, a.merchant_id, m.name AS merchant_name, a.display_name, a.status, a.active_release_id,
           COALESCE(s.sessions, 0) AS sessions, COALESCE(q.questions, 0) AS questions,
           COALESCE(q.completed, 0) AS completed, COALESCE(q.failed, 0) AS failed, COALESCE(q.pending, 0) AS pending, q.mean_response_ms
-        FROM assistant a JOIN merchant m ON m.id = a.merchant_id
+        FROM assistant a JOIN merchant_assistant current_assistant ON current_assistant.merchant_id=a.merchant_id AND current_assistant.assistant_id=a.id JOIN merchant m ON m.id = a.merchant_id
         LEFT JOIN (SELECT merchant_id, assistant_id, COUNT(*) AS sessions FROM conversation_session WHERE created_at >= ? AND created_at < ? GROUP BY merchant_id, assistant_id) s ON s.merchant_id = a.merchant_id AND s.assistant_id = a.id
         LEFT JOIN (SELECT merchant_id, assistant_id, ${questionAggregates} FROM message WHERE role = 'visitor' AND created_at >= ? AND created_at < ? GROUP BY merchant_id, assistant_id) q ON q.merchant_id = a.merchant_id AND q.assistant_id = a.id
         ${scope} ORDER BY questions DESC, a.merchant_id, a.id LIMIT ? OFFSET ?`,

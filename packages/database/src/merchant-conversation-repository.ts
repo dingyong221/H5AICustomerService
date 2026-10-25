@@ -147,6 +147,7 @@ export class MySqlMerchantConversationRepository {
                 cs.created_at
            FROM conversation_session cs
            JOIN assistant a ON a.id = cs.assistant_id AND a.merchant_id = cs.merchant_id
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
            JOIN merchant m ON m.id = cs.merchant_id AND m.status = 'active'
            JOIN merchant_membership mm ON mm.merchant_id = cs.merchant_id
              AND mm.merchant_user_id = ? AND mm.status = 'active'
@@ -184,6 +185,7 @@ export class MySqlMerchantConversationRepository {
                 cs.created_at
            FROM conversation_session cs
            JOIN assistant a ON a.id = cs.assistant_id AND a.merchant_id = cs.merchant_id
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
            JOIN merchant m ON m.id = cs.merchant_id AND m.status = 'active'
            JOIN merchant_membership mm ON mm.merchant_id = cs.merchant_id
              AND mm.merchant_user_id = ? AND mm.status = 'active'

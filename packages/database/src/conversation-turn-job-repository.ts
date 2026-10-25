@@ -169,6 +169,7 @@ export class MySqlConversationTurnJobRepository {
            FROM conversation_session cs
            JOIN merchant m ON m.id = cs.merchant_id
            JOIN assistant a ON a.merchant_id = cs.merchant_id AND a.id = cs.assistant_id
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
            JOIN assistant_release r
              ON r.merchant_id = cs.merchant_id AND r.assistant_id = cs.assistant_id
             AND r.id = cs.release_id
@@ -226,7 +227,7 @@ export class MySqlConversationTurnJobRepository {
         `SELECT role, content FROM message
           WHERE merchant_id = ? AND assistant_id = ? AND session_id = ?
             AND seq_no < ? AND state = 'completed'
-          ORDER BY seq_no DESC LIMIT 10`,
+          ORDER BY seq_no DESC LIMIT 24`,
         [payload.merchantId, payload.assistantId, payload.sessionId, message.seq_no],
       );
       if (contextRows.some((row) => row.role !== 'visitor' && row.role !== 'assistant')) {
@@ -295,6 +296,7 @@ export class MySqlConversationTurnJobRepository {
            FROM conversation_session cs
            JOIN merchant m ON m.id = cs.merchant_id
            JOIN assistant a ON a.merchant_id = cs.merchant_id AND a.id = cs.assistant_id
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
           WHERE cs.id = ? AND cs.merchant_id = ? AND cs.assistant_id = ?
             AND cs.release_id = ? AND cs.status = 'active' LIMIT 1 FOR UPDATE`,
         [payload.sessionId, payload.merchantId, payload.assistantId, payload.releaseId],

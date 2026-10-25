@@ -1,5 +1,31 @@
 import type { ConversationTurnClaim } from '@h5cs/database';
 
+type ContextMessage = Readonly<{ role: 'visitor' | 'assistant'; content: string }>;
+
+/** The database query has already limited these complete turns to one tenant and session. */
+export function selectConversationContext(
+  messages: readonly ContextMessage[],
+): readonly ContextMessage[] {
+  if (messages.length % 2 !== 0) throw new Error('Incomplete conversation context');
+  for (let i = 0; i < messages.length; i += 2) {
+    if (messages[i]?.role !== 'visitor' || messages[i + 1]?.role !== 'assistant')
+      throw new Error('Invalid conversation context order');
+  }
+  const result: ContextMessage[] = [];
+  let remaining = 16_000;
+  for (let i = messages.length - 2; i >= 0 && result.length < 24; i -= 2) {
+    const question = messages[i]!,
+      answer = messages[i + 1]!;
+    const size = question.content.length + answer.content.length;
+    if (!question.content.trim() || !answer.content.trim())
+      throw new Error('Empty conversation context');
+    if (size > remaining) break;
+    remaining -= size;
+    result.unshift(question, answer);
+  }
+  return result;
+}
+
 export type ConversationPrompt = Readonly<{
   policy: string;
   confirmedFacts: string;
@@ -42,7 +68,7 @@ export function buildConversationPrompt(claim: ConversationTurnClaim): Conversat
       promotionsAndSalesPolicy: claim.facts.promotionSummary,
       humanContact: claim.facts.humanContact ?? '',
     }),
-    history: claim.context,
+    history: selectConversationContext(claim.context),
     question: claim.question,
     insufficientInfoMessage: claim.facts.insufficientInfoMessage,
   };

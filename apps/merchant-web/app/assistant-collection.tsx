@@ -1,10 +1,8 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { redirect } from 'next/navigation';
 import { PageShell } from '@h5cs/ui';
 import { merchantAssistants } from './tenant-data';
 import { merchantPath } from './tenant-paths';
-import { assistantListStatus } from './workspace/assistant-list-status';
-
 export async function AssistantCollection({
   merchantId,
   section,
@@ -12,39 +10,19 @@ export async function AssistantCollection({
   merchantId: string;
   section: 'knowledge' | 'preview' | 'publish';
 }) {
-  if (!/^[0-9a-f]{32}$/u.test(merchantId)) notFound();
-  const assistants = await merchantAssistants(merchantId, merchantPath(merchantId, section));
+  const [assistant] = await merchantAssistants(merchantId, merchantPath(merchantId, section));
+  if (assistant) redirect(merchantPath(merchantId, section, assistant.assistantId));
   const title =
     section === 'knowledge' ? '知识补充' : section === 'preview' ? '效果试聊' : '发布分享';
   return (
     <PageShell
       title={title}
       eyebrow="Merchant Workspace"
-      description={<p>先选择客服，再进入{title}。不会修改其他客服的资料。</p>}
+      description={<p>先开通本商家的唯一AI客服，之后可直接进入{title}。</p>}
     >
-      <p>
-        <Link href={`${merchantPath(merchantId, 'help')}#${section}`}>查看操作帮助</Link>
-      </p>
-      <section className="merchant-account-card assistant-create-card">
-        <h2>选择客服</h2>
-        {assistants.length ? (
-          <ul className="assistant-workspace-list">
-            {assistants.map((assistant) => (
-              <li key={assistant.assistantId}>
-                <Link href={merchantPath(merchantId, section, assistant.assistantId)}>
-                  {assistant.displayName}
-                </Link>
-                <span>{assistantListStatus(assistant)}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p>本商家还没有客服，请先新建客服。</p>
-        )}
-        <Link className="tenant-feature-link" href={merchantPath(merchantId, 'drafts')}>
-          返回客服列表
-        </Link>
-      </section>
+      <Link className="tenant-feature-link" href={merchantPath(merchantId, 'drafts') + '/new'}>
+        开通我的AI客服
+      </Link>
     </PageShell>
   );
 }

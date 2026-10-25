@@ -311,6 +311,7 @@ export class MySqlPublicSessionRepository {
         `SELECT cs.release_id, cs.created_at, cs.expires_at, cs.status
            FROM conversation_session cs
            JOIN assistant a ON a.merchant_id = cs.merchant_id AND a.id = cs.assistant_id
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
            JOIN merchant m ON m.id = cs.merchant_id
           WHERE cs.id = ? AND cs.visitor_credential_id = ?
             AND a.public_slug_digest = ? AND a.public_slug = ?
@@ -340,6 +341,7 @@ export class MySqlPublicSessionRepository {
         const [targets] = await connection.execute<TargetRow[]>(
           `SELECT a.id AS assistant_id, a.merchant_id, r.id AS release_id
              FROM assistant a
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
              JOIN merchant m ON m.id = a.merchant_id
              JOIN assistant_active_release ar
                ON ar.merchant_id = a.merchant_id AND ar.assistant_id = a.id
@@ -413,6 +415,7 @@ export class MySqlPublicSessionRepository {
         `SELECT cs.release_id, cs.created_at, cs.expires_at, cs.status
            FROM conversation_session cs
            JOIN assistant a ON a.merchant_id = cs.merchant_id AND a.id = cs.assistant_id
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
            JOIN merchant m ON m.id = cs.merchant_id
           WHERE cs.id = ? AND cs.visitor_credential_id = ?
             AND a.public_slug_digest = ? AND a.public_slug = ?
@@ -450,6 +453,7 @@ export class MySqlPublicSessionRepository {
            FROM conversation_session cs
            JOIN merchant m ON m.id = cs.merchant_id
            JOIN assistant a ON a.merchant_id = cs.merchant_id AND a.id = cs.assistant_id
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
            JOIN assistant_release r
              ON r.merchant_id = cs.merchant_id AND r.assistant_id = cs.assistant_id
             AND r.id = cs.release_id
@@ -545,6 +549,7 @@ export class MySqlPublicSessionRepository {
            FROM conversation_session cs
            JOIN merchant m ON m.id = cs.merchant_id
            JOIN assistant a ON a.merchant_id = cs.merchant_id AND a.id = cs.assistant_id
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
            JOIN assistant_release r
              ON r.merchant_id = cs.merchant_id AND r.assistant_id = cs.assistant_id
             AND r.id = cs.release_id
@@ -632,6 +637,7 @@ export class MySqlPublicSessionRepository {
            FROM conversation_session cs
            JOIN merchant m ON m.id = cs.merchant_id
            JOIN assistant a ON a.merchant_id = cs.merchant_id AND a.id = cs.assistant_id
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
           WHERE cs.id = ? AND cs.visitor_credential_id = ?
             AND cs.status = 'active' AND cs.expires_at > ?
             AND m.status = 'active' AND a.status = 'active'
@@ -738,6 +744,7 @@ export class MySqlPublicSessionRepository {
            FROM conversation_session cs
            JOIN merchant m ON m.id = cs.merchant_id
            JOIN assistant a ON a.merchant_id = cs.merchant_id AND a.id = cs.assistant_id
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
           WHERE cs.id = ? AND cs.visitor_credential_id = ?
             AND cs.status = 'active' AND cs.expires_at > ?
             AND m.status = 'active' AND a.status = 'active' LIMIT 1`,

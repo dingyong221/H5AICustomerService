@@ -163,6 +163,26 @@ async function verifyLiveConnection(connection, expectedDatabase) {
   }
 }
 
+/** Run before any new DDL, including the unique-assistant binding backfill. */
+export async function assertSingleAssistantUpgrade(connection) {
+  const [tables] = await connection.query(
+    "SELECT TABLE_NAME AS name FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('assistant','assistant_release','merchant_assistant')",
+  );
+  const names = new Set(tables.map((table) => table.name));
+  if (names.has('merchant_assistant') || !names.has('assistant') || !names.has('assistant_release'))
+    return;
+  const [ambiguous] = await connection.query(
+    `SELECT a.merchant_id FROM assistant a
+      WHERE a.active_release_id IS NOT NULL OR EXISTS
+        (SELECT 1 FROM assistant_release r WHERE r.merchant_id=a.merchant_id AND r.assistant_id=a.id)
+      GROUP BY a.merchant_id HAVING COUNT(*) > 1 LIMIT 1`,
+  );
+  if (ambiguous.length)
+    throw new MigrationPreflightError(
+      'Multiple published assistants require an explicit reviewed selection before migration',
+    );
+}
+
 async function applyMigrations(options, inventory) {
   if (inventory.planSha256 !== options.acceptedPlanSha256) {
     throw new MigrationPreflightError('Migration plan hash changed; run --inventory again');
@@ -194,10 +214,11 @@ async function applyMigrations(options, inventory) {
     const [lockRows] = await connection.query(
       "SELECT GET_LOCK('h5cs_schema_migration_v1', 0) AS acquired",
     );
-    if (row(lockRows)?.acquired !== 1) {
+    if (![1, '1'].includes(row(lockRows)?.acquired)) {
       throw new MigrationPreflightError('Another schema migration is active');
     }
     locked = true;
+    await assertSingleAssistantUpgrade(connection);
     const [{ drizzle }, { migrate }] = await Promise.all([
       import('drizzle-orm/mysql2'),
       import('drizzle-orm/mysql2/migrator'),

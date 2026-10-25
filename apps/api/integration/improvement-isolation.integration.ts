@@ -1,3 +1,4 @@
+import { seedHistoricalSibling } from './legacy-assistant-fixture.js';
 import { randomBytes, randomInt, randomUUID } from 'node:crypto';
 import type { Connection, ExecuteValues, RowDataPacket } from 'mysql2/promise';
 import { describe, expect, it } from 'vitest';
@@ -113,15 +114,8 @@ async function fixture() {
 }
 
 async function secondAssistant(f: Awaited<ReturnType<typeof fixture>>) {
-  const snapshot = await lifecycle.createManualDraft({
-    merchantId: f.actor.merchantId,
-    merchantUserId: f.actor.merchantUserId,
-    displayName: '同商家隔离测试客服B',
-    draft: f.draft,
-    idempotency: idem(),
-    now: new Date(),
-  });
-  return { ...f.actor, assistantId: toAssistantId(snapshot.assistantId) };
+  const sibling = await seedHistoricalSibling(database, f.actor);
+  return { ...f.actor, assistantId: sibling.assistantId };
 }
 
 async function sourceMessage(f: Awaited<ReturnType<typeof fixture>>) {

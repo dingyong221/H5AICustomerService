@@ -52,6 +52,7 @@ export class MySqlKnowledgeMaterialRepository {
   ) {
     const [rows] = await connection.execute<RowDataPacket[]>(
       `SELECT a.id FROM assistant a
+           JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
       JOIN merchant m ON m.id=a.merchant_id JOIN merchant_membership mm ON mm.merchant_id=m.id
       JOIN merchant_user mu ON mu.id=mm.merchant_user_id AND mu.status='active'
       WHERE a.merchant_id=? AND a.id=? AND mm.merchant_user_id=? AND mm.status='active'

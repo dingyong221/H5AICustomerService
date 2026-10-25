@@ -238,17 +238,17 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   const assistantMenu = merchantNavigation.locator('summary').filter({ hasText: 'AI 客服' });
   await assistantMenu.click();
   await expect(
-    merchantNavigation.getByRole('link', { name: '客服列表', exact: true }),
+    merchantNavigation.getByRole('link', { name: '我的AI客服', exact: true }),
   ).toBeHidden();
   await assistantMenu.focus();
   await assistantMenu.press('Enter');
-  await merchantNavigation.getByRole('link', { name: '客服列表', exact: true }).click();
+  await merchantNavigation.getByRole('link', { name: '我的AI客服', exact: true }).click();
   await expect(merchantPage).toHaveURL(managementUrl + '/drafts');
   // Creating a new assistant has its own page; it is not buried below a list.
   await expect(merchantPage.locator('.assistant-create-form')).toHaveCount(0);
   await merchantPage
     .getByRole('main')
-    .getByRole('link', { name: '新建客服', exact: true })
+    .getByRole('link', { name: '开通我的AI客服', exact: true })
     .first()
     .click();
   await expect(merchantPage).toHaveURL(managementUrl + '/drafts/new');

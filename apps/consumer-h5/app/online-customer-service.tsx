@@ -26,9 +26,9 @@ import {
   type OnlinePublicAssistantSnapshot,
 } from './public-api-client';
 import {
-  clearSessionReference,
-  readSessionReference,
-  saveSessionReference,
+  clearBrowserSessionReference,
+  readBrowserSessionReference,
+  saveBrowserSessionReference,
 } from './session-reference';
 
 function SendIcon() {
@@ -134,16 +134,7 @@ export function OnlineCustomerService({
 
   useEffect(() => {
     const controller = new AbortController();
-    let storage: Storage;
-    try {
-      storage = window.sessionStorage;
-    } catch {
-      queueMicrotask(() => {
-        if (!controller.signal.aborted) setRestoreStatus('ready');
-      });
-      return () => controller.abort();
-    }
-    const sessionRequestId = readSessionReference(storage, publicSlug);
+    const sessionRequestId = readBrowserSessionReference(publicSlug);
     if (!sessionRequestId) {
       queueMicrotask(() => {
         if (!controller.signal.aborted) setRestoreStatus('ready');
@@ -163,7 +154,7 @@ export function OnlineCustomerService({
           signal: controller.signal,
         });
         if (!session) {
-          clearSessionReference(storage, publicSlug);
+          clearBrowserSessionReference(publicSlug);
           setRecoveryNotice('上次咨询已结束，发送消息将开始新咨询。');
           setRestoreStatus('ready');
           return;
@@ -178,7 +169,7 @@ export function OnlineCustomerService({
           history.session.releaseRef !== session.releaseRef ||
           history.snapshot.publicAssistantId !== publicSlug
         ) {
-          clearSessionReference(storage, publicSlug);
+          clearBrowserSessionReference(publicSlug);
           setRecoveryNotice('上次咨询无法恢复，发送消息将开始新咨询。');
           setRestoreStatus('ready');
           return;
@@ -248,7 +239,7 @@ export function OnlineCustomerService({
         if (!workingState.session) {
           sessionRequestIdRef.current = pending.sessionRequestId;
           try {
-            saveSessionReference(window.sessionStorage, publicSlug, pending.sessionRequestId);
+            saveBrowserSessionReference(publicSlug, pending.sessionRequestId);
           } catch {
             // Browser storage is optional for the current conversation.
           }
@@ -336,7 +327,7 @@ export function OnlineCustomerService({
   function viewLatestAssistant(): void {
     activeController.current?.abort();
     try {
-      clearSessionReference(window.sessionStorage, publicSlug);
+      clearBrowserSessionReference(publicSlug);
     } catch {
       // No message or new session is submitted by this action.
     }
@@ -370,7 +361,7 @@ export function OnlineCustomerService({
       });
       await client.endSession({ sessionHandle: session.sessionHandle, signal: controller.signal });
       try {
-        clearSessionReference(window.sessionStorage, publicSlug);
+        clearBrowserSessionReference(publicSlug);
       } catch {
         // Browser storage is optional; reloading still starts a fresh consultation.
       }
@@ -420,6 +411,9 @@ export function OnlineCustomerService({
         </header>
 
         <div className="conversation-notices">
+          <p className="version-notice">
+            本商家只有一个AI客服，你的咨询上下文独立保存。在有效期内可在此浏览器继续咨询，换设备不会自动关联。
+          </p>
           <aside className="scope-notice">
             <strong>这是 AI 客服</strong>
             <span>

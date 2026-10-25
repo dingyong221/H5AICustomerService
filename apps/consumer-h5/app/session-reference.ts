@@ -39,3 +39,47 @@ export function clearSessionReference(storage: Storage, publicSlug: string): voi
     // The server still validates the HttpOnly visitor cookie and session expiry.
   }
 }
+
+/** References alone cannot authorize history: the API also checks the HttpOnly visitor cookie. */
+export function readBrowserSessionReference(publicSlug: string): string | null {
+  let persisted: string | null = null;
+  try {
+    persisted = readSessionReference(window.localStorage, publicSlug);
+  } catch {
+    /* optional storage */
+  }
+  if (persisted) return persisted;
+  try {
+    const legacy = readSessionReference(window.sessionStorage, publicSlug);
+    if (legacy) saveBrowserSessionReference(publicSlug, legacy);
+    return legacy;
+  } catch {
+    return null;
+  }
+}
+
+export function saveBrowserSessionReference(publicSlug: string, requestId: string): void {
+  try {
+    saveSessionReference(window.localStorage, publicSlug, requestId);
+  } catch {
+    /* optional storage */
+  }
+  try {
+    saveSessionReference(window.sessionStorage, publicSlug, requestId);
+  } catch {
+    /* optional storage */
+  }
+}
+
+export function clearBrowserSessionReference(publicSlug: string): void {
+  try {
+    clearSessionReference(window.localStorage, publicSlug);
+  } catch {
+    /* optional storage */
+  }
+  try {
+    clearSessionReference(window.sessionStorage, publicSlug);
+  } catch {
+    /* optional storage */
+  }
+}
