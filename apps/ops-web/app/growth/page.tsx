@@ -99,6 +99,9 @@ export default async function GrowthPage() {
           采集{growthEnabled() ? '已启用' : '当前已关闭，以下仅为历史数据'}
           。页面/点击为客户端观测，不等于业务成功；页面累计时长不等于自然人真实在线时长。
         </p>
+        <p>
+          触达与使用事件每日合计最多采集2万条，达到上限会停止新增采集；退出统计、网络失败也会导致缺样，不影响业务使用。
+        </p>
         {data.days.length ? (
           <div className="growth-table-wrap">
             <table className="ops-table">

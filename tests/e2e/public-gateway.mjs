@@ -13,18 +13,20 @@ http
 
     const singleDomain = process.env['H5CS_E2E_PATH_MODE'] === 'single_domain';
     const targetPort =
-      pathname === '/api/v1/public' ||
-      pathname.startsWith('/api/v1/public/') ||
-      (singleDomain && pathname.startsWith('/api/'))
-        ? 4000
-        : singleDomain && (pathname === '/ops' || pathname.startsWith('/ops/'))
-          ? 3002
-          : singleDomain &&
-              (pathname === '/console' ||
-                pathname.startsWith('/console/') ||
-                /^\/[0-9a-f]{32}(?:\/|$)/u.test(pathname))
-            ? 3000
-            : 3003;
+      pathname === '/console/usage'
+        ? 3000
+        : pathname === '/api/v1/public' ||
+            pathname.startsWith('/api/v1/public/') ||
+            (singleDomain && pathname.startsWith('/api/'))
+          ? 4000
+          : singleDomain && (pathname === '/ops' || pathname.startsWith('/ops/'))
+            ? 3002
+            : singleDomain &&
+                (pathname === '/console' ||
+                  pathname.startsWith('/console/') ||
+                  /^\/[0-9a-f]{32}(?:\/|$)/u.test(pathname))
+              ? 3000
+              : 3003;
     const upstream = http.request(
       {
         hostname: host,

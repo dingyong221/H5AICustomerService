@@ -193,6 +193,18 @@ test('native H5 free registration to versioned consumer conversation, repeat log
   };
   await ask(oldPage, '你们提供什么服务？');
   await expect(oldPage.getByText(/本地模型夹具：提供上门空调清洗服务/).last()).toBeVisible();
+  await expect
+    .poll(async () =>
+      Number(
+        (
+          await sql(
+            "SELECT COUNT(*) n FROM product_usage_event WHERE merchant_id=UNHEX(?) AND role='consumer' AND control='conversation.send'",
+            [merchantId],
+          )
+        )[0]!['n'],
+      ),
+    )
+    .toBeGreaterThan(0);
   await page.goto(base + '/conversations');
   await page.locator('.merchant-conversation-list a').first().click();
   await page.getByRole('link', { name: '改进这条回答', exact: true }).first().click();

@@ -3,9 +3,14 @@ import { currentMerchant } from '../account/merchant-actions';
 export async function POST(request: Request) {
   try {
     const session = await currentMerchant();
+    const consumerOrigin = process.env['CONSUMER_H5_ORIGIN'];
+    const expectedOrigin =
+      consumerOrigin && request.headers.get('origin') === consumerOrigin
+        ? consumerOrigin
+        : process.env['MERCHANT_PUBLIC_ORIGIN'];
     return await collectUsageRequest(
       request,
-      process.env['MERCHANT_PUBLIC_ORIGIN'],
+      expectedOrigin,
       session
         ? { role: 'merchant', id: session.merchantUserId, merchantId: session.merchantId }
         : undefined,

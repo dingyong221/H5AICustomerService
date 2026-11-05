@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { UsageTracker } from '@h5cs/ui';
 import '@h5cs/ui/styles.css';
 import './styles.css';
+export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   description: '通过商家公开入口进行连续的在线业务咨询。',

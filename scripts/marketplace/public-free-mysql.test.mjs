@@ -135,6 +135,7 @@ test('growth attribution is first-touch, new-allocation-only, transactional and 
   assert(report.days.length > 0);
   assert(report.retention.length > 0);
   assert.equal((await growth.invitationStats(owner.merchantId)).opened, 1);
+  assert.equal(Object.keys(await growth.cleanupExpired()).length, 5);
 });
 const status = (id) =>
   sql(
