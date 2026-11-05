@@ -223,6 +223,7 @@ export function MaterialManager({
       ) : null}
       <div hidden={stage !== 'materials'}>
         <form
+          data-usage="knowledge.upload"
           className="merchant-account-form"
           onSubmit={(event) => {
             event.preventDefault();
@@ -413,6 +414,7 @@ export function MaterialManager({
               可能遗漏或误解原文。请对照提取文字检查价格、适用条件和冲突事项；生成成功不等于资料已确认。
             </p>
             <button
+              data-usage="knowledge.organize"
               disabled={disabled || !consent || !selected.length || selected.length > 5}
               type="button"
               onClick={() => void request('organize', { sourceIds: selected, consent })}
@@ -496,6 +498,7 @@ export function MaterialManager({
       <div hidden={stage !== 'review'}>
         <section className="knowledge-summary-editor" aria-label="核对并保存知识整理稿">
           <form
+            data-usage="knowledge.save"
             className="merchant-account-form"
             onSubmit={(event) => {
               event.preventDefault();

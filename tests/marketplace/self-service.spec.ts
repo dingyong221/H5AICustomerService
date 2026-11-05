@@ -2,6 +2,11 @@ import { randomBytes, randomInt } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
 import {
+  createOperatorSession,
+  loadOperatorAuthConfig,
+  operatorCookieName,
+} from '../../apps/ops-web/app/operator-auth';
+import {
   loadDatabaseConfig,
   MySqlMarketplaceRepository,
 } from '../../packages/database/src/index.js';
@@ -77,6 +82,7 @@ test('native H5 free registration to versioned consumer conversation, repeat log
   await expect(
     page.getByRole('link', { name: '免费开通我的 AI 客服 →', exact: true }),
   ).toBeVisible();
+  await page.getByRole('img', { name: /商家开通二维码/ }).scrollIntoViewIfNeeded();
   await expect(page.getByRole('img', { name: /商家开通二维码/ })).toHaveJSProperty(
     'naturalWidth',
     640,
@@ -238,6 +244,94 @@ test('native H5 free registration to versioned consumer conversation, repeat log
   await expect(freshPage.getByText(/商家的\s*AI\s*服务额度已用尽/)).toBeVisible();
   const callsAfter = await (await page.request.get('http://127.0.0.1:9020/healthz')).json();
   expect(callsAfter.calls).toBe(callsBefore.calls);
+  await page.goto(`${base}/invite`);
+  await page.getByRole('button', { name: '生成我的邀请入口' }).click();
+  const invitation = await page.getByLabel('邀请链接', { exact: true }).inputValue();
+  expect(invitation).toMatch(/\/console\/r\/[A-Za-z0-9_-]{43}$/);
+  const friend = await browser.newContext(),
+    friendPage = await friend.newPage();
+  await friendPage.goto(invitation);
+  await expect(friendPage).toHaveURL(/\/console\/product$/);
+  await friendPage.getByRole('link', { name: '免费开通我的 AI 客服 →', exact: true }).click();
+  await friendPage.getByLabel('商家名称', { exact: true }).fill('合成邀请商家');
+  await friendPage
+    .getByLabel('手机号', { exact: true })
+    .fill(`139${String(randomInt(10000000, 99999999))}`);
+  await friendPage
+    .getByLabel('登录密码', { exact: true })
+    .fill(randomBytes(24).toString('base64url'));
+  await friendPage.getByRole('button', { name: '免费开通客来答', exact: true }).click();
+  await expect(friendPage).toHaveURL(/\/[0-9a-f]{32}\/drafts\/[0-9a-f]{32}$/);
+  expect(
+    (
+      await sql('SELECT inviter_id FROM growth_referral WHERE invitee_id=UNHEX(?)', [
+        new URL(friendPage.url()).pathname.split('/')[1]!,
+      ])
+    )[0]!['inviter_id'],
+  ).toEqual(Buffer.from(merchantId, 'hex'));
+  await page.reload();
+  await expect(page.getByText(/首次开通\s*1\s*家/)).toBeVisible();
+  const usageProbe = await page.evaluate(async () => {
+    const response = await fetch('/console/usage', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        events: [
+          {
+            id: crypto.randomUUID(),
+            instance: crypto.randomUUID(),
+            event: 'page_view',
+            page: 'invite',
+            control: 'page',
+            activeMs: 0,
+            at: new Date().toISOString(),
+          },
+        ],
+      }),
+    });
+    return { status: response.status, body: await response.json() };
+  });
+  expect(usageProbe).toMatchObject({ status: 202, body: { collected: true } });
+  await expect
+    .poll(async () =>
+      Number(
+        (
+          await sql(
+            "SELECT COUNT(*) n FROM product_usage_event WHERE merchant_id=UNHEX(?) AND page='invite' AND event='control_click' AND control='invite.create'",
+            [merchantId],
+          )
+        )[0]!['n'],
+      ),
+    )
+    .toBeGreaterThan(0);
+  await screenshot(page, 'invite-attribution-and-usage', info.project.name);
+  await page.goto('http://127.0.0.1:3000/console/usage-info');
+  await page.getByRole('button', { name: '关闭基础使用统计', exact: true }).click();
+  await expect(page.getByRole('button', { name: '允许基础使用统计', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('kelaida_usage_optout'))).toBe('1');
+  await page.getByRole('button', { name: '允许基础使用统计', exact: true }).click();
+  const ops = await browser.newContext(
+    info.project.name === 'mobile'
+      ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }
+      : {},
+  );
+  const opsConfig = loadOperatorAuthConfig()!;
+  await ops.addCookies([
+    {
+      name: operatorCookieName(opsConfig),
+      value: createOperatorSession(opsConfig),
+      url: opsConfig.publicOrigin,
+      httpOnly: true,
+    },
+  ]);
+  const opsPage = await ops.newPage();
+  await opsPage.goto(opsConfig.publicOrigin + '/ops/growth');
+  await expect(opsPage.getByRole('heading', { name: '增长与使用', exact: true })).toBeVisible();
+  await expect(opsPage.getByText('未成熟', { exact: true }).first()).toBeVisible();
+  await screenshot(opsPage, 'growth-dashboard', info.project.name);
+  await ops.close();
+  await friend.close();
+
   for (const status of ['paused', 'expired']) {
     await sql(
       `UPDATE marketplace_entitlement e JOIN marketplace_allocation a ON a.subject_digest=e.subject_digest AND a.product=e.product SET e.status=?,e.expires_at=${status === 'expired' ? 'DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 1 DAY)' : 'DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 1 DAY)'} WHERE a.merchant_id=?`,

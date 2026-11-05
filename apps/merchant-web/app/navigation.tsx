@@ -53,6 +53,7 @@ export function MerchantNavigation({
       short: '营',
       items: [
         { href: path('conversations'), label: '咨询管理', short: '询' },
+        { href: path('invite'), label: '邀请商家', short: '邀' },
         {
           href: path('improvements'),
           label: '问题与改进',
@@ -80,6 +81,7 @@ export function MerchantNavigation({
     const isActive = active(item);
     return (
       <Link
+        data-usage={item.label === '帮助中心' ? 'help.open' : 'navigation'}
         key={item.label}
         href={item.href}
         title={item.label}

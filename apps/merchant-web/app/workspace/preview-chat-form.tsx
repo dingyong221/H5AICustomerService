@@ -43,7 +43,7 @@ export function PreviewChatForm({
         : null;
   return (
     <>
-      <form action={action} className="assistant-preview-form">
+      <form data-usage="preview.send" action={action} className="assistant-preview-form">
         <input name="merchantId" type="hidden" value={merchantId} />
         <input name="assistantId" type="hidden" value={assistantId} />
         <input name="draftRevision" type="hidden" value={draftRevision} />

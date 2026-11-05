@@ -14,6 +14,7 @@ vi.mock('@h5cs/database', () => ({
   loadDatabaseConfig: () => ({ configured: true, config: {} }),
   selfServicePolicy: () => ({ days: null, modelCalls: null }),
   marketplaceFixtureEnabled: () => false,
+  growthEnabled: () => false,
   MerchantAccessError: class extends Error {},
   MySqlMerchantAccessRepository: class {},
   MarketplaceAccessError: class extends Error {

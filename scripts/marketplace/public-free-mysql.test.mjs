@@ -7,6 +7,7 @@ import {
   MySqlMerchantAccessRepository,
   MySqlAssistantLifecycleRepository,
   MySqlPlatformProvisioningRepository,
+  MySqlGrowthUsageRepository,
 } from '../../packages/database/dist/index.js';
 const url = new URL(process.env.H5CS_A6_TEST_MYSQL_URL ?? '');
 if (
@@ -49,6 +50,92 @@ async function sql(statement, values = []) {
   }
 }
 const hex = (value) => Buffer.from(value, 'hex');
+
+test('growth attribution is first-touch, new-allocation-only, transactional and tenant isolated; telemetry deduplicates safely', async () => {
+  const environment = {
+    ...env,
+    H5CS_GROWTH_USAGE_ENABLED: 'true',
+    H5CS_FREE_CAMPAIGN: 'growth-' + randomBytes(6).toString('hex'),
+  };
+  const accounts = new MySqlMarketplaceRepository(database, key, environment),
+    growth = new MySqlGrowthUsageRepository(database);
+  const ownerInput = input(),
+    owner = await accounts.claimFree(ownerInput),
+    other = await accounts.claimFree(input());
+  await assert.rejects(growth.invitation(owner.merchantId, owner.merchantUserId, true));
+  await assert.rejects(growth.invitation(owner.merchantId, other.merchantUserId, false));
+  const code = randomBytes(32).toString('base64url'),
+    otherCode = randomBytes(32).toString('base64url');
+  await sql(
+    `INSERT INTO growth_invitation (merchant_id,owner_id,public_code,status,created_at) VALUES (?,?,?,'active',UTC_TIMESTAMP(6)),(?,?,?,'active',UTC_TIMESTAMP(6))`,
+    [
+      hex(owner.merchantId),
+      hex(owner.merchantUserId),
+      code,
+      hex(other.merchantId),
+      hex(other.merchantUserId),
+      otherCode,
+    ],
+  );
+  const touch = await growth.touch(code);
+  assert(touch);
+  assert.equal((await growth.touch(otherCode, touch.token)).token, touch.token);
+  assert.equal(await growth.touch('invalid'), null);
+  const friendInput = { ...input(), growthTouch: touch.token };
+  const friends = await Promise.all(
+    Array.from({ length: 3 }, () =>
+      accounts.claimFree({ ...friendInput, requestId: randomUUID() }),
+    ),
+  );
+  assert(friends.every((f) => f.merchantId === friends[0].merchantId));
+  let rows = await sql('SELECT inviter_id FROM growth_referral WHERE invitee_id=?', [
+    hex(friends[0].merchantId),
+  ]);
+  assert.equal(rows.length, 1);
+  assert(rows[0].inviter_id.equals(hex(owner.merchantId)));
+  const otherTouch = await growth.touch(otherCode);
+  await accounts.claimFree({
+    ...friendInput,
+    growthTouch: otherTouch.token,
+    requestId: randomUUID(),
+  });
+  rows = await sql('SELECT inviter_id FROM growth_referral WHERE invitee_id=?', [
+    hex(friends[0].merchantId),
+  ]);
+  assert(rows[0].inviter_id.equals(hex(owner.merchantId)));
+  await accounts.claimFree({ ...ownerInput, growthTouch: touch.token, requestId: randomUUID() });
+  assert.equal(
+    (await sql('SELECT * FROM growth_referral WHERE invitee_id=?', [hex(owner.merchantId)])).length,
+    0,
+  );
+  await sql(
+    'UPDATE growth_touch SET expires_at=DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 1 DAY) WHERE token_digest=UNHEX(SHA2(?,256))',
+    [otherTouch.token],
+  );
+  const expired = await accounts.claimFree({ ...input(), growthTouch: otherTouch.token });
+  assert.equal(
+    (await sql('SELECT * FROM growth_referral WHERE invitee_id=?', [hex(expired.merchantId)]))
+      .length,
+    0,
+  );
+  const identity = { role: 'merchant', actor: owner.merchantUserId, merchantId: owner.merchantId };
+  const event = {
+    id: randomUUID(),
+    instance: randomUUID(),
+    event: 'page_view',
+    page: 'workspace',
+    control: 'page',
+    activeMs: 0,
+    at: new Date().toISOString(),
+  };
+  assert.equal(await growth.collect(identity, [event]), 1);
+  assert.equal(await growth.collect(identity, [event]), 0);
+  await assert.rejects(growth.collect(identity, [{ ...event, activeMs: 1 }]));
+  const report = await growth.usageReport();
+  assert(report.days.length > 0);
+  assert(report.retention.length > 0);
+  assert.equal((await growth.invitationStats(owner.merchantId)).opened, 1);
+});
 const status = (id) =>
   sql(
     'SELECT e.* FROM marketplace_entitlement e JOIN marketplace_allocation a ON a.subject_digest=e.subject_digest AND a.product=e.product WHERE a.merchant_id=?',

@@ -13,6 +13,7 @@ import {
   MarketplaceAccessError,
   marketplaceFixtureEnabled,
   selfServicePolicy,
+  growthEnabled,
 } from '@h5cs/database';
 
 import { safeMerchantReturnPath } from './merchant-return-path';
@@ -262,7 +263,12 @@ export async function claimMarketplace(
   let destination: string;
   try {
     const repository = new MySqlMarketplaceRepository(database.config, key);
+    const store = await cookies();
+    const invite = growthEnabled()
+      ? store.get(origin.protocol === 'https:' ? '__Host-h5cs_invite' : 'h5cs_invite')?.value
+      : undefined;
     const input = {
+      ...(invite ? { growthTouch: invite } : {}),
       merchantName:
         typeof formData.get('merchantName') === 'string'
           ? String(formData.get('merchantName'))

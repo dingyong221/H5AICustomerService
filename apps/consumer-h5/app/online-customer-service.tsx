@@ -401,6 +401,7 @@ export function OnlineCustomerService({
           </div>
           {conversation.session ? (
             <button
+              data-usage="conversation.new"
               className="new-consultation-button"
               disabled={pending !== undefined || ending}
               onClick={() => void startNewConsultation()}
@@ -530,6 +531,7 @@ export function OnlineCustomerService({
             </details>
           ) : null}
           <form
+            data-usage="conversation.send"
             aria-label="发送咨询消息"
             className="composer"
             onSubmit={(event) => {

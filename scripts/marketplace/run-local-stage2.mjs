@@ -55,12 +55,17 @@ const env = {
   UV_THREADPOOL_SIZE: '1',
   APP_ENV: 'test',
   H5CS_MARKETPLACE_MODE: 'public-free',
+  H5CS_GROWTH_USAGE_ENABLED: 'true',
   H5CS_FREE_CAMPAIGN: 'h5-local-' + Date.now(),
   H5CS_FREE_DAYS: 'unlimited',
   H5CS_FREE_MODEL_CALLS: 'unlimited',
   H5CS_FREE_MAX_CLAIMS: 'unlimited',
   MYSQL_DATABASE_URL: `mysql://h5cs_a6_test:${password}@127.0.0.1:33186/h5cs_marketplace_a6_test`,
   MERCHANT_PUBLIC_ORIGIN: 'http://127.0.0.1:3000',
+  OPS_PUBLIC_ORIGIN: 'http://127.0.0.1:3002',
+  OPS_ADMIN_USERNAME: 'local-growth-operator',
+  OPS_ADMIN_PASSWORD_HASH: 'local-unused-password-hash',
+  OPS_SESSION_SIGNING_KEY: phoneKey,
   MERCHANT_PHONE_LOOKUP_KEY: phoneKey,
   PUBLIC_CONVERSATION_ENABLED: 'true',
   CONSUMER_H5_ORIGIN: 'http://127.0.0.1:3001',
@@ -267,7 +272,7 @@ try {
   if (before.sha256 !== after.sha256) throw Error('Legacy baseline changed during marketplace DDL');
   report.upgrade = {
     from: 15,
-    to: 17,
+    to: 18,
     legacyTables: legacyTables.length,
     legacySha256: before.sha256,
     preserved: true,
@@ -275,7 +280,7 @@ try {
   await migrate(drizzle(source), { migrationsFolder: migrations });
   if ((await snapshotTables(source, legacyTables)).sha256 !== before.sha256)
     throw Error('Replay modified legacy rows');
-  console.log('Non-empty 15→17 migration and replay preserved legacy data');
+  console.log('Non-empty 15→18 migration and replay preserved legacy data');
   // Also run the existing CI 12→16 non-empty probe, rather than trusting its offline unit tests.
   await source.query(
     'CREATE DATABASE h5cs_integration_ci CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci',
@@ -331,6 +336,19 @@ try {
     { cwd: join(root, 'apps/merchant-web') },
   );
   await waitHttp('http://127.0.0.1:3000/console/marketplace');
+  node(
+    'ops',
+    [
+      join(root, 'apps/ops-web/node_modules/next/dist/bin/next'),
+      'start',
+      '--hostname',
+      '127.0.0.1',
+      '--port',
+      '3002',
+    ],
+    { cwd: join(root, 'apps/ops-web') },
+  );
+  await waitHttp('http://127.0.0.1:3002/ops/login');
   node(
     'consumer',
     [

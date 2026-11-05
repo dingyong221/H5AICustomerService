@@ -15,7 +15,7 @@ export function MerchantLogoutForm({
 }) {
   const [state, action, pending] = useActionState(logoutMerchant, { error: null });
   return (
-    <form action={action}>
+    <form action={action} data-usage="logout">
       <input name="merchantId" type="hidden" value={merchantId} />
       <input name="csrfToken" type="hidden" value={csrfToken} />
       {state.error ? <p role="alert">{state.error}</p> : null}
