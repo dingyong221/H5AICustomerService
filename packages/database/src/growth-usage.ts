@@ -160,7 +160,10 @@ export class MySqlGrowthUsageRepository {
         "SELECT DATE_FORMAT(DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 8 HOUR),'%Y-%m-%d') day",
       );
       const day = String(clock[0]!['day']);
-      await c.execute('INSERT IGNORE INTO product_usage_budget (day,accepted) VALUES (?,0)', [day]);
+      await c.execute(
+        'INSERT INTO product_usage_budget (day,accepted) VALUES (?,0) ON DUPLICATE KEY UPDATE accepted=accepted',
+        [day],
+      );
       const [budget] = await c.execute<RowDataPacket[]>(
         'SELECT accepted FROM product_usage_budget WHERE day=? FOR UPDATE',
         [day],
@@ -209,6 +212,25 @@ export class MySqlGrowthUsageRepository {
     }
   }
   async collect(identity: UsageIdentity, events: UsageEvent[]) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.collectOnce(identity, events);
+      } catch (error) {
+        if (
+          attempt >= 2 ||
+          !(
+            error &&
+            typeof error === 'object' &&
+            'code' in error &&
+            error.code === 'ER_LOCK_DEADLOCK'
+          )
+        )
+          throw error;
+        await new Promise((resolve) => setTimeout(resolve, 10 * (attempt + 1)));
+      }
+    }
+  }
+  private async collectOnce(identity: UsageIdentity, events: UsageEvent[]) {
     events = events.filter((e) => Math.abs(Date.now() - Date.parse(e.at)) <= 86400000);
     if (!events.length) return 0;
     const c = await this.database.openConnection();
@@ -219,8 +241,12 @@ export class MySqlGrowthUsageRepository {
         "SELECT DATE_FORMAT(DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 8 HOUR),'%Y-%m-%d') day",
       );
       const day = String(clock[0]!['day']);
-      // One fixed database row serializes the bounded daily budget across app instances.
-      await c.execute('INSERT IGNORE INTO product_usage_budget (day,accepted) VALUES (?,0)', [day]);
+      // Acquire an exclusive budget-row lock immediately. INSERT IGNORE followed by
+      // FOR UPDATE can deadlock when concurrent duplicate inserts hold shared locks.
+      await c.execute(
+        'INSERT INTO product_usage_budget (day,accepted) VALUES (?,0) ON DUPLICATE KEY UPDATE accepted=accepted',
+        [day],
+      );
       const [budget] = await c.execute<RowDataPacket[]>(
         'SELECT accepted FROM product_usage_budget WHERE day=? FOR UPDATE',
         [day],

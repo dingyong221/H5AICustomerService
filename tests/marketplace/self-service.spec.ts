@@ -62,7 +62,10 @@ test.afterEach(async ({ browser }, info) => {
             responses: await Promise.all(
               (usageResponses.get(p) ?? []).map(async (r) => ({
                 status: r.status(),
-                body: await r.json().catch(() => null),
+                body: await Promise.race([
+                  r.json().catch(() => null),
+                  new Promise((resolve) => setTimeout(() => resolve({ unavailable: true }), 1000)),
+                ]),
               })),
             ),
             tap: await p

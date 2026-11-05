@@ -157,6 +157,28 @@ test('growth attribution is first-touch, new-allocation-only, transactional and 
     at: new Date().toISOString(),
   };
   assert.equal(await growth.collect(identity, [event]), 1);
+  const concurrent = Array.from({ length: 16 }, () => ({
+    ...event,
+    id: randomUUID(),
+    instance: randomUUID(),
+  }));
+  const [results, visits] = await Promise.all([
+    Promise.all(concurrent.map((e) => growth.collect(identity, [e]))),
+    Promise.all(Array.from({ length: 8 }, () => growth.touch(code))),
+  ]);
+  assert(visits.every((v) => v !== null));
+  assert.equal(new Set(visits.map((v) => v.token)).size, 8);
+  assert.equal(
+    results.reduce((sum, n) => sum + n, 0),
+    16,
+  );
+  assert.equal(
+    (await Promise.all(concurrent.map((e) => growth.collect(identity, [e])))).reduce(
+      (sum, n) => sum + n,
+      0,
+    ),
+    0,
+  );
   assert.equal(await growth.collect(identity, [event]), 0);
   await assert.rejects(growth.collect(identity, [{ ...event, activeMs: 1 }]));
   const report = await growth.usageReport();
