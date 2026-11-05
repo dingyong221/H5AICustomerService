@@ -63,6 +63,7 @@ const env = {
   MYSQL_DATABASE_URL: `mysql://h5cs_a6_test:${password}@127.0.0.1:33186/h5cs_marketplace_a6_test`,
   MERCHANT_PUBLIC_ORIGIN: 'http://127.0.0.1:3000',
   OPS_PUBLIC_ORIGIN: 'http://127.0.0.1:3002',
+  NEXT_PUBLIC_OPS_BASE_PATH: '/ops',
   OPS_ADMIN_USERNAME: 'local-growth-operator',
   OPS_ADMIN_PASSWORD_HASH: 'local-unused-password-hash',
   OPS_SESSION_SIGNING_KEY: phoneKey,
