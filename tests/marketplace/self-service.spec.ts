@@ -55,6 +55,7 @@ test('native H5 free registration to versioned consumer conversation, repeat log
   await screenshot(page, 'public-product-and-activation-qr', info.project.name);
   await page.getByRole('link', { name: '免费领取并开通 →', exact: true }).click();
   await expect(page.getByRole('heading', { name: '0元领取你的AI客服' })).toBeVisible();
+  await expect(page.getByLabel('商家名称', { exact: true })).toBeInViewport();
   await screenshot(page, 'claim-empty', info.project.name);
   const claim = async (target = page) => {
     await target.getByLabel('商家名称', { exact: true }).fill('合成H5自助商家');

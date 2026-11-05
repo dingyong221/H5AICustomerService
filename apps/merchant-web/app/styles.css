@@ -153,6 +153,20 @@ a {
   opacity: 0.6;
 }
 
+.merchant-account-form .merchant-claim-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  line-height: 1.5;
+}
+
+.merchant-account-form .merchant-claim-consent input {
+  flex: 0 0 1.1rem;
+  width: 1.1rem;
+  min-height: 1.1rem;
+  margin-top: 0.2rem;
+}
+
 .assistant-create-card {
   max-width: 62rem;
 }

@@ -19,15 +19,6 @@ export default async function MarketplacePage() {
       description={<p>填写真实资料，试聊确认后发布。</p>}
     >
       <section className="merchant-account-card">
-        <p>整理自己的商品或服务资料，试聊核对后，分享固定客户咨询链接和二维码。</p>
-        <ol>
-          <li>领取并登录商家账号</li>
-          <li>填写行业、商品服务、价格优惠和特别说明</li>
-          <li>补充知识，试聊核对，确认发布</li>
-          <li>分享客户咨询入口，持续改善</li>
-        </ol>
-        <p>产品领取入口面向商家。客户咨询二维码在客服发布后由原后台提供，两类二维码用途不同。</p>
-        <p>首版为0元免支付领取，具体期限和额度以本页已开放的领取说明为准。不会自动收费。</p>
         {offer ? (
           <section>
             <h2>0元领取你的AI客服</h2>
@@ -51,6 +42,15 @@ export default async function MarketplacePage() {
           </p>
         )}
         <Link href="/console/account/login">已有账号：登录原商家后台</Link>
+        <details>
+          <summary>开通后怎么用？</summary>
+          <ol>
+            <li>填写行业、商品服务、价格优惠和特别说明</li>
+            <li>补充知识，试聊核对，确认发布</li>
+            <li>分享客户咨询入口，持续改善</li>
+          </ol>
+          <p>此入口面向商家；发布后的客户咨询二维码才用于消费者提问。不会自动收费。</p>
+        </details>
       </section>
     </PageShell>
   );
