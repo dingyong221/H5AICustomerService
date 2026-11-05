@@ -1,9 +1,9 @@
 export type SelfServicePolicy = Readonly<{
   origin: string;
   campaign: string;
-  days: number;
-  modelCalls: number;
-  maxClaims: number;
+  days: number | null;
+  modelCalls: number | null;
+  maxClaims: number | null;
 }>;
 
 /** A server-owned free offer. No price, subject, quota or entitlement is accepted from a URL. */
@@ -25,6 +25,7 @@ export function selfServicePolicy(
       return null;
     const integer = (key: string, maximum: number) => {
       const text = environment[key] ?? '';
+      if (text === 'unlimited') return null;
       if (!/^[1-9][0-9]*$/u.test(text)) throw new Error('Missing finite free offer');
       const number = Number(text);
       if (!Number.isSafeInteger(number) || number > maximum) throw new Error('Invalid free offer');

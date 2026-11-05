@@ -193,9 +193,14 @@ export async function AssistantView({
         </div>
         {quota ? (
           <p role="status">
-            AI服务额度：剩余 {Math.max(0, quota.limit - quota.reserved)} / {quota.limit}{' '}
-            次AI服务调用，至{' '}
-            {quota.expiresAt.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}（北京时间）
+            AI服务额度：
+            {quota.limit === null
+              ? `暂不限次数（已记录${quota.reserved}次调用尝试）`
+              : `剩余 ${Math.max(0, quota.limit - quota.reserved)} / ${quota.limit} 次AI服务调用`}
+            ，
+            {quota.expiresAt === null
+              ? '有效期暂不限'
+              : `至 ${quota.expiresAt.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}（北京时间）`}
             ；不自动重置。失败或超时可能计入，试聊、整理、撰写、复测和客户问答共用。新草稿须补全真实资料并确认发布。
           </p>
         ) : null}

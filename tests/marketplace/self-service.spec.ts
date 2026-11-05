@@ -73,6 +73,7 @@ test('native H5 free registration to versioned consumer conversation, repeat log
   const phone = `139${String(randomInt(10000000, 99999999))}`,
     password = randomBytes(24).toString('base64url');
   await page.goto('http://127.0.0.1:3000/console/product');
+  await expect(page.getByText(/有效期暂不限，AI调用次数暂不限/)).toBeVisible();
   await expect(page.getByRole('link', { name: '免费领取并开通 →', exact: true })).toBeVisible();
   await expect(page.getByRole('img', { name: /商家开通二维码/ })).toHaveJSProperty(
     'naturalWidth',
@@ -94,6 +95,7 @@ test('native H5 free registration to versioned consumer conversation, repeat log
     await expect(target).toHaveURL(/\/[0-9a-f]{32}\/drafts\/[0-9a-f]{32}$/);
   };
   await claim();
+  await expect(page.getByText(/暂不限次数（已记录0次调用尝试）/)).toBeVisible();
   const draftUrl = page.url(),
     parts = new URL(draftUrl).pathname.split('/'),
     merchantId = parts[1]!,

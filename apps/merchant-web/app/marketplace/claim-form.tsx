@@ -1,8 +1,9 @@
 'use client';
 import { useActionState, useState } from 'react';
 import { claimMarketplace } from '../account/merchant-actions';
+import { offerTerms, type OfferTerms } from './offer-copy';
 
-export function MarketplaceClaimForm({ offer }: { offer?: { days: number; modelCalls: number } }) {
+export function MarketplaceClaimForm({ offer }: { offer?: OfferTerms }) {
   const [state, action, pending] = useActionState(claimMarketplace, { error: null });
   const [merchantName, setMerchantName] = useState('');
   const [phone, setPhone] = useState('');
@@ -68,7 +69,7 @@ export function MarketplaceClaimForm({ offer }: { offer?: { days: number; modelC
         <input name="acceptOffer" type="checkbox" required />
         <span>
           {offer
-            ? `我已了解0元领取后首次开通可使用${offer.days}天，包含${offer.modelCalls}次AI调用尝试；重复领取不重置期限和额度，不会自动扣费。`
+            ? `我已了解0元领取后${offerTerms(offer)}；重复领取不重置期限和额度，不会自动扣费。后续规则如有调整会另行说明。`
             : '我已了解本地合成测试的期限与额度。'}
         </span>
       </label>

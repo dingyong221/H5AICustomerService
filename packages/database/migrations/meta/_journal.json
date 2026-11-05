@@ -113,6 +113,13 @@
       "when": 1793858226768,
       "tag": "0015_clumsy_prowler",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1793864155337,
+      "tag": "0016_goofy_salo",
+      "breakpoints": true
     }
   ]
 }

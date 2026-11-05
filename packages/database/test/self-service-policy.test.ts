@@ -34,4 +34,20 @@ describe('server-owned public free offer', () => {
       }),
     ).toBeNull();
   });
+  it('supports only an explicit unlimited token and retains independently bounded dimensions', () => {
+    expect(
+      selfServicePolicy({
+        ...env,
+        H5CS_FREE_DAYS: 'unlimited',
+        H5CS_FREE_MODEL_CALLS: 'unlimited',
+        H5CS_FREE_MAX_CLAIMS: 'unlimited',
+      }),
+    ).toMatchObject({ days: null, modelCalls: null, maxClaims: null });
+    expect(selfServicePolicy({ ...env, H5CS_FREE_MODEL_CALLS: 'unlimited' })).toMatchObject({
+      days: 30,
+      modelCalls: null,
+      maxClaims: 100,
+    });
+    expect(selfServicePolicy({ ...env, H5CS_FREE_DAYS: 'UNLIMITED' })).toBeNull();
+  });
 });

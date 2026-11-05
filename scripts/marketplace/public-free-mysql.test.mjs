@@ -54,6 +54,60 @@ const status = (id) =>
     'SELECT e.* FROM marketplace_entitlement e JOIN marketplace_allocation a ON a.subject_digest=e.subject_digest AND a.product=e.product WHERE a.merchant_id=?',
     [hex(id)],
   );
+
+test('explicit unlimited offer records attempts, preserves pause/revoke and can later become bounded without resetting resources', async () => {
+  const unlimitedEnv = {
+    ...env,
+    H5CS_FREE_CAMPAIGN: 'unlimited-' + randomBytes(6).toString('hex'),
+    H5CS_FREE_DAYS: 'unlimited',
+    H5CS_FREE_MODEL_CALLS: 'unlimited',
+    H5CS_FREE_MAX_CLAIMS: 'unlimited',
+  };
+  const unlimited = new MySqlMarketplaceRepository(database, key, unlimitedEnv);
+  const owner = input(),
+    account = await unlimited.claimFree(owner);
+  assert.equal((await unlimited.quotaForMerchant(account.merchantId)).limit, null);
+  assert.equal((await unlimited.quotaForMerchant(account.merchantId)).expiresAt, null);
+  await Promise.all(
+    Array.from({ length: 5 }, () => unlimited.reserveModelCall(account.merchantId, 'preview')),
+  );
+  assert.equal((await status(account.merchantId))[0].model_calls_reserved, 5);
+  await sql(
+    'UPDATE marketplace_entitlement e JOIN marketplace_allocation a ON a.subject_digest=e.subject_digest AND a.product=e.product SET e.model_call_limit=5, e.expires_at=DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 1 DAY) WHERE a.merchant_id=?',
+    [hex(account.merchantId)],
+  );
+  await assert.rejects(unlimited.reserveModelCall(account.merchantId, 'preview'), {
+    code: 'quota_exhausted',
+  });
+  await sql(
+    "UPDATE marketplace_entitlement e JOIN marketplace_allocation a ON a.subject_digest=e.subject_digest AND a.product=e.product SET e.model_call_limit=NULL, e.expires_at=NULL, e.status='paused' WHERE a.merchant_id=?",
+    [hex(account.merchantId)],
+  );
+  await assert.rejects(unlimited.assertModelAccess(account.merchantId), { code: 'not_eligible' });
+  await assert.rejects(unlimited.reserveModelCall(account.merchantId, 'preview'), {
+    code: 'not_eligible',
+  });
+  assert.equal(await access.resolveSession(account.sessionToken), null);
+  await sql(
+    "UPDATE marketplace_entitlement e JOIN marketplace_allocation a ON a.subject_digest=e.subject_digest AND a.product=e.product SET e.status='active' WHERE a.merchant_id=?",
+    [hex(account.merchantId)],
+  );
+  const again = await unlimited.claimFree({ ...owner, requestId: randomUUID() });
+  assert.equal(again.merchantId, account.merchantId);
+  assert.equal(again.assistantId, account.assistantId);
+  assert.equal((await status(account.merchantId))[0].model_calls_reserved, 5);
+  await unlimited.reserveModelCall(account.merchantId, 'preview');
+  assert.equal((await status(account.merchantId))[0].model_calls_reserved, 6);
+  await sql('UPDATE marketplace_campaign SET claimed_count=10001 WHERE campaign=?', [
+    unlimitedEnv.H5CS_FREE_CAMPAIGN,
+  ]);
+  await unlimited.claimFree(input());
+  const bounded = new MySqlMarketplaceRepository(database, key, {
+    ...unlimitedEnv,
+    H5CS_FREE_MAX_CLAIMS: '100',
+  });
+  await assert.rejects(bounded.claimFree(input()), { code: 'not_eligible' });
+});
 function intercepted(hook) {
   return {
     ...database,

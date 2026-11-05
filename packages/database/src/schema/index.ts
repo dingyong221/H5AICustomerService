@@ -1155,8 +1155,8 @@ export const marketplaceEntitlements = mysqlTable(
     status: varchar('status', { length: 32 }).notNull(),
     version: int('version', { unsigned: true }).notNull(),
     validFrom: utcDateTime('valid_from').notNull(),
-    expiresAt: utcDateTime('expires_at').notNull(),
-    modelCallLimit: int('model_call_limit', { unsigned: true }).notNull(),
+    expiresAt: utcDateTime('expires_at'),
+    modelCallLimit: int('model_call_limit', { unsigned: true }),
     modelCallsReserved: int('model_calls_reserved', { unsigned: true }).notNull().default(0),
   },
   (t) => [

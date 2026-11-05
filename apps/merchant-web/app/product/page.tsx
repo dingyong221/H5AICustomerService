@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { PageShell } from '@h5cs/ui';
 import Image from 'next/image';
 import { selfServicePolicy } from '@h5cs/database';
+import { offerTerms } from '../marketplace/offer-copy';
 export const dynamic = 'force-dynamic';
 
 export default function ProductPage() {
@@ -38,10 +39,7 @@ export default function ProductPage() {
         </ol>
         {offer ? (
           <>
-            <p>
-              0元领取，有效期{offer.days}天，包含{offer.modelCalls}
-              次AI调用尝试；重复领取不重置额度和期限，不自动收费。
-            </p>
+            <p>0元领取，{offerTerms(offer)}；重复领取不重置额度和期限，不自动收费。</p>
             {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- A fresh document resets the long marketing-page scroll before mobile registration. */}
             <a className="tenant-feature-link" href="/console/marketplace">
               免费领取并开通 →
@@ -70,7 +68,7 @@ export default function ProductPage() {
           已有账号，登录商家后台 →
         </Link>
         <p>
-          免费不代表无限调用。超出额度或到期后请联系运营核查，资料和固定客户链接保留；不会自动向原免费用户收费。
+          服务期限和AI次数以上方当前规则为准。后续规则如有调整会另行说明；资料和固定客户链接保留，不会自动扣费。
         </p>
       </section>
       <section className="merchant-account-card">

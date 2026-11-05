@@ -20,7 +20,7 @@ const tempPrefix = 'h5cs-ci-upgrade-';
 const expectedDatabase = 'h5cs_integration_ci';
 const expectedUser = 'h5cs_ci';
 const expectedBaselineCount = 12;
-const expectedFullCount = 16;
+const expectedFullCount = 17;
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
 export class UpgradeProbeError extends Error {

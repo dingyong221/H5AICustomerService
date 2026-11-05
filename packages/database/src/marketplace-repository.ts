@@ -19,7 +19,7 @@ type Grant = RowDataPacket & {
   subject_digest: Buffer;
   status: string;
   valid_from: Date;
-  expires_at: Date;
+  expires_at: Date | null;
   source: string;
   code_expires: Date;
 };
@@ -214,7 +214,10 @@ export class MySqlMarketplaceRepository {
       [subject, product, randomBytes(16), policy.campaign],
     );
     if (claim.affectedRows === 1) {
-      if (!campaigns[0] || campaigns[0].claimed_count >= policy.maxClaims)
+      if (
+        !campaigns[0] ||
+        (policy.maxClaims !== null && campaigns[0].claimed_count >= policy.maxClaims)
+      )
         throw new MarketplaceAccessError('not_eligible');
       await connection.execute(
         'UPDATE marketplace_campaign SET claimed_count = claimed_count + 1 WHERE campaign = ?',
@@ -229,7 +232,7 @@ export class MySqlMarketplaceRepository {
     const [grants] = await connection.execute<Grant[]>(
       `SELECT e.subject_digest, e.status, e.valid_from, e.expires_at, f.source
       FROM marketplace_entitlement e JOIN marketplace_free_claim f ON f.subject_digest=e.subject_digest AND f.product=e.product
-      WHERE e.subject_digest=? AND e.product=? AND e.status='active' AND e.valid_from<=UTC_TIMESTAMP(6) AND e.expires_at>UTC_TIMESTAMP(6) FOR UPDATE`,
+      WHERE e.subject_digest=? AND e.product=? AND e.status='active' AND e.valid_from<=UTC_TIMESTAMP(6) AND (e.expires_at IS NULL OR e.expires_at>UTC_TIMESTAMP(6)) FOR UPDATE`,
       [subject, product],
     );
     if (!grants[0] || grants[0].source !== 'native-public-free')
@@ -446,9 +449,9 @@ export class MySqlMarketplaceRepository {
 
   /** Reserve every actual supplier attempt, including failed/unknown calls and Job retries. */
   async quotaForMerchant(merchantId: string): Promise<{
-    limit: number;
+    limit: number | null;
     reserved: number;
-    expiresAt: Date;
+    expiresAt: Date | null;
     state: 'active' | 'paused' | 'revoked' | 'expired' | 'not_started';
   } | null> {
     if (!/^[0-9a-f]{32}$/u.test(merchantId)) throw new MarketplaceAccessError('not_eligible');
@@ -456,9 +459,9 @@ export class MySqlMarketplaceRepository {
     try {
       const [rows] = await connection.execute<
         (RowDataPacket & {
-          model_call_limit: number;
+          model_call_limit: number | null;
           model_calls_reserved: number;
-          expires_at: Date;
+          expires_at: Date | null;
           valid_from: Date;
           status: string;
           effective_state: 'active' | 'paused' | 'revoked' | 'expired' | 'not_started';
@@ -502,19 +505,19 @@ export class MySqlMarketplaceRepository {
           subject_digest: Buffer;
           status: string;
           valid_from: Date;
-          expires_at: Date;
-          model_call_limit: number;
+          expires_at: Date | null;
+          model_call_limit: number | null;
           model_calls_reserved: number;
         })[]
       >(
-        `SELECT (e.status = 'active' AND e.valid_from <= UTC_TIMESTAMP(6) AND e.expires_at > UTC_TIMESTAMP(6)) is_eligible, e.subject_digest, e.status, e.valid_from, e.expires_at, e.model_call_limit, e.model_calls_reserved FROM marketplace_allocation a JOIN marketplace_entitlement e ON e.subject_digest = a.subject_digest AND e.product = a.product WHERE a.merchant_id = ? AND a.product = ? FOR UPDATE`,
+        `SELECT (e.status = 'active' AND e.valid_from <= UTC_TIMESTAMP(6) AND (e.expires_at IS NULL OR e.expires_at > UTC_TIMESTAMP(6))) is_eligible, e.subject_digest, e.status, e.valid_from, e.expires_at, e.model_call_limit, e.model_calls_reserved FROM marketplace_allocation a JOIN marketplace_entitlement e ON e.subject_digest = a.subject_digest AND e.product = a.product WHERE a.merchant_id = ? AND a.product = ? FOR UPDATE`,
         [Buffer.from(merchantId, 'hex'), product],
       );
       const row = rows[0];
       // Merchants outside this self-service product keep their existing model policy.
       if (row) {
         if (row.is_eligible !== 1) throw new MarketplaceAccessError('not_eligible');
-        if (row.model_calls_reserved >= row.model_call_limit)
+        if (row.model_call_limit !== null && row.model_calls_reserved >= row.model_call_limit)
           throw new MarketplaceAccessError('quota_exhausted');
         await connection.execute(
           `UPDATE marketplace_entitlement SET model_calls_reserved = model_calls_reserved + 1 WHERE subject_digest = ? AND product = ?`,

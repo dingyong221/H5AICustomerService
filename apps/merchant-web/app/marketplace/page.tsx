@@ -2,6 +2,7 @@ import { PageShell } from '@h5cs/ui';
 import Link from 'next/link';
 import { marketplaceFixtureEnabled, selfServicePolicy } from '@h5cs/database';
 import { MarketplaceClaimForm } from './claim-form';
+import { offerTerms } from './offer-copy';
 import { currentMerchant, currentMerchantIdentity } from '../account/merchant-actions';
 import { redirect } from 'next/navigation';
 
@@ -22,10 +23,7 @@ export default async function MarketplacePage() {
         {offer ? (
           <section>
             <h2>0元领取你的AI客服</h2>
-            <p>
-              有效期{offer.days}天，包含{offer.modelCalls}
-              次AI调用尝试。每个账号一套，重复扫码返回原后台。
-            </p>
+            <p>{offerTerms(offer)}。每个账号一套，重复扫码返回原后台。</p>
             <MarketplaceClaimForm offer={{ days: offer.days, modelCalls: offer.modelCalls }} />
           </section>
         ) : fixture ? (
