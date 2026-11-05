@@ -2,8 +2,24 @@
   box-sizing: border-box;
 }
 
+.assistant-avatar svg {
+  width: 2rem;
+  height: 1.8rem;
+}
+.assistant-avatar {
+  background: #fff !important;
+  color: #073b80 !important;
+}
+.consumer-platform-brand {
+  text-align: center;
+  padding: 0.65rem 1rem;
+  background: #eaf0fa;
+  color: #536d91;
+  font-size: 0.7rem;
+}
+
 :root {
-  background: #eaf0ec;
+  background: #eaedf0;
   color: var(--ui-ink);
   font-family:
     Inter,
@@ -41,7 +57,7 @@ textarea:focus-visible {
 .consumer-page {
   align-items: center;
   background:
-    radial-gradient(circle at 15% 12%, rgba(106, 183, 145, 0.18), transparent 27rem), #eaf0ec;
+    radial-gradient(circle at 15% 12%, rgba(70, 125, 215, 0.18), transparent 27rem), #eaedf0;
   display: flex;
   justify-content: center;
   min-height: 100dvh;
@@ -49,10 +65,10 @@ textarea:focus-visible {
 }
 
 .chat-shell {
-  background: #f8faf9;
-  border: 1px solid #d8e0db;
+  background: #f8f9fa;
+  border: 1px solid #d8dbe0;
   border-radius: 24px;
-  box-shadow: 0 28px 80px rgba(26, 54, 40, 0.15);
+  box-shadow: 0 28px 80px rgba(26, 43, 70, 0.15);
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   height: min(54rem, calc(100dvh - 3rem));
@@ -79,7 +95,7 @@ textarea:focus-visible {
   background: #ffffff;
   border: 1px solid var(--ui-line);
   border-radius: 8px;
-  color: #174f3c;
+  color: #172e4f;
   cursor: pointer;
   flex: 0 0 auto;
   font-size: 0.75rem;
@@ -104,7 +120,7 @@ textarea:focus-visible {
 .assistant-avatar,
 .message-avatar {
   align-items: center;
-  background: linear-gradient(145deg, #174f3c, #288160);
+  background: linear-gradient(145deg, #172e4f, #284d81);
   border-radius: 14px;
   color: #ffffff;
   display: flex;
@@ -118,7 +134,7 @@ textarea:focus-visible {
 }
 
 .assistant-avatar--muted {
-  background: #7d8982;
+  background: #7d8289;
 }
 
 .assistant-title-row {
@@ -133,9 +149,9 @@ textarea:focus-visible {
 }
 
 .ai-label {
-  background: #e4f3eb;
+  background: #e4eaf3;
   border-radius: 5px;
-  color: #166142;
+  color: #163561;
   font-size: 0.58rem;
   font-weight: 850;
   letter-spacing: 0.05em;
@@ -153,7 +169,7 @@ textarea:focus-visible {
   background: transparent;
   border: 0;
   border-radius: 9px;
-  color: #77817b;
+  color: #777b81;
   display: flex;
   height: 2.75rem;
   justify-content: center;
@@ -202,9 +218,9 @@ textarea:focus-visible {
 }
 
 .scope-notice {
-  background: #eef7f2;
-  border-bottom: 1px solid #d5e7dc;
-  color: #315544;
+  background: #eef2f7;
+  border-bottom: 1px solid #d5dde7;
+  color: #314055;
   display: grid;
   font-size: 0.74rem;
   gap: 0.2rem;
@@ -213,13 +229,13 @@ textarea:focus-visible {
 }
 
 .scope-notice strong {
-  color: #176043;
+  color: #173560;
   font-size: 0.78rem;
 }
 
 .unavailable-panel {
   align-self: center;
-  color: #536159;
+  color: #535961;
   justify-self: center;
   max-width: 23rem;
   padding: 2rem;
@@ -241,7 +257,7 @@ textarea:focus-visible {
 }
 
 .unavailable-panel h2 {
-  color: #26342d;
+  color: #262c34;
   font-size: 1.15rem;
   margin: 1rem 0 0.55rem;
 }
@@ -253,7 +269,7 @@ textarea:focus-visible {
 }
 
 .unavailable-panel .unavailable-panel__safety {
-  color: #87918c;
+  color: #878b91;
   font-size: 0.7rem;
   margin-top: 1rem;
 }
@@ -267,7 +283,7 @@ textarea:focus-visible {
 }
 
 .timeline-label {
-  color: #8a958f;
+  color: #8a8f95;
   font-size: 0.68rem;
   margin: 0.2rem 0 1rem;
   text-align: center;
@@ -298,14 +314,14 @@ textarea:focus-visible {
 }
 
 .message-row--visitor .message-bubble {
-  background: #1c6d4e;
-  border-color: #1c6d4e;
+  background: #1c3e6d;
+  border-color: #1c3e6d;
   border-radius: 16px 4px 16px 16px;
   color: #ffffff;
 }
 
 .message-status {
-  color: #87918c;
+  color: #878b91;
   font-size: 0.65rem;
   margin: 0.35rem 0.3rem 0;
 }
@@ -323,10 +339,10 @@ textarea:focus-visible {
 
 .message-bubble {
   background: #ffffff;
-  border: 1px solid #dfe6e2;
+  border: 1px solid #dfe2e6;
   border-radius: 4px 16px 16px;
   box-shadow: 0 6px 18px rgba(24, 48, 36, 0.05);
-  color: #26312b;
+  color: #262b31;
   font-size: 0.9rem;
   line-height: 1.68;
   max-width: 24rem;
@@ -342,7 +358,7 @@ textarea:focus-visible {
 }
 
 .message-time {
-  color: #919b95;
+  color: #91959b;
   display: block;
   font-size: 0.65rem;
   margin: 0.35rem 0 0 0.3rem;
@@ -366,7 +382,7 @@ textarea:focus-visible {
 }
 
 .state-preview__heading p {
-  color: #267356;
+  color: #264673;
   font-size: 0.63rem;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -392,7 +408,7 @@ textarea:focus-visible {
 }
 
 .state-preview__list article + article {
-  border-top: 1px solid #edf1ef;
+  border-top: 1px solid #edeff1;
 }
 
 .state-preview__list p {
@@ -456,10 +472,10 @@ textarea:focus-visible {
 }
 
 .quick-questions button {
-  background: #f5f8f6;
+  background: #f5f6f8;
   border: 1px solid var(--ui-line);
   border-radius: 999px;
-  color: #7c8781;
+  color: #7c8187;
   flex: 0 0 auto;
   font-size: 0.72rem;
   min-height: 2rem;
@@ -468,8 +484,8 @@ textarea:focus-visible {
 
 .composer {
   align-items: flex-end;
-  background: #f5f7f6;
-  border: 1px solid #d7dfda;
+  background: #f5f6f7;
+  border: 1px solid #d7dadf;
   border-radius: 15px;
   display: flex;
   gap: 0.55rem;
@@ -499,7 +515,7 @@ textarea:focus-visible {
 }
 
 .composer textarea::placeholder {
-  color: #98a19c;
+  color: #989ca1;
 }
 
 .composer .ui-button {
@@ -517,10 +533,10 @@ textarea:focus-visible {
 }
 
 .send-button {
-  background: #dfe5e1;
+  background: #dfe2e5;
   border: 0;
   border-radius: 11px;
-  color: #7f8984;
+  color: #7f8389;
   flex: 0 0 auto;
   font-size: 0.72rem;
   height: 2.75rem;
@@ -528,7 +544,7 @@ textarea:focus-visible {
 }
 
 .composer-help {
-  color: #89938e;
+  color: #898d93;
   font-size: 0.64rem;
   line-height: 1.45;
   margin: 0.45rem 0 0;
@@ -536,8 +552,8 @@ textarea:focus-visible {
 }
 
 .human-contact-notice {
-  border-bottom: 1px solid #dfe7e1;
-  color: #254b3a;
+  border-bottom: 1px solid #dfe2e7;
+  color: #25354b;
   flex: 0 0 auto;
   font-size: 0.8rem;
   line-height: 1.6;
@@ -583,9 +599,9 @@ textarea:focus-visible {
 .page-recovery-actions button {
   align-items: center;
   background: #fff;
-  border: 1px solid #afcdbb;
+  border: 1px solid #afbccd;
   border-radius: 8px;
-  color: #175b3f;
+  color: #17335b;
   cursor: pointer;
   display: inline-flex;
   font-size: 0.78rem;
@@ -606,7 +622,7 @@ textarea:focus-visible {
 
 .reply-progress,
 .previous-question {
-  color: #53645a;
+  color: #535a64;
   font-size: 0.74rem;
   line-height: 1.5;
   margin: 0 0 0.6rem;

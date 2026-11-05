@@ -1,3 +1,4 @@
+import { BrandMark } from '@h5cs/ui';
 import { OnlineCustomerService } from './online-customer-service';
 import type { PublicAssistantLoadResult } from './public-api-client';
 import { PageRecoveryActions } from './page-recovery-actions';
@@ -52,7 +53,7 @@ export function CustomerServiceShell({
         <header className="chat-header">
           <div className="assistant-identity">
             <div aria-hidden="true" className="assistant-avatar assistant-avatar--muted">
-              AI
+              <BrandMark />
             </div>
             <div>
               <div className="assistant-title-row">

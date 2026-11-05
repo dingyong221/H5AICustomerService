@@ -2,6 +2,22 @@
   box-sizing: border-box;
 }
 
+.ops-brand > span svg {
+  width: 1.8rem;
+  height: 1.6rem;
+}
+.ops-brand > span {
+  background: #fff !important;
+  color: #073b80 !important;
+}
+.ops-brand-subtitle {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: #a9bdd8;
+  margin-top: 0.2rem;
+}
+
 html {
   scroll-behavior: smooth;
 }
@@ -123,8 +139,8 @@ a {
 }
 
 .ops-created {
-  background: #eff9f3;
-  border: 1px solid #a8dcc0;
+  background: #eff3f9;
+  border: 1px solid #a8bedc;
   border-radius: 10px;
   margin-top: 1.5rem;
   overflow-wrap: anywhere;
@@ -144,7 +160,7 @@ a {
 }
 
 .ops-created button {
-  background: #275d43;
+  background: #273d5d;
   border: 0;
   border-radius: 8px;
   color: #fff;
@@ -678,8 +694,8 @@ a {
   white-space: nowrap;
 }
 .ops-state--active {
-  background: #e6f5ec;
-  color: #1c6840;
+  background: #e6ecf5;
+  color: #1c3c68;
 }
 .ops-pagination {
   align-items: center;

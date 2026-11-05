@@ -24,7 +24,7 @@
   width: 100%;
   min-width: 0;
   min-height: 44px;
-  border: 1px solid #b6cbbd;
+  border: 1px solid #b6bfcb;
   background: #fff;
   border-radius: 8px;
   padding: 0.7rem;
@@ -36,9 +36,9 @@
 }
 .improvement-form button,
 .improvement-filter button {
-  background: #146c4d;
+  background: #14396c;
   color: #fff;
-  border: 1px solid #146c4d;
+  border: 1px solid #14396c;
   border-radius: 8px;
   min-height: 44px;
   padding: 0.7rem 1rem;
@@ -51,7 +51,7 @@
   cursor: not-allowed;
 }
 .improvement-form .improvement-secondary {
-  color: #146c4d;
+  color: #14396c;
   background: #fff;
 }
 .improvement-form .improvement-check {
@@ -74,7 +74,7 @@
 }
 .improvement-form small,
 .improvement-muted {
-  color: #53685c;
+  color: #535c68;
 }
 .improvement-error {
   color: #9a251b;
@@ -83,8 +83,8 @@
   padding: 0.85rem;
 }
 .improvement-success {
-  color: #11563d;
-  background: #eaf6ee;
+  color: #112e56;
+  background: #eaeff6;
   border-radius: 8px;
   padding: 0.85rem;
 }
@@ -96,10 +96,10 @@
   padding: 0;
 }
 .improvement-counts li {
-  border: 1px solid #cfdfd3;
+  border: 1px solid #cfd6df;
   border-radius: 8px;
   padding: 0.6rem 0.75rem;
-  background: #f3f8f5;
+  background: #f3f5f8;
 }
 .improvement-list {
   list-style: none;
@@ -108,7 +108,7 @@
   gap: 1rem;
 }
 .improvement-list li {
-  border: 1px solid #d3dfd7;
+  border: 1px solid #d3d8df;
   border-radius: 10px;
   padding: 1rem;
   min-width: 0;
@@ -128,8 +128,8 @@
 }
 .improvement-patch,
 .improvement-answer {
-  background: #f2f7f4;
-  border: 1px solid #cfdfd4;
+  background: #f2f4f7;
+  border: 1px solid #cfd6df;
   border-radius: 10px;
   padding: 1rem;
   white-space: pre-wrap;
@@ -138,7 +138,7 @@
   line-height: 1.7;
 }
 .improvement-run {
-  border-top: 1px solid #dce7df;
+  border-top: 1px solid #dce1e7;
   margin-top: 1.5rem;
   padding-top: 1rem;
 }
@@ -160,8 +160,8 @@
   margin-left: 0.4rem;
   border-radius: 1rem;
   padding: 0.1rem 0.45rem;
-  background: #d1eddf;
-  color: #114f38;
+  background: #d1dded;
+  color: #112b4f;
   font-size: 0.78rem;
 }
 .improvement-form :focus-visible,

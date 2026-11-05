@@ -9,8 +9,8 @@ export const metadata: Metadata = {
   description: '管理商家、运行任务和审计记录的运营工作台。',
   robots: { index: false, follow: false },
   title: {
-    default: '平台运营中心 | H5 AI 客服',
-    template: '%s | 平台运营中心',
+    default: '平台运营中心 | 客来答',
+    template: '%s | 客来答运营中心',
   },
 };
 

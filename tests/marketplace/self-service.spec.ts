@@ -74,24 +74,26 @@ test('native H5 free registration to versioned consumer conversation, repeat log
     password = randomBytes(24).toString('base64url');
   await page.goto('http://127.0.0.1:3000/console/product');
   await expect(page.getByText(/有效期暂不限，AI调用次数暂不限/)).toBeVisible();
-  await expect(page.getByRole('link', { name: '免费领取并开通 →', exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('link', { name: '免费开通我的 AI 客服 →', exact: true }),
+  ).toBeVisible();
   await expect(page.getByRole('img', { name: /商家开通二维码/ })).toHaveJSProperty(
     'naturalWidth',
     640,
   );
   await screenshot(page, 'public-product-and-activation-qr', info.project.name);
-  await page.getByRole('link', { name: '免费领取并开通 →', exact: true }).click();
-  await expect(page.getByRole('heading', { name: '0元领取你的AI客服' })).toBeVisible();
+  await page.getByRole('link', { name: '免费开通我的 AI 客服 →', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '免费开通客来答' })).toBeVisible();
+  await expect(page.getByRole('checkbox')).toHaveCount(0);
   await expect(page.getByLabel('商家名称', { exact: true })).toBeInViewport();
   expect((await page.getByLabel('商家名称', { exact: true }).boundingBox())!.y).toBeGreaterThan(80);
   await screenshot(page, 'claim-empty', info.project.name);
   const claim = async (target = page) => {
     await target.getByLabel('商家名称', { exact: true }).fill('合成H5自助商家');
     await target.getByLabel('手机号', { exact: true }).fill(phone);
-    await target.getByLabel('密码（已有账号须原密码）').fill(password);
-    await target.getByRole('checkbox', { name: /我已了解0元领取/ }).check();
-    await target.getByRole('checkbox', { name: /已有商家时/ }).check();
-    await target.getByRole('button', { name: '0元领取并进入我的后台' }).click();
+    await target.getByLabel('登录密码', { exact: true }).fill(password);
+    await expect(target.getByRole('checkbox')).toHaveCount(0);
+    await target.getByRole('button', { name: '免费开通客来答' }).click();
     await expect(target).toHaveURL(/\/[0-9a-f]{32}\/drafts\/[0-9a-f]{32}$/);
   };
   await claim();

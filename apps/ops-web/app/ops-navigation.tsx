@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { BrandMark } from '@h5cs/ui';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Suspense, useRef, useState, useSyncExternalStore } from 'react';
 
@@ -111,9 +112,13 @@ function Sidebar({ selected }: { selected: string | null }) {
       }}
     >
       <div className="ops-sidebar-header">
-        <Link aria-label="H5 AI 客服运营中心" className="ops-brand" href="/" onClick={closeMenu}>
-          <span aria-hidden="true">H5</span>
-          <strong>运营中心</strong>
+        <Link aria-label="客来答运营中心" className="ops-brand" href="/" onClick={closeMenu}>
+          <span aria-hidden="true">
+            <BrandMark />
+          </span>
+          <strong>
+            客来答<small className="ops-brand-subtitle">运营中心</small>
+          </strong>
         </Link>
         <button
           aria-controls="ops-sidebar-body"

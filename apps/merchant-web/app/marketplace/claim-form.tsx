@@ -1,7 +1,7 @@
 'use client';
 import { useActionState, useState } from 'react';
 import { claimMarketplace } from '../account/merchant-actions';
-import { offerTerms, type OfferTerms } from './offer-copy';
+import { type OfferTerms } from './offer-copy';
 
 export function MarketplaceClaimForm({ offer }: { offer?: OfferTerms }) {
   const [state, action, pending] = useActionState(claimMarketplace, { error: null });
@@ -18,7 +18,7 @@ export function MarketplaceClaimForm({ offer }: { offer?: OfferTerms }) {
             required
             maxLength={100}
             autoComplete="organization"
-            placeholder="例如：青禾家居"
+            placeholder="请输入商家或店铺名称"
             value={merchantName}
             onChange={(event) => setMerchantName(event.target.value)}
           />
@@ -43,7 +43,7 @@ export function MarketplaceClaimForm({ offer }: { offer?: OfferTerms }) {
         />
       </label>
       <label>
-        密码（已有账号须原密码）
+        登录密码
         <input
           name="password"
           required
@@ -51,34 +51,14 @@ export function MarketplaceClaimForm({ offer }: { offer?: OfferTerms }) {
           minLength={12}
           maxLength={128}
           autoComplete="current-password"
-          placeholder="至少12个字符，请妥善保存"
+          placeholder="至少12位；已有账号请输入原密码"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
         />
       </label>
-      <label className="merchant-claim-consent">
-        <input name="reuseExisting" type="checkbox" />
-        <span>
-          已有商家时，我同意复用原商家和客服，并适用本次免费服务期限与额度；原链接保持不变
-        </span>
-      </label>
-      <p>
-        新用户用此手机号和密码注册，已有账号必须输入原密码。手机号仅用于登录，当前不进行短信验证；不会凭相同手机号自动关联外部平台账号。
-      </p>
-      <label className="merchant-claim-consent">
-        <input name="acceptOffer" type="checkbox" required />
-        <span>
-          {offer
-            ? `我已了解0元领取后${offerTerms(offer)}；重复领取不重置期限和额度，不会自动扣费。后续规则如有调整会另行说明。`
-            : '我已了解本地合成测试的期限与额度。'}
-        </span>
-      </label>
-      <p>
-        AI调用包含消费者问答、试聊、资料撰写、知识整理及改善复测；失败或超时的尝试也可能计入。开通后仍需核对资料、试聊并发布，客户才可咨询。
-      </p>
       {state.error ? <p role="alert">{state.error}</p> : null}
       <button type="submit" disabled={pending}>
-        {pending ? '正在开通，请稍候…' : '0元领取并进入我的后台'}
+        {pending ? '正在开通，请稍候…' : '免费开通客来答'}
       </button>
     </form>
   );
