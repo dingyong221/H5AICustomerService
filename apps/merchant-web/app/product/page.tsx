@@ -42,9 +42,10 @@ export default function ProductPage() {
               0元领取，有效期{offer.days}天，包含{offer.modelCalls}
               次AI调用尝试；重复领取不重置额度和期限，不自动收费。
             </p>
-            <Link className="tenant-feature-link" href="/console/marketplace">
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- A fresh document resets the long marketing-page scroll before mobile registration. */}
+            <a className="tenant-feature-link" href="/console/marketplace">
               免费领取并开通 →
-            </Link>
+            </a>
             <p>手机扫码进入本产品页：</p>
             <Image
               src="/console/product/qr"
