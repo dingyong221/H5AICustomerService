@@ -1,3 +1,4 @@
+import { MarketplaceAccessError } from '@h5cs/database';
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 
@@ -63,14 +64,27 @@ async function handlePreview(
           : { answer: await service.reply(payload, AbortSignal.timeout(20_000)) };
     writeJson(response, 200, { data, request_id: requestId }, requestId);
   } catch (error) {
-    const status = error instanceof PreviewError ? error.statusCode : 503;
+    const marketCode =
+      error instanceof MarketplaceAccessError
+        ? error.code === 'quota_exhausted'
+          ? 'MARKETPLACE_QUOTA_EXHAUSTED'
+          : 'MARKETPLACE_NOT_ELIGIBLE'
+        : null;
+    const status = marketCode
+      ? marketCode === 'MARKETPLACE_QUOTA_EXHAUSTED'
+        ? 429
+        : 403
+      : error instanceof PreviewError
+        ? error.statusCode
+        : 503;
     writeJson(
       response,
       status,
       {
         error: {
           code:
-            status === 429 ? 'RATE_LIMITED' : status === 400 ? 'INVALID_REQUEST' : 'UNAVAILABLE',
+            marketCode ??
+            (status === 429 ? 'RATE_LIMITED' : status === 400 ? 'INVALID_REQUEST' : 'UNAVAILABLE'),
         },
         request_id: requestId,
       },

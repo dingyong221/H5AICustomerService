@@ -1,3 +1,4 @@
+import { checkMarketplaceModelError } from './model-service-error';
 import { lstatSync, readFileSync } from 'node:fs';
 
 import type { AssistantDraftConfig } from '@h5cs/domain';
@@ -92,6 +93,7 @@ export async function requestWorkerPreview(
       facts: { assistantName: input.assistantName, ...input.draft },
     }),
   });
+  await checkMarketplaceModelError(response);
   if (response.status === 429) throw new WorkerPreviewRateLimitError();
   if (
     response.status !== 200 ||

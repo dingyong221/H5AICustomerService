@@ -22,7 +22,13 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body>
+        {['test', 'local'].includes(process.env['APP_ENV'] ?? '') &&
+        process.env['H5CS_LOCAL_MODEL_FIXTURE'] === 'true' ? (
+          <p role="note">本地合成测试 · 确定性模型夹具 · 非真实千问/AI超市，不作正式业务入口</p>
+        ) : null}
+        {children}
+      </body>
     </html>
   );
 }

@@ -20,7 +20,7 @@ const tempPrefix = 'h5cs-ci-upgrade-';
 const expectedDatabase = 'h5cs_integration_ci';
 const expectedUser = 'h5cs_ci';
 const expectedBaselineCount = 12;
-const expectedFullCount = 15;
+const expectedFullCount = 17;
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
 export class UpgradeProbeError extends Error {
@@ -150,10 +150,11 @@ export async function reviewedUpgradePlan(folder = sourceFolder) {
     inventory.entries.length !== expectedFullCount ||
     journal.entries.length !== expectedFullCount ||
     !/^0012_/u.test(journal.entries[12]?.tag ?? '') ||
-    journal.entries[14]?.tag !== '0014_flimsy_swarm'
+    journal.entries[14]?.tag !== '0014_flimsy_swarm' ||
+    journal.entries[15]?.tag !== '0015_clumsy_prowler'
   ) {
     throw new UpgradeProbeError(
-      'Probe requires the reviewed twelve-to-fifteen migration plan; review the probe when the plan changes',
+      'Probe requires the reviewed twelve-to-sixteen migration plan; review the probe when the plan changes',
     );
   }
   const entries = inventory.entries.map((entry, index) => {
@@ -290,12 +291,19 @@ export function assertUpgradedTableSet(tables, baselineTables) {
     'assistant_evaluation_run',
     'assistant_publication_governance',
     'merchant_assistant',
+    'marketplace_allocation',
+    'marketplace_campaign',
+    'marketplace_claim_code',
+    'marketplace_entitlement',
+    'marketplace_free_claim',
+    'marketplace_model_attempt',
+    'marketplace_signup_throttle',
   ];
   if (
-    expected.length !== 33 ||
-    new Set(expected).size !== 33 ||
-    tables.length !== 33 ||
-    new Set(tables).size !== 33 ||
+    expected.length !== 40 ||
+    new Set(expected).size !== 40 ||
+    tables.length !== 40 ||
+    new Set(tables).size !== 40 ||
     tables.some((table) => !expected.includes(table))
   )
     throw new UpgradeProbeError('Upgrade produced an unexpected application-table set');

@@ -122,6 +122,8 @@ export const loadDatabaseConfig = (
     : undefined;
   const options: ConnectionOptions = {
     host,
+    // All persisted DATETIME values are UTC, independent of workstation/server TZ.
+    timezone: 'Z',
     port: parsedUrl.port ? Number(parsedUrl.port) : 3306,
     user: decodeURIComponent(parsedUrl.username),
     password: decodeURIComponent(parsedUrl.password),

@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 
 import { MerchantLoginForm } from './login-form';
 import { safeMerchantReturnPath } from '../merchant-return-path';
-import { currentMerchant } from '../merchant-actions';
+import { currentMerchant, currentMerchantIdentity } from '../merchant-actions';
 
 export default async function MerchantPasswordLoginPage({
   searchParams,
@@ -14,6 +14,7 @@ export default async function MerchantPasswordLoginPage({
   const merchantId = merchant && /^[0-9a-f]{32}$/u.test(merchant) ? merchant : undefined;
   const nextPath = merchantId ? safeMerchantReturnPath(merchantId, next) : null;
   const session = await currentMerchant(merchantId);
+  if (!session && (await currentMerchantIdentity())) redirect('/console/marketplace/status');
   if (session) redirect(nextPath ?? `/${session.merchantId}`);
   return (
     <PageShell

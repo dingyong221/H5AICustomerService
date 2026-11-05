@@ -2,7 +2,8 @@ import Link from 'next/link';
 import { PageShell, StatusBadge } from '@h5cs/ui';
 import { merchantAssistants, merchantAssistantGovernance } from '../tenant-data';
 import { merchantPath } from '../tenant-paths';
-import { governanceNextStep, qualityLabels } from '../workspace/governance-model';
+import { qualityLabels } from '../workspace/governance-model';
+import { SetupProgressPanel } from '../workspace/setup-progress-panel';
 export default async function MerchantDashboard({
   params,
 }: {
@@ -15,7 +16,6 @@ export default async function MerchantDashboard({
         assistant.assistantId,
       ) ?? null)
     : null;
-  const next = governanceNextStep(governance);
   const path = (section: 'drafts' | 'knowledge' | 'preview' | 'publish') =>
     assistant
       ? merchantPath(merchantId, section, assistant.assistantId)
@@ -35,6 +35,11 @@ export default async function MerchantDashboard({
         </Link>
       }
     >
+      <SetupProgressPanel
+        merchantId={merchantId}
+        assistant={assistant ?? null}
+        governance={governance}
+      />
       {assistant ? (
         <>
           <section className="merchant-account-card assistant-create-card">
@@ -50,42 +55,16 @@ export default async function MerchantDashboard({
             </div>
             <p>
               当前草稿修订 {assistant.draftRevision} ·{' '}
-              {governance?.hasUnpublishedChanges ? '有待发布修改' : '无待发布资料修改'} ·{' '}
-              {governance ? qualityLabels[governance.quality.state] : '发布检查暂不可用'}
+              {governance
+                ? governance.hasUnpublishedChanges
+                  ? '有待发布修改'
+                  : '无待发布资料修改'
+                : '待发布状态待核对'}{' '}
+              · {governance ? qualityLabels[governance.quality.state] : '发布检查暂不可用'}
             </p>
-            <h3>下一步</h3>
-            <p>{next.detail}</p>
-            <Link
-              className="tenant-feature-link"
-              href={merchantPath(merchantId, next.section, assistant.assistantId)}
-            >
-              {next.label} →
-            </Link>
           </section>
-          <div className="tenant-feature-grid">
-            <Link className="tenant-feature-link" href={path('drafts')}>
-              基础资料 →
-            </Link>
-            <Link className="tenant-feature-link" href={path('knowledge')}>
-              知识补充 →
-            </Link>
-            <Link className="tenant-feature-link" href={path('preview')}>
-              效果试聊 →
-            </Link>
-            <Link className="tenant-feature-link" href={path('publish')}>
-              发布分享 →
-            </Link>
-          </div>
         </>
-      ) : (
-        <section className="merchant-account-card assistant-create-card">
-          <h2>开通你的AI客服</h2>
-          <p>基础资料 → 知识补充（可上传材料）→ 效果试聊 → 发布分享。后续修改都维护同一个客服。</p>
-          <Link className="tenant-feature-link" href={path('drafts')}>
-            开通我的AI客服
-          </Link>
-        </section>
-      )}
+      ) : null}
       <div className="tenant-feature-grid">
         <Link className="tenant-feature-link" href={merchantPath(merchantId, 'conversations')}>
           消费者会话 →

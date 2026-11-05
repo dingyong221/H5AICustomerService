@@ -45,8 +45,9 @@ export class MerchantAccessError extends Error {
   }
 }
 
-const tokenDigest = (value: string): Buffer => createHash('sha256').update(value, 'ascii').digest();
-const derivePassword = (password: string, salt: Buffer, length: number): Promise<Buffer> =>
+export const tokenDigest = (value: string): Buffer =>
+  createHash('sha256').update(value, 'ascii').digest();
+export const derivePassword = (password: string, salt: Buffer, length: number): Promise<Buffer> =>
   new Promise((resolve, reject) => {
     scrypt(password, salt, length, (error, key) => (error ? reject(error) : resolve(key)));
   });
@@ -56,7 +57,7 @@ const hexId = (value: string): Buffer => {
   return Buffer.from(value, 'hex');
 };
 
-const phoneNumber = (value: string): string => {
+export const phoneNumber = (value: string): string => {
   const compact = value.replace(/[\s-]/gu, '');
   const normalized = compact.startsWith('+86') ? compact.slice(3) : compact;
   if (!/^1[3-9][0-9]{9}$/u.test(normalized)) {
@@ -65,14 +66,14 @@ const phoneNumber = (value: string): string => {
   return `+86${normalized}`;
 };
 
-const passwordValue = (value: string): string => {
+export const passwordValue = (value: string): string => {
   if (value.length < 12 || value.length > 128) {
     throw new MerchantAccessError('密码须为 12–128 个字符');
   }
   return value;
 };
 
-const comparePassword = async (password: string, row: CredentialRow): Promise<boolean> => {
+export const comparePassword = async (password: string, row: CredentialRow): Promise<boolean> => {
   if (row.password_salt.byteLength !== 16 || row.password_hash.byteLength !== 64) {
     throw new MerchantAccessError('Stored password credential is invalid');
   }
@@ -254,10 +255,26 @@ export class MySqlMerchantAccessRepository {
     }
   }
 
+  public async resolveSessionIdentity(
+    rawToken: string,
+    merchantId?: string,
+  ): Promise<MerchantSession | null> {
+    return this.#resolveSession(rawToken, merchantId, undefined, false);
+  }
+
   public async resolveSession(
     rawToken: string,
     merchantId?: string,
     rawCsrfToken?: string,
+  ): Promise<MerchantSession | null> {
+    return this.#resolveSession(rawToken, merchantId, rawCsrfToken, true);
+  }
+
+  async #resolveSession(
+    rawToken: string,
+    merchantId: string | undefined,
+    rawCsrfToken: string | undefined,
+    requireEntitlement: boolean,
   ): Promise<MerchantSession | null> {
     if (!/^[A-Za-z0-9_-]{43}$/u.test(rawToken)) return null;
     if (rawCsrfToken !== undefined && !/^[A-Za-z0-9_-]{43}$/u.test(rawCsrfToken)) return null;
@@ -281,6 +298,7 @@ export class MySqlMerchantAccessRepository {
           WHERE s.session_digest = ? AND s.authentication_level = 'primary'
             ${csrfFilter}
             AND u.status = 'active' AND mm.status = 'active' AND m.status = 'active'
+            ${requireEntitlement ? "AND NOT EXISTS (SELECT 1 FROM marketplace_allocation ma JOIN marketplace_entitlement me ON me.subject_digest = ma.subject_digest AND me.product = ma.product WHERE ma.merchant_id = m.id AND (me.status <> 'active' OR me.valid_from > UTC_TIMESTAMP(6) OR me.expires_at <= UTC_TIMESTAMP(6)))" : ''}
             ${merchantFilter}
           LIMIT 2`,
         parameters,
@@ -330,23 +348,32 @@ export class MySqlMerchantAccessRepository {
     merchantUserId: Buffer,
     merchantId: Buffer,
   ): Promise<MerchantSessionIssued> {
-    const sessionToken = randomBytes(32).toString('base64url');
-    const csrfToken = randomBytes(32).toString('base64url');
-    const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1_000);
-    await connection.execute(
-      `INSERT INTO platform_login_session
+    return issueMerchantSession(connection, merchantUserId, merchantId);
+  }
+}
+
+/** Shared primary-session transaction primitive; caller must authenticate first. */
+export async function issueMerchantSession(
+  connection: Connection,
+  merchantUserId: Buffer,
+  merchantId: Buffer,
+): Promise<MerchantSessionIssued> {
+  const sessionToken = randomBytes(32).toString('base64url');
+  const csrfToken = randomBytes(32).toString('base64url');
+  const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1_000);
+  await connection.execute(
+    `INSERT INTO platform_login_session
          (session_digest, merchant_user_id, merchant_id, csrf_digest, authentication_level,
           authenticated_at, expires_at, revoked_at, created_at, updated_at)
        VALUES (?, ?, ?, ?, 'primary', UTC_TIMESTAMP(6), ?, NULL,
                UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
-      [tokenDigest(sessionToken), merchantUserId, merchantId, tokenDigest(csrfToken), expiresAt],
-    );
-    return {
-      merchantId: merchantId.toString('hex'),
-      merchantUserId: merchantUserId.toString('hex'),
-      sessionToken,
-      csrfToken,
-      expiresAt,
-    };
-  }
+    [tokenDigest(sessionToken), merchantUserId, merchantId, tokenDigest(csrfToken), expiresAt],
+  );
+  return {
+    merchantId: merchantId.toString('hex'),
+    merchantUserId: merchantUserId.toString('hex'),
+    sessionToken,
+    csrfToken,
+    expiresAt,
+  };
 }

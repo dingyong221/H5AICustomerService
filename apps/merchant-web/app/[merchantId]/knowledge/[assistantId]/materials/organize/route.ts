@@ -1,3 +1,4 @@
+import { MarketplaceModelError } from '../../../../../workspace/model-service-error';
 import {
   materialAccess,
   materialResponse,
@@ -35,7 +36,9 @@ export async function POST(
     if (text.length > 24000)
       return materialResponse(413, { error: '所选文字合计超过 24000 字，请分批整理。' });
     return materialResponse(200, await requestKnowledgeOrganization(scope.merchantId, text));
-  } catch {
+  } catch (error) {
+    if (error instanceof MarketplaceModelError)
+      return materialResponse(error.status, { error: error.message, code: error.code });
     return materialResponse(503, { error: 'AI 整理暂不可用。材料已保留，可稍后重试或手动整理。' });
   }
 }

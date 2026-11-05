@@ -36,6 +36,9 @@ vi.mock('@h5cs/database', () => ({
     findManagementSnapshot = mocks.snapshot;
     getPublicationGovernance = mocks.governance;
   },
+  MySqlMarketplaceRepository: class {
+    quotaForMerchant = async () => null;
+  },
   MySqlKnowledgeMaterialRepository: class {
     list = mocks.materials;
   },

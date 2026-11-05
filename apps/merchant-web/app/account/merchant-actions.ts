@@ -1,6 +1,6 @@
 'use server';
 
-import { timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
@@ -9,6 +9,10 @@ import {
   loadDatabaseConfig,
   MerchantAccessError,
   MySqlMerchantAccessRepository,
+  MySqlMarketplaceRepository,
+  MarketplaceAccessError,
+  marketplaceFixtureEnabled,
+  selfServicePolicy,
 } from '@h5cs/database';
 
 import { safeMerchantReturnPath } from './merchant-return-path';
@@ -80,6 +84,19 @@ export async function currentMerchant(merchantId?: string) {
   if (!token) return null;
   try {
     return await repository.resolveSession(token, merchantId);
+  } catch {
+    return null;
+  }
+}
+
+export async function currentMerchantIdentity() {
+  const repository = getRepository(),
+    origin = merchantOrigin();
+  if (!repository || !origin) return null;
+  const token = (await cookies()).get(sessionCookieName(origin.protocol === 'https:'))?.value;
+  if (!token) return null;
+  try {
+    return await repository.resolveSessionIdentity(token);
   } catch {
     return null;
   }
@@ -172,6 +189,13 @@ export async function loginMerchant(
       error: error instanceof MerchantAccessError ? error.message : '登录失败，请稍后重试。',
     };
   }
+  const database = loadDatabaseConfig();
+  if (database.configured) {
+    const status = await new MySqlMarketplaceRepository(database.config).quotaForMerchant(
+      merchantId,
+    );
+    if (status && status.state !== 'active') redirect('/console/marketplace/status');
+  }
   redirect(safeMerchantReturnPath(merchantId, nextPathInput) ?? `/${merchantId}`);
 }
 
@@ -213,4 +237,62 @@ export async function logoutMerchant(
   store.delete(sessionCookieName(secure));
   store.delete(csrfCookieName(secure));
   redirect('/console/account/login');
+}
+
+export async function claimMarketplace(
+  _previous: MerchantAccessState,
+  formData: FormData,
+): Promise<MerchantAccessState> {
+  const origin = merchantOrigin();
+  const offer = selfServicePolicy(process.env);
+  if ((!marketplaceFixtureEnabled(process.env) && !offer) || !origin || !(await sameOrigin(origin)))
+    return { error: '领取暂未开放或请求来源无效，请稍后重试。' };
+  const code = formData.get('claimCode'),
+    phone = formData.get('phone'),
+    password = formData.get('password');
+  if (
+    (!offer && typeof code !== 'string') ||
+    typeof phone !== 'string' ||
+    typeof password !== 'string' ||
+    formData.get('acceptOffer') !== 'on'
+  )
+    return { error: '请填写账号信息并确认免费期限、额度与服务说明。' };
+  const database = loadDatabaseConfig(),
+    key = process.env['MERCHANT_PHONE_LOOKUP_KEY'];
+  if (!database.configured || !key) return { error: '账号服务暂不可用，请稍后重试。' };
+  let destination: string;
+  try {
+    const repository = new MySqlMarketplaceRepository(database.config, key);
+    const input = {
+      merchantName:
+        typeof formData.get('merchantName') === 'string'
+          ? String(formData.get('merchantName'))
+          : '',
+      phone,
+      password,
+      reuseExisting: formData.get('reuseExisting') === 'on',
+      requestId: randomUUID(),
+    };
+    const session = offer
+      ? await repository.claimFree(input)
+      : await repository.claimSynthetic({ ...input, code: code as string });
+    await setSession(session);
+    destination = '/' + session.merchantId + '/drafts/' + session.assistantId;
+  } catch (error) {
+    const message =
+      error instanceof MarketplaceAccessError
+        ? {
+            not_eligible:
+              '当前无法领取：资格可能未生效、已到期、名额已满，或操作过于频繁。已有商家可先登录原后台查看状态，稍后重试或联系运营。',
+            authentication_failed: '账号认证未通过，请使用原密码。',
+            binding_conflict: '此主体或账号已有其他绑定，请核查归属。',
+            existing_resources_require_selection:
+              '已有资源需确认：仅支持明确同意复用的单一 owner 商家及至多一个客服，多项资源请人工核查。',
+            quota_exhausted: '模型额度已用尽，请联系运营。',
+            state_unknown: '未能确认提交结果，请使用原账号重试或登录核查，不要换号重复创建。',
+          }[error.code]
+        : '未能确认开通，请保留原账号，稍后重试或登录核查；不要换号重复创建。';
+    return { error: message };
+  }
+  redirect(destination);
 }

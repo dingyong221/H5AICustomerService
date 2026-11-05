@@ -18,6 +18,16 @@ import { binaryIdFromString, loadDatabaseConfig } from '../src/index.js';
 import { assistants, onboardingSessions } from '../src/schema/index.js';
 
 describe('database connection configuration', () => {
+  it('parses and serializes UTC DATETIME independently of the workstation timezone', async () => {
+    const connect = vi.fn(async () => ({}) as Connection);
+    const result = loadDatabaseConfig(
+      { MYSQL_DATABASE_URL: 'mysql://test:test@127.0.0.1/utc_test' },
+      connect,
+    );
+    if (!result.configured) throw new Error('Local test configuration required');
+    await result.config.openConnection();
+    expect(connect).toHaveBeenCalledWith(expect.objectContaining({ timezone: 'Z' }));
+  });
   it('imports the complete Drizzle schema without ESM initialization errors', () => {
     expect(assistants).toBeDefined();
     expect(onboardingSessions).toBeDefined();

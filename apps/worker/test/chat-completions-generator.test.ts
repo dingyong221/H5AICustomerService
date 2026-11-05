@@ -240,6 +240,8 @@ describe('configured Chat Completions generator', () => {
         },
         {
           fetchImpl: vi.fn<typeof fetch>(async () => response('100 元/台。')),
+          assertModelAccess: async () => undefined,
+          reserveModelCall: async () => undefined,
           storeFactory: () => ({ claimNext: async () => claim, complete, fail }),
         },
       );

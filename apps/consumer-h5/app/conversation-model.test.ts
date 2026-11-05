@@ -57,6 +57,25 @@ function pendingState() {
 }
 
 describe('conversation model', () => {
+  it('shows product quota/eligibility failures accurately and does not invite automatic retries', () => {
+    for (const [code, message] of [
+      ['MARKETPLACE_QUOTA_EXHAUSTED', '额度已用尽'],
+      ['MARKETPLACE_NOT_ELIGIBLE', '已暂停或过期'],
+    ]) {
+      let state = attachSession(pendingState(), session);
+      state = markAccepted(state, accepted);
+      const failed = applyTurnResult(state, {
+        messages: [visitorMessage],
+        sessionHandle: session.sessionHandle,
+        state: 'failed',
+        traceId: accepted.traceId,
+        turnId: accepted.turnId,
+        error: { code: code!, retryable: false },
+      });
+      expect(failed.pending?.errorMessage).toContain(message);
+      expect(failed.pending?.retryable).toBe(false);
+    }
+  });
   it('continues polling for accepted and processing turns only', () => {
     expect(shouldContinuePolling('accepted')).toBe(true);
     expect(shouldContinuePolling('processing')).toBe(true);

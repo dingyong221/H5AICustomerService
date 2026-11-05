@@ -266,6 +266,21 @@ const validateDraft = (draft: AssistantDraftConfig): AssistantDraftConfig => {
 
 const parseDraft = (value: string | Record<string, unknown>): AssistantDraftConfig => {
   const object = parseObject(value, 'draft config');
+  // Only the exact server-created empty seed is readable; saving/publishing remains strictly validated.
+  const seed = {
+    industry: '',
+    businessScope: '',
+    materialsSummary: '',
+    pricingSummary: '',
+    promotionSummary: '',
+    welcomeMessage: '您好，我是 AI 客服。请问需要了解什么？',
+    insufficientInfoMessage: '商家尚未提供这项资料，请联系商家核实。',
+  };
+  if (
+    Object.keys(object).length === Object.keys(seed).length &&
+    Object.entries(seed).every(([key, expected]) => object[key] === expected)
+  )
+    return seed;
   return validateDraft({
     industry: text(object['industry'], 'industry', 128),
     businessScope: paragraphText(object['businessScope'], 'businessScope', 2_000),
@@ -1193,7 +1208,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
         current.status === 'paused'
       )
         throw new AssistantRevisionConflictError();
-      const draft = parseDraft(current.config);
+      const draft = validateDraft(parseDraft(current.config));
       const contentHash = createHash('sha256').update(JSON.stringify(draft), 'utf8').digest();
       const previous = parseObject(current.validation, 'draft validation');
       if (
@@ -1338,7 +1353,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
           throw new AssistantPublishValidationError();
         }
         const validation = parseObject(current.validation, 'draft validation');
-        const draft = parseDraft(current.config);
+        const draft = validateDraft(parseDraft(current.config));
         const contentHash = createHash('sha256').update(JSON.stringify(draft), 'utf8').digest();
         if (
           validation['publishable'] !== true ||

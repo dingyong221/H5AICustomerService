@@ -1,5 +1,7 @@
 'use server';
 
+import { MarketplaceModelError } from '../workspace/model-service-error';
+
 import { randomUUID } from 'node:crypto';
 import { loadDatabaseConfig, MySqlAssistantImprovementRepository } from '@h5cs/database';
 import { ImprovementConflictError } from '@h5cs/domain';
@@ -230,6 +232,7 @@ export async function evaluateImprovementAction(
       );
     let answer: string | null = null;
     let errorCode: string | null = null;
+    let modelError: string | null = null;
     try {
       answer = await requestWorkerPreview({
         merchantId: authorized.actor.merchantId,
@@ -237,8 +240,10 @@ export async function evaluateImprovementAction(
         draft: started.draft,
         question: started.run.question,
       });
-    } catch {
-      errorCode = 'preview_unavailable';
+    } catch (error) {
+      errorCode =
+        error instanceof MarketplaceModelError ? error.code.toLowerCase() : 'preview_unavailable';
+      modelError = error instanceof MarketplaceModelError ? error.message : null;
     }
     await authorized.repository.finishEvaluation({
       ...authorized.actor,
@@ -257,7 +262,9 @@ export async function evaluateImprovementAction(
         ? '本次复测失败已记录。请稍后重试，失败不算通过。'
         : 'AI 实际回答已记录，尚未判定通过。请核对事实、适用条件和后续处理渠道，再选择是否符合预期。',
     );
-    return errorCode ? { ...state, error: 'AI 试聊服务暂不可用；请稍后重新发起复测。' } : state;
+    return errorCode
+      ? { ...state, error: modelError ?? 'AI 试聊服务暂不可用；请稍后重新发起复测。' }
+      : state;
   } catch (error) {
     return failedWrite(error);
   }

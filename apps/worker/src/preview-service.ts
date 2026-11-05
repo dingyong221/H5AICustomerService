@@ -1,3 +1,4 @@
+import { loadDatabaseConfig, MySqlMarketplaceRepository } from '@h5cs/database';
 import { timingSafeEqual } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { parseWritingInput, parseWritingResult, type WritingResult } from '@h5cs/contracts';
@@ -124,7 +125,10 @@ export class PreviewService {
   public async reply(payload: unknown, signal: AbortSignal): Promise<string> {
     const { merchantId, facts, question } = parsePayload(payload);
     this.limit(merchantId);
-    return this.#generator.generate(buildPreviewPrompt(facts, question), signal);
+    return this.#generator.generate(buildPreviewPrompt(facts, question), signal, {
+      merchantId,
+      operation: 'preview',
+    });
   }
 
   private limit(merchantId: string): void {
@@ -154,7 +158,10 @@ export class PreviewService {
     this.limit(merchantId);
     this.#writingBusy.add(merchantId);
     try {
-      const answer = await this.#generator.generate(buildWritingPrompt(input), signal);
+      const answer = await this.#generator.generate(buildWritingPrompt(input), signal, {
+        merchantId,
+        operation: 'writing',
+      });
       const result = parseWritingResult(JSON.parse(answer), input.field);
       if (!result || !preservesProvidedNumbers(input, result))
         throw new Error('Invalid writing answer');
@@ -198,7 +205,10 @@ export class PreviewService {
     this.limit(merchantId);
     this.#writingBusy.add(merchantId);
     try {
-      const output = await this.#generator.generate(buildKnowledgePrompt(text), signal);
+      const output = await this.#generator.generate(buildKnowledgePrompt(text), signal, {
+        merchantId,
+        operation: 'organize',
+      });
       const result = parseMaterialOrganization(
         renderKnowledgeOrganization(text, JSON.parse(output)),
       );
@@ -230,7 +240,23 @@ export function createPreviewService(
   ) {
     return null;
   }
-  return new PreviewService(token, new ChatCompletionsGenerator(model.config));
+  let database: ReturnType<typeof loadDatabaseConfig>;
+  try {
+    database = loadDatabaseConfig(environment);
+  } catch {
+    return null;
+  }
+  if (!database.configured) return null;
+  const budget = new MySqlMarketplaceRepository(database.config);
+  return new PreviewService(
+    token,
+    new ChatCompletionsGenerator(
+      model.config,
+      fetch,
+      (merchantId, operation) => budget.reserveModelCall(merchantId, operation),
+      (merchantId) => budget.assertModelAccess(merchantId),
+    ),
+  );
 }
 import { parseMaterialOrganization, type MaterialOrganization } from '@h5cs/contracts';
 import { buildKnowledgePrompt } from './knowledge-prompt.js';

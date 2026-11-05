@@ -38,7 +38,3 @@ catalog:
   typescript-eslint: 8.70.0
   vitest: 4.1.11
   zod: 4.6.6
-
-audit:
-  ignore:
-    - GHSA-vfj7-8cjw-p6xm

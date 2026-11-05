@@ -43,6 +43,13 @@ export function loadChatCompletionsConfig(
   if (environment['MODEL_PROVIDER'] !== 'chat_completions') {
     return { configured: false, reason: 'MODEL_PROVIDER is not chat_completions' };
   }
+  if (
+    (environment['H5CS_MARKETPLACE_MODE'] === 'local-fixture' ||
+      environment['H5CS_LOCAL_MODEL_FIXTURE'] === 'true') &&
+    environment['MODEL_API_KEY_FILE']
+  ) {
+    return { configured: false, reason: 'Local fixture forbids supplier secret files' };
+  }
   const model = environment['MODEL_NAME'];
   const apiKey = readApiKey(environment);
   const endpointValue = environment['MODEL_CHAT_COMPLETIONS_URL'];
@@ -70,6 +77,22 @@ export function loadChatCompletionsConfig(
       url.href !== endpointValue
     ) {
       return { configured: false, reason: 'MODEL_CHAT_COMPLETIONS_URL is invalid' };
+    }
+    if (
+      (environment['H5CS_MARKETPLACE_MODE'] === 'local-fixture' ||
+        environment['H5CS_LOCAL_MODEL_FIXTURE'] === 'true') &&
+      (!['test', 'development'].includes(environment['NODE_ENV'] ?? '') ||
+        !['test', 'local'].includes(environment['APP_ENV'] ?? '') ||
+        !loopback ||
+        url.protocol !== 'http:' ||
+        environment['MODEL_API_KEY_FILE'] ||
+        !model!.startsWith('local-') ||
+        !apiKey!.startsWith('local-fixture-'))
+    ) {
+      return {
+        configured: false,
+        reason: 'Local fixture forbids external or production model configuration',
+      };
     }
     const config = { endpoint: url.href, model: model!, apiKey: apiKey! };
     Object.defineProperty(config, 'apiKey', { enumerable: false });
@@ -115,13 +138,26 @@ export class ChatCompletionsGenerator implements ConversationTurnGenerator {
   readonly #config: ChatCompletionsConfig;
   readonly #fetchImpl: typeof fetch;
 
-  public constructor(config: ChatCompletionsConfig, fetchImpl: typeof fetch = fetch) {
+  public constructor(
+    config: ChatCompletionsConfig,
+    fetchImpl: typeof fetch = fetch,
+    private readonly reserve?: (merchantId: string, operation: string) => Promise<void>,
+    private readonly assertAccess?: (merchantId: string) => Promise<void>,
+  ) {
     this.#config = config;
     this.#fetchImpl = fetchImpl;
   }
 
-  public async generate(prompt: ConversationPrompt, signal: AbortSignal): Promise<string> {
+  public async generate(
+    prompt: ConversationPrompt,
+    signal: AbortSignal,
+    context?: { merchantId: string; operation: string },
+  ): Promise<string> {
     signal.throwIfAborted();
+    if (this.assertAccess) {
+      if (!context) throw new Error('Model access context required');
+      await this.assertAccess(context.merchantId);
+    }
     const controlled = controlledServiceReply(prompt);
     if (controlled !== null) return controlled.answer;
     // Published snapshots stay immutable, but time-sensitive/contradictory facts must
@@ -149,6 +185,11 @@ export class ChatCompletionsGenerator implements ConversationTurnGenerator {
         const contact = normalizeHumanContact(facts['humanContact']);
         return `商家当前资料存在已过期规则或相互冲突的明确内容，暂不能据此给出可靠报价或承诺，请联系商家核实。${contact ? `\n商家联系说明：${contact}` : ''}`;
       }
+    }
+    if (this.reserve) {
+      if (!context) throw new Error('Model budget context required');
+      await this.reserve(context.merchantId, context.operation);
+      signal.throwIfAborted();
     }
     const response = await this.#fetchImpl(this.#config.endpoint, {
       method: 'POST',

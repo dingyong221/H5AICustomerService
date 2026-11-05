@@ -48,6 +48,7 @@ describe('conversation turn processor', () => {
         confirmedFacts: expect.stringContaining('100 元/台'),
       }),
       expect.any(AbortSignal),
+      { merchantId: claim.merchantId, operation: 'consumer' },
     );
     expect(JSON.stringify(generate.mock.calls[0]?.[0])).not.toContain(claim.sessionId);
     expect(complete).toHaveBeenCalledWith(

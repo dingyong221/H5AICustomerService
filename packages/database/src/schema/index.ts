@@ -1130,3 +1130,127 @@ export type SessionRow = typeof sessions.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;
 export type MerchantUserRow = typeof merchantUsers.$inferSelect;
 export type OnboardingSessionRow = typeof onboardingSessions.$inferSelect;
+
+export const marketplaceFreeClaims = mysqlTable(
+  'marketplace_free_claim',
+  {
+    subjectDigest: digest('subject_digest').notNull(),
+    product: varchar('product', { length: 64 }).notNull(),
+    claimId: id('claim_id').notNull(),
+    source: varchar('source', { length: 64 }).notNull(),
+    priceVersion: varchar('price_version', { length: 64 }).notNull(),
+    createdAt: utcDateTime('created_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.subjectDigest, t.product] }),
+    uniqueIndex('uq_market_claim_id').on(t.claimId),
+  ],
+);
+
+export const marketplaceEntitlements = mysqlTable(
+  'marketplace_entitlement',
+  {
+    subjectDigest: digest('subject_digest').notNull(),
+    product: varchar('product', { length: 64 }).notNull(),
+    status: varchar('status', { length: 32 }).notNull(),
+    version: int('version', { unsigned: true }).notNull(),
+    validFrom: utcDateTime('valid_from').notNull(),
+    expiresAt: utcDateTime('expires_at'),
+    modelCallLimit: int('model_call_limit', { unsigned: true }),
+    modelCallsReserved: int('model_calls_reserved', { unsigned: true }).notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.subjectDigest, t.product] }),
+    foreignKey({
+      columns: [t.subjectDigest, t.product],
+      foreignColumns: [marketplaceFreeClaims.subjectDigest, marketplaceFreeClaims.product],
+      name: 'fk_market_entitlement_claim',
+    }),
+  ],
+);
+
+export const marketplaceClaimCodes = mysqlTable(
+  'marketplace_claim_code',
+  {
+    codeDigest: digest('code_digest').notNull(),
+    subjectDigest: digest('subject_digest').notNull(),
+    product: varchar('product', { length: 64 }).notNull(),
+    expiresAt: utcDateTime('expires_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.codeDigest] }),
+    foreignKey({
+      columns: [t.subjectDigest, t.product],
+      foreignColumns: [marketplaceFreeClaims.subjectDigest, marketplaceFreeClaims.product],
+      name: 'fk_market_code_claim',
+    }),
+  ],
+);
+
+export const marketplaceAllocations = mysqlTable(
+  'marketplace_allocation',
+  {
+    subjectDigest: digest('subject_digest').notNull(),
+    product: varchar('product', { length: 64 }).notNull(),
+    merchantUserId: id('merchant_user_id').notNull(),
+    merchantId: id('merchant_id').notNull(),
+    assistantId: id('assistant_id').notNull(),
+    createdAt: utcDateTime('created_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.subjectDigest, t.product] }),
+    uniqueIndex('uq_market_account_product').on(t.merchantUserId, t.product),
+    uniqueIndex('uq_market_merchant_product').on(t.merchantId, t.product),
+    uniqueIndex('uq_market_assistant_product').on(t.assistantId, t.product),
+    foreignKey({
+      columns: [t.subjectDigest, t.product],
+      foreignColumns: [marketplaceEntitlements.subjectDigest, marketplaceEntitlements.product],
+      name: 'fk_market_allocation_entitlement',
+    }),
+    foreignKey({
+      columns: [t.merchantUserId],
+      foreignColumns: [merchantUsers.id],
+      name: 'fk_market_allocation_user',
+    }),
+    foreignKey({
+      columns: [t.merchantId],
+      foreignColumns: [merchants.id],
+      name: 'fk_market_allocation_merchant',
+    }),
+    foreignKey({
+      columns: [t.merchantId, t.assistantId],
+      foreignColumns: [assistants.merchantId, assistants.id],
+      name: 'fk_market_allocation_assistant',
+    }),
+  ],
+);
+
+export const marketplaceModelAttempts = mysqlTable(
+  'marketplace_model_attempt',
+  {
+    id: id('id').notNull(),
+    subjectDigest: digest('subject_digest').notNull(),
+    product: varchar('product', { length: 64 }).notNull(),
+    operation: varchar('operation', { length: 64 }).notNull(),
+    state: varchar('state', { length: 32 }).notNull(),
+    createdAt: utcDateTime('created_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.id] }),
+    foreignKey({
+      columns: [t.subjectDigest, t.product],
+      foreignColumns: [marketplaceEntitlements.subjectDigest, marketplaceEntitlements.product],
+      name: 'fk_market_attempt_entitlement',
+    }),
+  ],
+);
+export const marketplaceCampaigns = mysqlTable('marketplace_campaign', {
+  campaign: varchar('campaign', { length: 48 }).primaryKey(),
+  claimedCount: int('claimed_count', { unsigned: true }).notNull().default(0),
+});
+
+export const marketplaceSignupThrottle = mysqlTable('marketplace_signup_throttle', {
+  scopeDigest: digest('scope_digest').primaryKey(),
+  bucket: int('bucket', { unsigned: true }).notNull(),
+  attempts: int('attempts', { unsigned: true }).notNull(),
+});

@@ -57,6 +57,9 @@ export function ShareAssistantLink({
   const publicSlug = new URL(safeHref).pathname.slice(3);
   return (
     <div className="assistant-share">
+      {['127.0.0.1', 'localhost'].includes(new URL(safeHref).hostname) ? (
+        <p role="note">本地测试客户咨询码：仅本机有效，不是正式产品领取码。</p>
+      ) : null}
       <p>
         固定消费者链接：<a href={safeHref}>{safeHref}</a>
       </p>

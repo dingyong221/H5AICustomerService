@@ -141,7 +141,12 @@ export function applyTurnResult(state: ConversationState, result: TurnResult): C
       messages,
       pending: {
         ...state.pending,
-        errorMessage: failure.message,
+        errorMessage:
+          result.error.code === 'MARKETPLACE_QUOTA_EXHAUSTED'
+            ? '商家的AI服务额度已用尽，请联系商家。'
+            : result.error.code === 'MARKETPLACE_NOT_ELIGIBLE'
+              ? '商家的AI服务已暂停或过期，请联系商家。'
+              : failure.message,
         errorCode: result.error.code,
         phase: 'failed',
         retryable: failure.retryable,
