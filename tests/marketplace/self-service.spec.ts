@@ -257,6 +257,18 @@ test('native H5 free registration to versioned consumer conversation, repeat log
   const callsAfter = await (await page.request.get('http://127.0.0.1:9020/healthz')).json();
   expect(callsAfter.calls).toBe(callsBefore.calls);
   await page.goto(`${base}/invite`);
+  await expect
+    .poll(async () =>
+      Number(
+        (
+          await sql(
+            "SELECT COUNT(*) n FROM product_usage_event WHERE merchant_id=UNHEX(?) AND page='invite' AND event='page_view'",
+            [merchantId],
+          )
+        )[0]!['n'],
+      ),
+    )
+    .toBeGreaterThan(0);
   await page.getByRole('button', { name: '生成我的邀请入口' }).click();
   const invitation = await page.getByLabel('邀请链接', { exact: true }).inputValue();
   expect(invitation).toMatch(/\/console\/r\/[A-Za-z0-9_-]{43}$/);

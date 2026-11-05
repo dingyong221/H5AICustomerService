@@ -51,6 +51,34 @@ async function sql(statement, values = []) {
 }
 const hex = (value) => Buffer.from(value, 'hex');
 
+test('retention keeps mature D30 cohorts visible when all four roles have daily cohorts', async () => {
+  const roles = ['anonymous', 'merchant', 'consumer', 'operator'];
+  const rows = Array.from({ length: 35 }, (_, i) =>
+    roles.map((role) => ({ actor: randomBytes(32), role, days: i + 1 })),
+  ).flat();
+  try {
+    await sql(
+      'INSERT INTO product_usage_actor (actor_digest,role,first_seen_at) VALUES ' +
+        rows.map(() => '(?,?,DATE_SUB(UTC_TIMESTAMP(6),INTERVAL ? DAY))').join(','),
+      rows.flatMap((r) => [r.actor, r.role, r.days]),
+    );
+    const target = (
+      await sql(
+        "SELECT DATE_FORMAT(DATE_ADD(DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 31 DAY),INTERVAL 8 HOUR),'%Y-%m-%d') day",
+      )
+    )[0].day;
+    const report = await new MySqlGrowthUsageRepository(database).usageReport();
+    assert(report.retention.some((r) => r.cohort === target && r.role === 'merchant'));
+  } finally {
+    await sql(
+      'DELETE FROM product_usage_actor WHERE actor_digest IN (' +
+        rows.map(() => '?').join(',') +
+        ')',
+      rows.map((r) => r.actor),
+    );
+  }
+});
+
 test('growth attribution is first-touch, new-allocation-only, transactional and tenant isolated; telemetry deduplicates safely', async () => {
   const environment = {
     ...env,

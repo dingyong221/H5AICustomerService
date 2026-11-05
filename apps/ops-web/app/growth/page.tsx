@@ -87,7 +87,7 @@ export default async function GrowthPage() {
         <h2>邀请转化</h2>
         <p>
           近30天触达记录 {invite.visits} · 累计首次开通 {invite.opened} 家 · 完成发布{' '}
-          {invite.published} 家 · 完成咨询 {invite.used} 家
+          {invite.published} 家 · 收到咨询 {invite.used} 家
         </p>
         <p>
           来自服务端邀请归属和业务事实。咨询含商家自测，不能直接证明真实客户使用或问题已解决。奖励未启用。
