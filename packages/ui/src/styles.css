@@ -1,17 +1,24 @@
 :root {
-  --ui-ink: #18201c;
-  --ui-muted: #67716b;
+  --ui-ink: #181b20;
+  --ui-muted: #676b71;
   --ui-surface: #ffffff;
-  --ui-soft: #f3f6f4;
-  --ui-line: #dce3df;
-  --ui-brand: #176b4d;
-  --ui-brand-strong: #0f523a;
+  --ui-soft: #f3f4f6;
+  --ui-line: #dcdfe3;
+  --ui-brand: #173a6b;
+  --ui-brand-strong: #0f2b52;
   --ui-focus: #2870df;
   --ui-danger: #b42318;
   --ui-warning: #9a6700;
   --ui-radius-sm: 10px;
   --ui-radius-md: 16px;
-  --ui-shadow: 0 16px 48px rgba(22, 38, 29, 0.08);
+  --ui-shadow: 0 16px 48px rgba(22, 35, 58, 0.08);
+}
+
+svg.kelaida-brand-mark {
+  display: block;
+  height: 2rem;
+  width: 2.4rem;
+  flex: 0 0 auto;
 }
 
 .ui-button {
@@ -95,10 +102,10 @@
 
 .ui-status-badge {
   align-items: center;
-  background: #eef1ef;
+  background: #eeeff1;
   border: 1px solid transparent;
   border-radius: 999px;
-  color: #4b5550;
+  color: #4b4f55;
   display: inline-flex;
   font-size: 0.78rem;
   font-weight: 700;
@@ -121,8 +128,8 @@
 }
 
 .ui-status-badge--success {
-  background: #e8f6ef;
-  color: #14734e;
+  background: #e8eef6;
+  color: #143c73;
 }
 
 .ui-status-badge--warning {

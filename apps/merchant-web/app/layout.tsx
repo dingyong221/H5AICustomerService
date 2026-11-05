@@ -1,6 +1,7 @@
 import { marketplaceFixtureEnabled } from '@h5cs/database';
 import type { Metadata, Viewport } from 'next';
 import Link from 'next/link';
+import { BrandMark } from '@h5cs/ui';
 import type { ReactNode } from 'react';
 
 import '@h5cs/ui/styles.css';
@@ -19,14 +20,14 @@ export const metadata: Metadata = {
   description: '创建、测试并发布专属 AI 客服。',
   robots: { index: false, follow: false },
   title: {
-    default: '商家工作台 | H5 AI 客服',
-    template: '%s | H5 AI 客服',
+    default: '商家工作台 | 客来答',
+    template: '%s | 客来答',
   },
 };
 
 export const viewport: Viewport = {
   colorScheme: 'light',
-  themeColor: '#f3f6f4',
+  themeColor: '#f3f6fb',
   width: 'device-width',
 };
 
@@ -45,12 +46,12 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         </a>
         <div className="merchant-layout">
           <aside className="merchant-sidebar">
-            <Link aria-label="H5 AI 客服商家工作台" className="merchant-brand" href={workspaceHref}>
+            <Link aria-label="客来答商家工作台" className="merchant-brand" href={workspaceHref}>
               <span aria-hidden="true" className="merchant-brand__mark">
-                H5
+                <BrandMark />
               </span>
               <span className="merchant-brand__copy">
-                <strong>AI 客服</strong>
+                <strong>客来答</strong>
                 <small>商家工作台</small>
               </span>
             </Link>

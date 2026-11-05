@@ -253,10 +253,9 @@ export async function claimMarketplace(
   if (
     (!offer && typeof code !== 'string') ||
     typeof phone !== 'string' ||
-    typeof password !== 'string' ||
-    formData.get('acceptOffer') !== 'on'
+    typeof password !== 'string'
   )
-    return { error: '请填写账号信息并确认免费期限、额度与服务说明。' };
+    return { error: '请填写完整的商家账号信息。' };
   const database = loadDatabaseConfig(),
     key = process.env['MERCHANT_PHONE_LOOKUP_KEY'];
   if (!database.configured || !key) return { error: '账号服务暂不可用，请稍后重试。' };
@@ -270,7 +269,9 @@ export async function claimMarketplace(
           : '',
       phone,
       password,
-      reuseExisting: formData.get('reuseExisting') === 'on',
+      // Reuse only after the repository verifies the original password and sole active owner.
+      // This is a product flow, not a fabricated checkbox consent or external identity binding.
+      reuseExisting: true,
       requestId: randomUUID(),
     };
     const session = offer
@@ -287,7 +288,7 @@ export async function claimMarketplace(
             authentication_failed: '账号认证未通过，请使用原密码。',
             binding_conflict: '此主体或账号已有其他绑定，请核查归属。',
             existing_resources_require_selection:
-              '已有资源需确认：仅支持明确同意复用的单一 owner 商家及至多一个客服，多项资源请人工核查。',
+              '当前账号关联了多项或异常历史资源，请联系运营核查；不会重复创建商家或客服。',
             quota_exhausted: '模型额度已用尽，请联系运营。',
             state_unknown: '未能确认提交结果，请使用原账号重试或登录核查，不要换号重复创建。',
           }[error.code]

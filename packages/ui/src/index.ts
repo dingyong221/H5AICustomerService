@@ -1,4 +1,5 @@
 export { Button, type ButtonProps } from './button';
+export { BrandMark } from './brand-mark';
 export { EmptyState, type EmptyStateProps } from './empty-state';
 export { PageShell, type PageShellProps } from './page-shell';
 export {

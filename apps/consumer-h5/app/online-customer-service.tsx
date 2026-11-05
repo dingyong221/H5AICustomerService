@@ -1,4 +1,5 @@
 'use client';
+import { BrandMark } from '@h5cs/ui';
 
 import { HumanContactNotice } from './human-contact-notice';
 
@@ -388,7 +389,7 @@ export function OnlineCustomerService({
         <header className="chat-header">
           <div className="assistant-identity">
             <div aria-hidden="true" className="assistant-avatar">
-              AI
+              <BrandMark />
             </div>
             <div>
               <div className="assistant-title-row">
