@@ -137,6 +137,7 @@ export function UsageTracker({ enabled, endpoint }: { enabled: boolean; endpoint
       }
     }
     function interact() {
+      if (location.pathname !== path) tick();
       interaction = performance.now();
     }
     function click(e: MouseEvent) {
@@ -156,6 +157,7 @@ export function UsageTracker({ enabled, endpoint }: { enabled: boolean; endpoint
       flush();
     }
     function submit(e: SubmitEvent) {
+      if (location.pathname !== path) tick();
       const el = e.target as HTMLFormElement;
       const raw = el.getAttribute('data-usage');
       add('form_submit', raw && controls.has(raw) ? raw : 'unregistered_form');
