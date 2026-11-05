@@ -22,6 +22,7 @@ if (
   throw Error('Explicit A6 local fixture required');
 const db = loaded.config,
   repo = new MySqlMarketplaceRepository(db, env['MERCHANT_PHONE_LOOKUP_KEY']);
+const usageDiagnostics = new WeakMap<Page, unknown[]>();
 async function sql(statement: string, values: (string | number | Buffer)[] = []) {
   const c = await db.openConnection();
   try {
@@ -52,6 +53,22 @@ test.afterEach(async ({ browser }, info) => {
     for (const p of context.pages()) {
       if (p.isClosed()) continue;
       const prefix = `${env['H5CS_A6_EVIDENCE']}/${info.project.name}-failure-${index++}`;
+      await writeFile(
+        prefix + '-usage.json',
+        JSON.stringify(
+          {
+            responses: usageDiagnostics.get(p) ?? [],
+            tap: await p
+              .evaluate(() => (window as Window & { __inviteTap?: unknown }).__inviteTap)
+              .catch(() => null),
+            grouped: await sql(
+              'SELECT role,page,event,control,COUNT(*) n FROM product_usage_event GROUP BY role,page,event,control',
+            ).catch(() => []),
+          },
+          null,
+          2,
+        ),
+      );
       await p.screenshot({ path: prefix + '.png', fullPage: true }).catch(() => {});
       const text = await p
         .locator('body')
@@ -75,6 +92,33 @@ test('native H5 free registration to versioned consumer conversation, repeat log
   page,
   browser,
 }, info) => {
+  const diagnostics: unknown[] = [];
+  usageDiagnostics.set(page, diagnostics);
+  page.on('pageerror', (error) =>
+    diagnostics.push({ error: error.message.replace(/[A-Za-z0-9_-]{40,}/gu, '[opaque]') }),
+  );
+  page.on('response', async (response) => {
+    if (new URL(response.url()).pathname !== '/console/usage') return;
+    try {
+      const request = response.request().postDataJSON() as {
+        events?: { page: string; event: string; control: string }[];
+      };
+      const body = (await response.json()) as {
+        collected?: boolean;
+        accepted?: number;
+        reason?: string;
+      };
+      diagnostics.push({
+        status: response.status(),
+        events: request.events?.map((e) => ({ page: e.page, event: e.event, control: e.control })),
+        collected: body.collected,
+        accepted: body.accepted,
+        reason: body.reason,
+      });
+    } catch {
+      diagnostics.push({ status: response.status(), noJson: true });
+    }
+  });
   const phone = `139${String(randomInt(10000000, 99999999))}`,
     password = randomBytes(24).toString('base64url');
   await page.goto('http://127.0.0.1:3000/console/product');
@@ -269,6 +313,22 @@ test('native H5 free registration to versioned consumer conversation, repeat log
       ),
     )
     .toBeGreaterThan(0);
+  await page.evaluate(() => {
+    const root = window as Window & { __inviteTap?: unknown[] };
+    root.__inviteTap = [];
+    document.addEventListener(
+      'click',
+      (e) => {
+        const el = (e.target as Element)?.closest?.('button,a');
+        root.__inviteTap?.push({
+          tag: el?.tagName,
+          control: el?.getAttribute('data-usage'),
+          visibility: document.visibilityState,
+        });
+      },
+      true,
+    );
+  });
   await page.getByRole('button', { name: '生成我的邀请入口' }).click();
   const invitation = await page.getByLabel('邀请链接', { exact: true }).inputValue();
   expect(invitation).toMatch(/\/console\/r\/[A-Za-z0-9_-]{43}$/);
