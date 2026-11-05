@@ -52,7 +52,7 @@ export function PublishAssistantForm({
   }, [state.published, hasPublishedLink]);
   const canPublish = ready && csrfToken.length > 0;
   return (
-    <form action={action} className="assistant-confirm-form">
+    <form data-usage="publish.confirm" action={action} className="assistant-confirm-form">
       <input name="merchantId" type="hidden" value={merchantId} />
       <input name="assistantId" type="hidden" value={assistantId} />
       <input name="draftRevision" type="hidden" value={draftRevision} />

@@ -20,7 +20,7 @@ const tempPrefix = 'h5cs-ci-upgrade-';
 const expectedDatabase = 'h5cs_integration_ci';
 const expectedUser = 'h5cs_ci';
 const expectedBaselineCount = 12;
-const expectedFullCount = 17;
+const expectedFullCount = 18;
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
 export class UpgradeProbeError extends Error {
@@ -298,12 +298,19 @@ export function assertUpgradedTableSet(tables, baselineTables) {
     'marketplace_free_claim',
     'marketplace_model_attempt',
     'marketplace_signup_throttle',
+    'growth_invitation',
+    'growth_touch',
+    'growth_referral',
+    'product_usage_actor',
+    'product_usage_day',
+    'product_usage_event',
+    'product_usage_budget',
   ];
   if (
-    expected.length !== 40 ||
-    new Set(expected).size !== 40 ||
-    tables.length !== 40 ||
-    new Set(tables).size !== 40 ||
+    expected.length !== 47 ||
+    new Set(expected).size !== 47 ||
+    tables.length !== 47 ||
+    new Set(tables).size !== 47 ||
     tables.some((table) => !expected.includes(table))
   )
     throw new UpgradeProbeError('Upgrade produced an unexpected application-table set');

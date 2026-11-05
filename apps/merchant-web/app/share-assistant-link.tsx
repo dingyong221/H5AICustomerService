@@ -65,6 +65,7 @@ export function ShareAssistantLink({
       </p>
       <p>把此链接或二维码发给消费者即可咨询。保存草稿、刷新页面和发布新版不会更换此地址。</p>
       <button
+        data-usage="share.copy"
         type="button"
         onClick={() => {
           void copyAssistantLink(safeHref, expectedOrigin, navigator.clipboard).then((result) =>
@@ -90,7 +91,11 @@ export function ShareAssistantLink({
             unoptimized
             width={224}
           />
-          <a download={`ai-customer-service-${publicSlug}.png`} href={currentQr.dataUrl}>
+          <a
+            data-usage="share.qr"
+            download={`ai-customer-service-${publicSlug}.png`}
+            href={currentQr.dataUrl}
+          >
             下载二维码
           </a>
         </div>

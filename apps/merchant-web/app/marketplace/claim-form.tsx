@@ -9,7 +9,7 @@ export function MarketplaceClaimForm({ offer }: { offer?: OfferTerms }) {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   return (
-    <form action={action} className="merchant-account-form">
+    <form action={action} className="merchant-account-form" data-usage="register.submit">
       {offer ? (
         <label>
           商家名称

@@ -28,7 +28,7 @@ export default function ProductPage() {
             客服。客户扫码就能问，你在一个后台持续管理。
           </p>
           <div className="product-actions">
-            <a className="tenant-feature-link" href={cta}>
+            <a className="tenant-feature-link" href={cta} data-usage="product.register">
               {offer ? '免费开通我的 AI 客服 →' : '进入商家后台 →'}
             </a>
             <Link className="product-secondary" href="/console/account/login">

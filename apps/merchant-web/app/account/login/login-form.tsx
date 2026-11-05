@@ -13,7 +13,7 @@ export function MerchantLoginForm({
 }) {
   const [state, action, pending] = useActionState(loginMerchant, { error: null });
   return (
-    <form action={action} className="merchant-account-form">
+    <form action={action} className="merchant-account-form" data-usage="login.submit">
       <input name="merchantId" type="hidden" value={merchantId ?? ''} />
       <input name="nextPath" type="hidden" value={nextPath ?? ''} />
       <label>

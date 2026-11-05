@@ -94,7 +94,12 @@ export function WritingAssistant({
         />
         我同意将此简述和当前字段文字发送至阿里云千问生成文案。
       </label>
-      <button type="button" onClick={() => void generate()} disabled={pending}>
+      <button
+        data-usage="writing.generate"
+        type="button"
+        onClick={() => void generate()}
+        disabled={pending}
+      >
         {pending ? '正在生成备选…' : options.length ? '重新生成备选' : '生成备选文案'}
       </button>
       {error ? <p role="alert">{error}</p> : null}

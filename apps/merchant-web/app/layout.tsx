@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { BrandMark } from '@h5cs/ui';
 import type { ReactNode } from 'react';
 
+import { UsageTracker } from '@h5cs/ui';
 import '@h5cs/ui/styles.css';
 import './styles.css';
 import './improvements/improvements.css';
@@ -40,6 +41,10 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   return (
     <html lang="zh-CN">
       <body>
+        <UsageTracker
+          enabled={process.env['H5CS_GROWTH_USAGE_ENABLED'] === 'true'}
+          endpoint="/console/usage"
+        />
         <UnsavedNavigationBoundary />
         <a className="skip-link" href="#main-content">
           跳到主要内容
@@ -91,6 +96,9 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
               </p>
             ) : null}
             {children}
+            <p className="workflow-note">
+              <Link href="/console/usage-info">使用数据说明与统计设置</Link>
+            </p>
           </main>
         </div>
       </body>

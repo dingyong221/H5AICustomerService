@@ -31,6 +31,12 @@ export const opsMenuGroups = [
       { href: '/#audit-log', label: '审计记录' },
     ],
   },
+  {
+    id: 'growth',
+    label: '增长与使用',
+    icon: '增',
+    items: [{ href: '/growth', label: '邀请与行为统计' }],
+  },
 ] as const;
 
 export function normalizeOpsPath(raw: string) {
@@ -40,6 +46,7 @@ export function normalizeOpsPath(raw: string) {
 export function selectedOpsHref(pathname: string, report: string | null, hash: string) {
   const path = normalizeOpsPath(pathname);
   if (path === '/merchants' || path.startsWith('/merchants/')) return '/merchants';
+  if (path === '/growth') return '/growth';
   if (path === '/reports') {
     const kind = opsMenuGroups[1].items.some((item) => item.href === `/reports?report=${report}`)
       ? report

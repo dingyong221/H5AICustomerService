@@ -1,6 +1,11 @@
 import { randomBytes, randomInt } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type Response as PlaywrightResponse } from '@playwright/test';
+import {
+  createOperatorSession,
+  loadOperatorAuthConfig,
+  operatorCookieName,
+} from '../../apps/ops-web/app/operator-auth';
 import {
   loadDatabaseConfig,
   MySqlMarketplaceRepository,
@@ -17,6 +22,8 @@ if (
   throw Error('Explicit A6 local fixture required');
 const db = loaded.config,
   repo = new MySqlMarketplaceRepository(db, env['MERCHANT_PHONE_LOOKUP_KEY']);
+const usageDiagnostics = new WeakMap<Page, unknown[]>();
+const usageResponses = new WeakMap<Page, PlaywrightResponse[]>();
 async function sql(statement: string, values: (string | number | Buffer)[] = []) {
   const c = await db.openConnection();
   try {
@@ -47,6 +54,31 @@ test.afterEach(async ({ browser }, info) => {
     for (const p of context.pages()) {
       if (p.isClosed()) continue;
       const prefix = `${env['H5CS_A6_EVIDENCE']}/${info.project.name}-failure-${index++}`;
+      await writeFile(
+        prefix + '-usage.json',
+        JSON.stringify(
+          {
+            requests: usageDiagnostics.get(p) ?? [],
+            responses: await Promise.all(
+              (usageResponses.get(p) ?? []).map(async (r) => ({
+                status: r.status(),
+                body: await Promise.race([
+                  r.json().catch(() => null),
+                  new Promise((resolve) => setTimeout(() => resolve({ unavailable: true }), 1000)),
+                ]),
+              })),
+            ),
+            tap: await p
+              .evaluate(() => (window as Window & { __inviteTap?: unknown }).__inviteTap)
+              .catch(() => null),
+            grouped: await sql(
+              'SELECT role,page,event,control,COUNT(*) n FROM product_usage_event GROUP BY role,page,event,control',
+            ).catch(() => []),
+          },
+          null,
+          2,
+        ),
+      );
       await p.screenshot({ path: prefix + '.png', fullPage: true }).catch(() => {});
       const text = await p
         .locator('body')
@@ -70,6 +102,38 @@ test('native H5 free registration to versioned consumer conversation, repeat log
   page,
   browser,
 }, info) => {
+  const diagnostics: unknown[] = [];
+  usageDiagnostics.set(page, diagnostics);
+  page.on('pageerror', (error) =>
+    diagnostics.push({ error: error.message.replace(/[A-Za-z0-9_-]{40,}/gu, '[opaque]') }),
+  );
+  const responses: PlaywrightResponse[] = [];
+  usageResponses.set(page, responses);
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname !== '/console/usage') return;
+    try {
+      const data = request.postDataJSON() as {
+        events?: { page: string; event: string; control: string }[];
+      };
+      diagnostics.push({
+        sent: true,
+        events: data.events?.map((e) => ({ page: e.page, event: e.event, control: e.control })),
+      });
+    } catch {
+      diagnostics.push({ invalid: true });
+    }
+  });
+  page.on('response', (response) => {
+    if (new URL(response.url()).pathname === '/console/usage') responses.push(response);
+  });
+  page.on('requestfailed', (request) => {
+    if (new URL(request.url()).pathname === '/console/usage')
+      diagnostics.push({ failed: true, reason: request.failure()?.errorText });
+  });
+  page.on('console', (message) => {
+    if (message.text().startsWith('__usage_tap__'))
+      diagnostics.push({ tap: JSON.parse(message.text().slice('__usage_tap__'.length)) });
+  });
   const phone = `139${String(randomInt(10000000, 99999999))}`,
     password = randomBytes(24).toString('base64url');
   await page.goto('http://127.0.0.1:3000/console/product');
@@ -77,6 +141,7 @@ test('native H5 free registration to versioned consumer conversation, repeat log
   await expect(
     page.getByRole('link', { name: '免费开通我的 AI 客服 →', exact: true }),
   ).toBeVisible();
+  await page.getByRole('img', { name: /商家开通二维码/ }).scrollIntoViewIfNeeded();
   await expect(page.getByRole('img', { name: /商家开通二维码/ })).toHaveJSProperty(
     'naturalWidth',
     640,
@@ -187,6 +252,18 @@ test('native H5 free registration to versioned consumer conversation, repeat log
   };
   await ask(oldPage, '你们提供什么服务？');
   await expect(oldPage.getByText(/本地模型夹具：提供上门空调清洗服务/).last()).toBeVisible();
+  await expect
+    .poll(async () =>
+      Number(
+        (
+          await sql(
+            "SELECT COUNT(*) n FROM product_usage_event WHERE merchant_id=UNHEX(?) AND role='consumer' AND control='conversation.send'",
+            [merchantId],
+          )
+        )[0]!['n'],
+      ),
+    )
+    .toBeGreaterThan(0);
   await page.goto(base + '/conversations');
   await page.locator('.merchant-conversation-list a').first().click();
   await page.getByRole('link', { name: '改进这条回答', exact: true }).first().click();
@@ -238,6 +315,125 @@ test('native H5 free registration to versioned consumer conversation, repeat log
   await expect(freshPage.getByText(/商家的\s*AI\s*服务额度已用尽/)).toBeVisible();
   const callsAfter = await (await page.request.get('http://127.0.0.1:9020/healthz')).json();
   expect(callsAfter.calls).toBe(callsBefore.calls);
+  await page.goto(`${base}/invite`);
+  await expect
+    .poll(async () =>
+      Number(
+        (
+          await sql(
+            "SELECT COUNT(*) n FROM product_usage_event WHERE merchant_id=UNHEX(?) AND page='invite' AND event='page_view'",
+            [merchantId],
+          )
+        )[0]!['n'],
+      ),
+    )
+    .toBeGreaterThan(0);
+  await page.evaluate(() => {
+    const root = window as Window & { __inviteTap?: unknown[] };
+    root.__inviteTap = [];
+    document.addEventListener(
+      'click',
+      (e) => {
+        const el = (e.target as Element)?.closest?.('button,a');
+        const tap = {
+          tag: el?.tagName,
+          control: el?.getAttribute('data-usage'),
+          visibility: document.visibilityState,
+          targetType: (e.target as Node)?.nodeType,
+        };
+        root.__inviteTap?.push(tap);
+        console.info('__usage_tap__' + JSON.stringify(tap));
+      },
+      true,
+    );
+  });
+  await page.getByRole('button', { name: '生成我的邀请入口' }).click();
+  const invitation = await page.getByLabel('邀请链接', { exact: true }).inputValue();
+  expect(invitation).toMatch(/\/console\/r\/[A-Za-z0-9_-]{43}$/);
+  const friend = await browser.newContext(),
+    friendPage = await friend.newPage();
+  await friendPage.goto(invitation);
+  await expect(friendPage).toHaveURL(/\/console\/product$/);
+  await friendPage.getByRole('link', { name: '免费开通我的 AI 客服 →', exact: true }).click();
+  await friendPage.getByLabel('商家名称', { exact: true }).fill('合成邀请商家');
+  await friendPage
+    .getByLabel('手机号', { exact: true })
+    .fill(`139${String(randomInt(10000000, 99999999))}`);
+  await friendPage
+    .getByLabel('登录密码', { exact: true })
+    .fill(randomBytes(24).toString('base64url'));
+  await friendPage.getByRole('button', { name: '免费开通客来答', exact: true }).click();
+  await expect(friendPage).toHaveURL(/\/[0-9a-f]{32}\/drafts\/[0-9a-f]{32}$/);
+  expect(
+    (
+      await sql('SELECT inviter_id FROM growth_referral WHERE invitee_id=UNHEX(?)', [
+        new URL(friendPage.url()).pathname.split('/')[1]!,
+      ])
+    )[0]!['inviter_id'],
+  ).toEqual(Buffer.from(merchantId, 'hex'));
+  await page.reload();
+  await expect(page.getByText(/首次开通\s*1\s*家/)).toBeVisible();
+  const usageProbe = await page.evaluate(async () => {
+    const response = await fetch('/console/usage', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        events: [
+          {
+            id: crypto.randomUUID(),
+            instance: crypto.randomUUID(),
+            event: 'page_view',
+            page: 'invite',
+            control: 'page',
+            activeMs: 0,
+            at: new Date().toISOString(),
+          },
+        ],
+      }),
+    });
+    return { status: response.status, body: await response.json() };
+  });
+  expect(usageProbe).toMatchObject({ status: 202, body: { collected: true } });
+  await expect
+    .poll(async () =>
+      Number(
+        (
+          await sql(
+            "SELECT COUNT(*) n FROM product_usage_event WHERE merchant_id=UNHEX(?) AND page='invite' AND event='control_click' AND control='invite.create'",
+            [merchantId],
+          )
+        )[0]!['n'],
+      ),
+    )
+    .toBeGreaterThan(0);
+  await screenshot(page, 'invite-attribution-and-usage', info.project.name);
+  await page.goto('http://127.0.0.1:3000/console/usage-info');
+  await page.getByRole('button', { name: '关闭基础使用统计', exact: true }).click();
+  await expect(page.getByRole('button', { name: '允许基础使用统计', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('kelaida_usage_optout'))).toBe('1');
+  await page.getByRole('button', { name: '允许基础使用统计', exact: true }).click();
+  const ops = await browser.newContext(
+    info.project.name === 'mobile'
+      ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }
+      : {},
+  );
+  const opsConfig = loadOperatorAuthConfig()!;
+  await ops.addCookies([
+    {
+      name: operatorCookieName(opsConfig),
+      value: createOperatorSession(opsConfig),
+      url: opsConfig.publicOrigin,
+      httpOnly: true,
+    },
+  ]);
+  const opsPage = await ops.newPage();
+  await opsPage.goto(opsConfig.publicOrigin + '/ops/growth');
+  await expect(opsPage.getByRole('heading', { name: '增长与使用', exact: true })).toBeVisible();
+  await expect(opsPage.getByText('未成熟', { exact: true }).first()).toBeVisible();
+  await screenshot(opsPage, 'growth-dashboard', info.project.name);
+  await ops.close();
+  await friend.close();
+
   for (const status of ['paused', 'expired']) {
     await sql(
       `UPDATE marketplace_entitlement e JOIN marketplace_allocation a ON a.subject_digest=e.subject_digest AND a.product=e.product SET e.status=?,e.expires_at=${status === 'expired' ? 'DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 1 DAY)' : 'DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 1 DAY)'} WHERE a.merchant_id=?`,

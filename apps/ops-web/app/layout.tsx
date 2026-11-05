@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 
+import { UsageTracker } from '@h5cs/ui';
 import '@h5cs/ui/styles.css';
 import './styles.css';
 import { OpsSidebar } from './ops-navigation';
@@ -24,6 +25,10 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
   return (
     <html lang="zh-CN">
       <body>
+        <UsageTracker
+          enabled={process.env['H5CS_GROWTH_USAGE_ENABLED'] === 'true'}
+          endpoint="/ops/usage"
+        />
         <a className="ops-skip-link" href="#ops-main">
           跳到主要内容
         </a>

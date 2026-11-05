@@ -1254,3 +1254,95 @@ export const marketplaceSignupThrottle = mysqlTable('marketplace_signup_throttle
   bucket: int('bucket', { unsigned: true }).notNull(),
   attempts: int('attempts', { unsigned: true }).notNull(),
 });
+
+export const growthInvitations = mysqlTable(
+  'growth_invitation',
+  {
+    merchantId: id('merchant_id').primaryKey(),
+    ownerId: id('owner_id').notNull(),
+    publicCode: varchar('public_code', { length: 43 }).notNull(),
+    status: varchar('status', { length: 16 }).notNull().default('active'),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('uq_growth_code').on(t.publicCode)],
+);
+
+export const growthTouches = mysqlTable(
+  'growth_touch',
+  {
+    tokenDigest: digest('token_digest').primaryKey(),
+    inviterId: id('inviter_id').notNull(),
+    createdAt: createdAt(),
+    expiresAt: utcDateTime('expires_at').notNull(),
+  },
+  (t) => [index('idx_growth_touch_expiry').on(t.expiresAt)],
+);
+
+export const growthReferrals = mysqlTable(
+  'growth_referral',
+  {
+    inviteeId: id('invitee_id').primaryKey(),
+    inviterId: id('inviter_id').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('idx_growth_referrer_created').on(t.inviterId, t.createdAt)],
+);
+
+export const productUsageEvents = mysqlTable(
+  'product_usage_event',
+  {
+    eventId: binary('event_id', { length: 16 }).primaryKey(),
+    payloadDigest: digest('payload_digest').notNull(),
+    actorDigest: digest('actor_digest').notNull(),
+    role: varchar('role', { length: 16 }).notNull(),
+    merchantId: id('merchant_id'),
+    page: varchar('page', { length: 40 }).notNull(),
+    event: varchar('event', { length: 32 }).notNull(),
+    control: varchar('control', { length: 64 }).notNull(),
+    pageInstance: binary('page_instance', { length: 16 }).notNull(),
+    activeMs: int('active_ms', { unsigned: true }).notNull().default(0),
+    clientAt: utcDateTime('client_at').notNull(),
+    receivedAt: utcDateTime('received_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP(6)`),
+  },
+  (t) => [
+    index('idx_usage_received').on(t.receivedAt),
+    index('idx_usage_actor_received').on(t.actorDigest, t.receivedAt),
+    index('idx_usage_merchant_received').on(t.merchantId, t.receivedAt),
+  ],
+);
+
+export const productUsageActors = mysqlTable(
+  'product_usage_actor',
+  {
+    actorDigest: digest('actor_digest').primaryKey(),
+    role: varchar('role', { length: 16 }).notNull(),
+    firstSeenAt: utcDateTime('first_seen_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP(6)`),
+  },
+  (t) => [index('idx_usage_actor_first').on(t.firstSeenAt)],
+);
+
+export const productUsageDays = mysqlTable(
+  'product_usage_day',
+  {
+    actorDigest: digest('actor_digest').notNull(),
+    day: varchar('day', { length: 10 }).notNull(),
+    role: varchar('role', { length: 16 }).notNull(),
+    merchantId: id('merchant_id'),
+    views: int('views', { unsigned: true }).notNull().default(0),
+    actions: int('actions', { unsigned: true }).notNull().default(0),
+    activeMs: int('active_ms', { unsigned: true }).notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.actorDigest, t.day] }),
+    index('idx_usage_day_role').on(t.day, t.role),
+  ],
+);
+
+export const productUsageBudgets = mysqlTable('product_usage_budget', {
+  day: varchar('day', { length: 10 }).primaryKey(),
+  accepted: int('accepted', { unsigned: true }).notNull().default(0),
+});

@@ -40,7 +40,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Build real applications and workspace dependencies
-        run: pnpm exec turbo run build --filter=@h5cs/api --filter=@h5cs/worker --concurrency=1 && pnpm --filter @h5cs/merchant-web exec next build --webpack && pnpm --filter @h5cs/consumer-h5 exec next build --webpack
+        run: pnpm exec turbo run build --filter=@h5cs/api --filter=@h5cs/worker --concurrency=1 && pnpm --filter @h5cs/merchant-web exec next build --webpack && pnpm --filter @h5cs/consumer-h5 exec next build --webpack && NEXT_PUBLIC_OPS_BASE_PATH=/ops pnpm --filter @h5cs/ops-web exec next build --webpack
         env:
           NODE_ENV: production
           NODE_OPTIONS: --max-old-space-size=2048

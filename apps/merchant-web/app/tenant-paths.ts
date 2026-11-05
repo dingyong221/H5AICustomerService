@@ -6,7 +6,8 @@ export type MerchantSection =
   | 'conversations'
   | 'writing'
   | 'help'
-  | 'improvements';
+  | 'improvements'
+  | 'invite';
 
 export function merchantPath(
   merchantId: string,

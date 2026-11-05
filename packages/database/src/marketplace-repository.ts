@@ -13,6 +13,7 @@ import {
 import { emptyMarketplaceDraft, insertAssistantDraftRecords } from './assistant-draft-records.js';
 import { marketplaceFixtureEnabled } from './marketplace-local-policy.js';
 import { selfServicePolicy, type SelfServicePolicy } from './self-service-policy.js';
+import { bindGrowthReferral, growthEnabled } from './growth-usage.js';
 
 const product = 'h5ai-self-service-v1';
 type Grant = RowDataPacket & {
@@ -136,6 +137,7 @@ export class MySqlMarketplaceRepository {
   /** Native H5 free claim: identity is authenticated locally, offer comes only from server policy. */
   async claimFree(input: {
     merchantName: string;
+    growthTouch?: string;
     phone: string;
     password: string;
     reuseExisting?: boolean;
@@ -243,6 +245,7 @@ export class MySqlMarketplaceRepository {
   async #claimOnce(
     input: {
       merchantName?: string;
+      growthTouch?: string;
       code: string;
       phone: string;
       password: string;
@@ -298,6 +301,7 @@ export class MySqlMarketplaceRepository {
         [grant.subject_digest, product],
       );
       let allocation = allocations[0];
+      let createdMerchant = false;
       // A known subject is never rebound based on a caller-supplied phone number.
       if (allocation && (!user || !allocation.merchant_user_id.equals(user)))
         throw new MarketplaceAccessError('binding_conflict');
@@ -369,6 +373,7 @@ export class MySqlMarketplaceRepository {
             if (historical.length) throw new MarketplaceAccessError('binding_conflict');
           }
         } else {
+          createdMerchant = true;
           await connection.execute(
             `INSERT INTO merchant (id, name, status, timezone, created_at, updated_at) VALUES (?, ?, 'active', 'Asia/Shanghai', ?, ?)`,
             [merchant, input.merchantName?.trim() ?? '待完善商家资料', now, now],
@@ -434,6 +439,9 @@ export class MySqlMarketplaceRepository {
       );
       if (authorized.length !== 1) throw new MarketplaceAccessError('not_eligible');
       const session = await issueMerchantSession(connection, user, allocation.merchant_id);
+      if (createdMerchant && growthEnabled(this.environment)) {
+        await bindGrowthReferral(connection, input.growthTouch, allocation.merchant_id, user);
+      }
       committing = true;
       await connection.commit();
       return { ...session, assistantId: allocation.assistant_id.toString('hex') };

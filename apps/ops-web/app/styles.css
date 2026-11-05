@@ -2,6 +2,22 @@
   box-sizing: border-box;
 }
 
+.growth-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.growth-table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.growth-table-wrap th,
+.growth-table-wrap td {
+  padding: 0.65rem;
+  text-align: left;
+  border-bottom: 1px solid #dce5f2;
+  white-space: nowrap;
+}
+
 .ops-brand > span svg {
   width: 1.8rem;
   height: 1.6rem;

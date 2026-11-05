@@ -67,7 +67,7 @@ export function EditDraftForm({
     setEditingRevision(draftRevision);
   }
   return (
-    <form action={action} className="assistant-edit-form">
+    <form data-usage="draft.save" action={action} className="assistant-edit-form">
       <input name="merchantId" type="hidden" value={merchantId} />
       <input name="assistantId" type="hidden" value={assistantId} />
       <input name="draftRevision" type="hidden" value={editingRevision} />
