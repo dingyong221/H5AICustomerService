@@ -455,6 +455,12 @@ try {
     }
   await writeFile(
     join(evidence, 'processes-stopped.json'),
-    JSON.stringify({ stopped: true, productionTouched: false }),
+    JSON.stringify({
+      cleanupAttempted: true,
+      stopped: children.every(
+        (record) => record.child.exitCode !== null || record.child.signalCode !== null,
+      ),
+      productionTouched: false,
+    }),
   );
 }

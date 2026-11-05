@@ -40,6 +40,32 @@ async function screenshot(page: Page, name: string, project: string) {
   });
 }
 
+test.afterEach(async ({ browser }, info) => {
+  if (info.status === info.expectedStatus) return;
+  let index = 0;
+  for (const context of browser.contexts()) {
+    for (const p of context.pages()) {
+      if (p.isClosed()) continue;
+      const prefix = `${env['H5CS_A6_EVIDENCE']}/${info.project.name}-failure-${index++}`;
+      await p.screenshot({ path: prefix + '.png', fullPage: true }).catch(() => {});
+      const text = await p
+        .locator('body')
+        .innerText()
+        .catch(() => 'unavailable');
+      await writeFile(
+        prefix + '.json',
+        JSON.stringify({
+          pathname: new URL(p.url()).pathname,
+          text: text
+            .slice(0, 8000)
+            .replace(/1[3-9][0-9]{9}/gu, '[test-phone]')
+            .replace(/[A-Za-z0-9_-]{40,}/gu, '[opaque]'),
+        }),
+      );
+    }
+  }
+});
+
 test('native H5 free registration to versioned consumer conversation, repeat login and product states', async ({
   page,
   browser,
@@ -184,7 +210,8 @@ test('native H5 free registration to versioned consumer conversation, repeat log
   await expect(page.getByText(/第 2 版已发布/)).toBeVisible();
   await expect(link).toHaveAttribute('href', publicUrl);
   await ask(oldPage, '你们提供什么服务？');
-  await expect(oldPage.getByText(/本地模型夹具：提供上门空调清洗服务/).last()).toBeVisible();
+  await expect(oldPage.getByText(/本地模型夹具：提供上门空调清洗服务/)).toHaveCount(2);
+  await expect(oldPage.getByRole('textbox', { name: '输入想咨询的问题' })).toBeEnabled();
   await expect(oldPage.getByText(/也提供洗衣机清洁咨询/)).toHaveCount(0);
   await oldPage.reload();
   await expect(oldPage.getByText(/本地模型夹具/).first()).toBeVisible();
