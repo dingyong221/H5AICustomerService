@@ -1,3 +1,4 @@
+import { checkMarketplaceModelError } from '../workspace/model-service-error';
 import { parseWritingResult, type WritingInput, type WritingResult } from '@h5cs/contracts';
 import { previewToken, previewWorkerUrl } from '../workspace/worker-preview';
 
@@ -30,6 +31,7 @@ export async function requestWorkerWriting(
     },
     body: JSON.stringify({ merchantId, ...input }),
   });
+  await checkMarketplaceModelError(response);
   if (response.status === 429) throw new WritingUnavailable(429);
   if (
     response.status !== 200 ||

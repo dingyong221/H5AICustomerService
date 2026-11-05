@@ -1,3 +1,4 @@
+import { marketplaceFixtureEnabled } from '@h5cs/database';
 import type { Metadata, Viewport } from 'next';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
@@ -77,7 +78,19 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
               />
             ) : null}
           </aside>
-          <main id="main-content">{children}</main>
+          <main id="main-content">
+            {marketplaceFixtureEnabled(process.env) &&
+            process.env['H5CS_LOCAL_MODEL_FIXTURE'] === 'true' &&
+            /^http:\/\/(127\.0\.0\.1|localhost):9020\/chat\/completions$/.test(
+              process.env['MODEL_CHAT_COMPLETIONS_URL'] ?? '',
+            ) ? (
+              <p role="note" className="workflow-note">
+                本地合成测试：AI
+                超市身份为测试夹具；本轮模型请求仅发回环确定性服务，不连接千问。下方模型授权文案在本模式下均指本地夹具。链接及二维码仅供本机测试。
+              </p>
+            ) : null}
+            {children}
+          </main>
         </div>
       </body>
     </html>

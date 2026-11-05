@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import {
   loadDatabaseConfig,
   MySqlConversationTurnJobRepository,
+  MySqlMarketplaceRepository,
   type DatabaseConnectionConfig,
 } from '@h5cs/database';
 
@@ -17,6 +18,8 @@ import {
 
 type DispatchDependencies = Readonly<{
   fetchImpl?: typeof fetch;
+  assertModelAccess?: (merchantId: string) => Promise<void>;
+  reserveModelCall?: (merchantId: string, operation: string) => Promise<void>;
   storeFactory?: (database: DatabaseConnectionConfig) => ConversationTurnStore;
 }>;
 
@@ -40,7 +43,14 @@ export function createConversationDispatch(
   const store =
     dependencies.storeFactory?.(database.config) ??
     new MySqlConversationTurnJobRepository(database.config);
-  const generator = new ChatCompletionsGenerator(model.config, dependencies.fetchImpl);
+  const budget = new MySqlMarketplaceRepository(database.config);
+  const generator = new ChatCompletionsGenerator(
+    model.config,
+    dependencies.fetchImpl,
+    dependencies.reserveModelCall ??
+      ((merchantId, operation) => budget.reserveModelCall(merchantId, operation)),
+    dependencies.assertModelAccess ?? ((merchantId) => budget.assertModelAccess(merchantId)),
+  );
   return {
     configured: true,
     processor: new ConversationTurnProcessor(

@@ -1,3 +1,4 @@
+import { MarketplaceModelError } from '../../../workspace/model-service-error';
 import { randomUUID } from 'node:crypto';
 import { parseWritingInput } from '@h5cs/contracts';
 import { currentMerchantForWrite } from '../../../account/merchant-actions';
@@ -54,6 +55,8 @@ export async function POST(request: Request, context: { params: Promise<{ mercha
   try {
     return respond(200, { data: await requestWorkerWriting(merchantId, input) });
   } catch (error) {
+    if (error instanceof MarketplaceModelError)
+      return respond(error.status, { error: error.message, code: error.code });
     const status = error instanceof WritingUnavailable ? error.status : 503;
     return respond(status, {
       error:

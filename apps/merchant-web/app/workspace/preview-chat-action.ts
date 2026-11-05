@@ -12,6 +12,7 @@ import { revalidatePath } from 'next/cache';
 
 import { currentMerchantForWrite } from '../account/merchant-actions';
 import { requestWorkerPreview, WorkerPreviewRateLimitError } from './worker-preview';
+import { MarketplaceModelError } from './model-service-error';
 import { previewEvidence, type PreviewEvidence } from './preview-evidence';
 
 export type PreviewChatState = Readonly<{
@@ -107,6 +108,7 @@ export async function previewChatAction(
       checkId,
     };
   } catch (error) {
+    if (error instanceof MarketplaceModelError) return failed(error.message);
     if (error instanceof KnowledgeMaterialAccessError)
       return failed('登录已失效或无权试聊此客服。');
     if (error instanceof WorkerPreviewRateLimitError)

@@ -6,7 +6,9 @@
   "include": [
     "playwright.config.ts",
     "playwright.governance.config.ts",
+    "playwright.marketplace.config.ts",
     "tests/e2e/**/*.ts",
-    "tests/governance/**/*.ts"
+    "tests/governance/**/*.ts",
+    "tests/marketplace/**/*.ts"
   ]
 }

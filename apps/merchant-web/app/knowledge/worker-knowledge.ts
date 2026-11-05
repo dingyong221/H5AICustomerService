@@ -1,3 +1,4 @@
+import { checkMarketplaceModelError } from '../workspace/model-service-error';
 import { parseMaterialOrganization, type MaterialOrganization } from '@h5cs/contracts';
 import { previewToken, previewWorkerUrl } from '../workspace/worker-preview';
 export async function requestKnowledgeOrganization(
@@ -17,6 +18,7 @@ export async function requestKnowledgeOrganization(
     headers: { 'Content-Type': 'application/json', 'x-h5cs-preview-token': token },
     body: JSON.stringify({ merchantId, text }),
   });
+  await checkMarketplaceModelError(response);
   if (!response.ok) throw new Error('Organization failed');
   const payload = (await response.json()) as { data?: unknown };
   const result = parseMaterialOrganization(payload.data);

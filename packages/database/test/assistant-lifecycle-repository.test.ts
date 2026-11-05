@@ -93,6 +93,8 @@ const repositoryWith = (
   const end = vi.fn(async () => undefined);
   const connection = {
     execute: async (statement: string, values: readonly unknown[] = []) => {
+      // Ignore the additional product-scope authorization read in legacy SQL-order assertions.
+      if (statement.includes('FROM marketplace_allocation')) return [[], []];
       calls.push({ statement, values });
       if (statement.startsWith('SELECT id FROM merchant WHERE'))
         return [[{ id: Buffer.from(merchantId, 'hex') }], []];

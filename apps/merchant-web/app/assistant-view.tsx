@@ -7,6 +7,7 @@ import {
   loadDatabaseConfig,
   MySqlAssistantLifecycleRepository,
   MySqlKnowledgeMaterialRepository,
+  MySqlMarketplaceRepository,
   type KnowledgeMaterial,
 } from '@h5cs/database';
 import { toAssistantId, toMerchantId, toMerchantUserId } from '@h5cs/domain';
@@ -164,6 +165,9 @@ export async function AssistantView({
     ['资料不足时的回复', assistant.draft.insufficientInfoMessage],
     ['人工联系说明', assistant.draft.humanContact || '尚未提供。此处不实时转接人工。'],
   ] as const;
+  const quota = await new MySqlMarketplaceRepository(database.config)
+    .quotaForMerchant(merchantId)
+    .catch(() => null);
   const step = assistantWorkflowSteps.find((item) => item.section === section)!;
   return (
     <div className="assistant-workflow-layout">
@@ -187,6 +191,14 @@ export async function AssistantView({
           </StatusBadge>
           <Link href={`${merchantPath(merchantId, 'help')}#${section}`}>本步帮助</Link>
         </div>
+        {quota ? (
+          <p role="status">
+            AI服务额度：剩余 {Math.max(0, quota.limit - quota.reserved)} / {quota.limit}{' '}
+            次AI服务调用，至{' '}
+            {quota.expiresAt.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}（北京时间）
+            ；不自动重置。失败或超时可能计入，试聊、整理、撰写、复测和客户问答共用。新草稿须补全真实资料并确认发布。
+          </p>
+        ) : null}
         <AssistantWorkflowSteps
           merchantId={merchantId}
           assistantId={assistantId}
@@ -257,12 +269,12 @@ export async function AssistantView({
               保存本步后，继续上传商品表、说明文档或 FAQ。已有线上版本不受草稿编辑影响。
             </p>
             <DraftRevisionNotice
-              key={assistantId}
+              key={`notice:${assistantId}`}
               revision={assistant.draftRevision}
               knowledgeConfirmed={assistant.knowledgeConfirmed}
             />
             <EditDraftForm
-              key={assistantId}
+              key={`editor:${assistantId}`}
               csrfToken={csrfToken}
               returnPath={merchantPath(merchantId, 'drafts', assistantId)}
               continueHref={merchantPath(merchantId, 'knowledge', assistantId)}

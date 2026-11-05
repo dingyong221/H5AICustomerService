@@ -17,3 +17,6 @@ export * from './platform-analytics-repository.js';
 export * from './public-session-repository.js';
 export * from './schema/index.js';
 export { inspectBusinessFacts, normalizeHumanContact } from '@h5cs/domain';
+export * from './marketplace-repository.js';
+export * from './marketplace-local-policy.js';
+export * from './self-service-policy.js';
