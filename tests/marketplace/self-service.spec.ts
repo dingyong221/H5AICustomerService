@@ -1,6 +1,6 @@
 import { randomBytes, randomInt } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type Response as PlaywrightResponse } from '@playwright/test';
 import {
   createOperatorSession,
   loadOperatorAuthConfig,
@@ -23,6 +23,7 @@ if (
 const db = loaded.config,
   repo = new MySqlMarketplaceRepository(db, env['MERCHANT_PHONE_LOOKUP_KEY']);
 const usageDiagnostics = new WeakMap<Page, unknown[]>();
+const usageResponses = new WeakMap<Page, PlaywrightResponse[]>();
 async function sql(statement: string, values: (string | number | Buffer)[] = []) {
   const c = await db.openConnection();
   try {
@@ -57,7 +58,13 @@ test.afterEach(async ({ browser }, info) => {
         prefix + '-usage.json',
         JSON.stringify(
           {
-            responses: usageDiagnostics.get(p) ?? [],
+            requests: usageDiagnostics.get(p) ?? [],
+            responses: await Promise.all(
+              (usageResponses.get(p) ?? []).map(async (r) => ({
+                status: r.status(),
+                body: await r.json().catch(() => null),
+              })),
+            ),
             tap: await p
               .evaluate(() => (window as Window & { __inviteTap?: unknown }).__inviteTap)
               .catch(() => null),
@@ -97,27 +104,32 @@ test('native H5 free registration to versioned consumer conversation, repeat log
   page.on('pageerror', (error) =>
     diagnostics.push({ error: error.message.replace(/[A-Za-z0-9_-]{40,}/gu, '[opaque]') }),
   );
-  page.on('response', async (response) => {
-    if (new URL(response.url()).pathname !== '/console/usage') return;
+  const responses: PlaywrightResponse[] = [];
+  usageResponses.set(page, responses);
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname !== '/console/usage') return;
     try {
-      const request = response.request().postDataJSON() as {
+      const data = request.postDataJSON() as {
         events?: { page: string; event: string; control: string }[];
       };
-      const body = (await response.json()) as {
-        collected?: boolean;
-        accepted?: number;
-        reason?: string;
-      };
       diagnostics.push({
-        status: response.status(),
-        events: request.events?.map((e) => ({ page: e.page, event: e.event, control: e.control })),
-        collected: body.collected,
-        accepted: body.accepted,
-        reason: body.reason,
+        sent: true,
+        events: data.events?.map((e) => ({ page: e.page, event: e.event, control: e.control })),
       });
     } catch {
-      diagnostics.push({ status: response.status(), noJson: true });
+      diagnostics.push({ invalid: true });
     }
+  });
+  page.on('response', (response) => {
+    if (new URL(response.url()).pathname === '/console/usage') responses.push(response);
+  });
+  page.on('requestfailed', (request) => {
+    if (new URL(request.url()).pathname === '/console/usage')
+      diagnostics.push({ failed: true, reason: request.failure()?.errorText });
+  });
+  page.on('console', (message) => {
+    if (message.text().startsWith('__usage_tap__'))
+      diagnostics.push({ tap: JSON.parse(message.text().slice('__usage_tap__'.length)) });
   });
   const phone = `139${String(randomInt(10000000, 99999999))}`,
     password = randomBytes(24).toString('base64url');
@@ -320,11 +332,14 @@ test('native H5 free registration to versioned consumer conversation, repeat log
       'click',
       (e) => {
         const el = (e.target as Element)?.closest?.('button,a');
-        root.__inviteTap?.push({
+        const tap = {
           tag: el?.tagName,
           control: el?.getAttribute('data-usage'),
           visibility: document.visibilityState,
-        });
+          targetType: (e.target as Node)?.nodeType,
+        };
+        root.__inviteTap?.push(tap);
+        console.info('__usage_tap__' + JSON.stringify(tap));
       },
       true,
     );

@@ -105,7 +105,12 @@ export function UsageTracker({ enabled, endpoint }: { enabled: boolean; endpoint
         ref = path.startsWith('/a/') ? path.split('/')[2] : undefined;
       const body = JSON.stringify({ events: batch, ...(ref ? { publicRef: ref } : {}) });
       if (beacon && typeof navigator.sendBeacon === 'function') {
-        if (navigator.sendBeacon(endpoint, new Blob([body], { type: 'application/json' }))) return;
+        try {
+          if (navigator.sendBeacon(endpoint, new Blob([body], { type: 'application/json' })))
+            return;
+        } catch {
+          /* Fall back to keepalive fetch if the browser rejects beacon delivery. */
+        }
       }
       void fetch(endpoint, {
         method: 'POST',
@@ -142,7 +147,13 @@ export function UsageTracker({ enabled, endpoint }: { enabled: boolean; endpoint
     }
     function click(e: MouseEvent) {
       interact();
-      const el = (e.target as Element)?.closest?.('button,a');
+      const target =
+        e.target instanceof Element
+          ? e.target
+          : e.target instanceof Node
+            ? e.target.parentElement
+            : null;
+      const el = target?.closest('button,a');
       if (!el) return;
       const raw =
           el.getAttribute('data-usage') ??
@@ -154,7 +165,7 @@ export function UsageTracker({ enabled, endpoint }: { enabled: boolean; endpoint
               ? 'unregistered_link'
               : 'unregistered_button';
       add('control_click', control);
-      flush();
+      flush(el.tagName === 'A' || (el instanceof HTMLButtonElement && el.type === 'submit'));
     }
     function submit(e: SubmitEvent) {
       if (location.pathname !== path) tick();
@@ -180,8 +191,8 @@ export function UsageTracker({ enabled, endpoint }: { enabled: boolean; endpoint
       navigation = setInterval(() => {
         if (location.pathname !== path) tick();
       }, 1000);
-    document.addEventListener('click', click, true);
-    document.addEventListener('submit', submit, true);
+    window.addEventListener('click', click, true);
+    window.addEventListener('submit', submit, true);
     document.addEventListener('pointerdown', interact, { passive: true });
     document.addEventListener('keydown', interact);
     document.addEventListener('visibilitychange', hide);
@@ -194,8 +205,8 @@ export function UsageTracker({ enabled, endpoint }: { enabled: boolean; endpoint
       stopped = true;
       clearInterval(clock);
       clearInterval(navigation);
-      document.removeEventListener('click', click, true);
-      document.removeEventListener('submit', submit, true);
+      window.removeEventListener('click', click, true);
+      window.removeEventListener('submit', submit, true);
       document.removeEventListener('pointerdown', interact);
       document.removeEventListener('keydown', interact);
       document.removeEventListener('visibilitychange', hide);
