@@ -4,7 +4,7 @@ import { test, expect, type Page } from '@playwright/test';
 import {
   loadDatabaseConfig,
   MySqlMarketplaceRepository,
-} from '../../packages/database/dist/index.js';
+} from '../../packages/database/src/index.js';
 
 const env = process.env,
   loaded = loadDatabaseConfig();
