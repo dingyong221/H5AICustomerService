@@ -33,6 +33,11 @@ describe('deterministic explicit service request boundary', () => {
     ['帮我申请退款。', 'transaction_action'],
     ['现在给我全额退款。', 'transaction_action'],
     ['帮我取消订单。', 'transaction_action'],
+    ['请取消订单。', 'transaction_action'],
+    ['请你立即取消订单。', 'transaction_action'],
+    ['麻烦取消订单。', 'transaction_action'],
+    ['帮我退款并退运费。', 'transaction_action'],
+    ['如果符合条件，请帮我取消订单。', 'transaction_action'],
     ['替我修改订单。', 'transaction_action'],
     ['帮我处理退款。', 'transaction_action'],
     ['帮我修改收货地址。', 'transaction_action'],
@@ -75,6 +80,12 @@ describe('deterministic explicit service request boundary', () => {
     '投诉处理政策是什么？',
     '不要帮我投诉，只讲退货政策。',
     '不要帮我处理退款，只问运费。',
+    '如果我要退款，质量问题的退货运费由谁承担？',
+    '如果我要取消订单，需要满足哪些条件？',
+    '我要退款需要哪些条件？',
+    '请问取消订单的流程是什么？',
+    '假如我要退款会收手续费吗？',
+    '给我退款政策。',
   ])('does not swallow ordinary factual or policy questions: %s', (question) => {
     expect(controlledServiceReply(promptFor(question))).toBeNull();
   });

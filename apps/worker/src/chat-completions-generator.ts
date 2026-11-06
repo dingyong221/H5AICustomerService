@@ -5,6 +5,7 @@ import { inspectBusinessFacts, normalizeHumanContact } from '@h5cs/database';
 import type { ConversationPrompt } from './conversation-prompt.js';
 import type { ConversationTurnGenerator } from './conversation-turn-processor.js';
 import { controlledServiceReply } from './service-reply-boundary.js';
+import { conversationPrivacyReply, correctPrivacyPromises } from './conversation-privacy.js';
 
 export type ChatCompletionsConfig = Readonly<{
   endpoint: string;
@@ -186,6 +187,11 @@ export class ChatCompletionsGenerator implements ConversationTurnGenerator {
         return `商家当前资料存在已过期规则或相互冲突的明确内容，暂不能据此给出可靠报价或承诺，请联系商家核实。${contact ? `\n商家联系说明：${contact}` : ''}`;
       }
     }
+    const isConversation = typeof facts?.['productsAndServices'] === 'string';
+    if (isConversation) {
+      const privacyReply = conversationPrivacyReply(prompt.question);
+      if (privacyReply) return privacyReply;
+    }
     if (this.reserve) {
       if (!context) throw new Error('Model budget context required');
       await this.reserve(context.merchantId, context.operation);
@@ -243,6 +249,6 @@ export class ChatCompletionsGenerator implements ConversationTurnGenerator {
     ) {
       throw new Error('Model response is not a complete text answer');
     }
-    return content.trim();
+    return isConversation ? correctPrivacyPromises(content.trim()) : content.trim();
   }
 }

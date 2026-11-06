@@ -2,7 +2,7 @@ import { loadDatabaseConfig, MySqlMarketplaceRepository } from '@h5cs/database';
 import { timingSafeEqual } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { parseWritingInput, parseWritingResult, type WritingResult } from '@h5cs/contracts';
-import { buildWritingPrompt, preservesProvidedNumbers } from './writing-prompt.js';
+import { buildWritingPrompt, groundFinancialWriting } from './writing-prompt.js';
 
 import {
   ChatCompletionsGenerator,
@@ -162,9 +162,9 @@ export class PreviewService {
         merchantId,
         operation: 'writing',
       });
-      const result = parseWritingResult(JSON.parse(answer), input.field);
-      if (!result || !preservesProvidedNumbers(input, result))
-        throw new Error('Invalid writing answer');
+      const parsed = parseWritingResult(JSON.parse(answer), input.field);
+      if (!parsed) throw new Error('Invalid writing answer');
+      const result = groundFinancialWriting(input, parsed);
       const labeled =
         input.field === 'welcomeMessage'
           ? parseWritingResult(

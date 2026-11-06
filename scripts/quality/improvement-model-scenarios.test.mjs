@@ -113,7 +113,7 @@ test('distinguishes two deterministic capability-boundary replies from seven mod
     ).length,
     7,
   );
-  assert.equal(pack.responseBoundary.version, 'explicit-service-request-v1');
+  assert.equal(pack.responseBoundary.version, 'explicit-service-request-v2');
   for (const scenario of controlled) {
     assert.match(scenario.controlledReplyPreview.answer, /此窗口不实时转接/u);
     assert.doesNotMatch(

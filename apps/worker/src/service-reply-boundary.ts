@@ -1,6 +1,6 @@
 import type { ConversationPrompt } from './conversation-prompt.js';
 
-export const serviceReplyBoundaryVersion = 'explicit-service-request-v1';
+export const serviceReplyBoundaryVersion = 'explicit-service-request-v2';
 export type ControlledServiceReason = 'human_help' | 'complaint' | 'transaction_action';
 export type ControlledServiceReply = Readonly<{
   reason: ControlledServiceReason;
@@ -16,13 +16,16 @@ const humanRequest =
 const complaintRequest =
   /(?:我要|我想|我要求|要求|帮我|替我|给我)(?:提出|发起|进行)?(?:投诉|申诉|举报)|(?:投诉|举报)(?:你们|商家|店铺|这家)|投诉(?:电话|联系方式|入口|渠道)/u;
 const actionRequest =
-  /(?:帮我|替我|给我|为我|代我)(?:现在|马上|立刻|立即|直接)?(?:办理|处理|申请|发起|操作|执行|提交|安排)?(?:全额)?(?:退款|退钱|赔偿|补偿|退货|换货|取消订单|修改订单|更改订单|(?:修改|更改)(?:收货)?地址|改地址|下单|付款|支付|发货|催单|催发货|开票|开发票|预约)|(?:现在|马上|立刻|立即|直接)(?:就)?(?:退款|退钱|赔偿|补偿|取消订单|改地址|发货)|(?:我要|我想要|我要求)(?:退款|退钱|赔偿|补偿|取消订单)/u;
+  /(?:帮我|替我|给我|为我|代我|请(?:你)?|麻烦(?:你)?)(?:现在|马上|立刻|立即|直接)?(?:办理|处理|申请|发起|操作|执行|提交|安排)?(?:全额)?(?:退款|退钱|赔偿|补偿|退货|换货|取消订单|修改订单|更改订单|(?:修改|更改)(?:收货)?地址|改地址|下单|付款|支付|发货|催单|催发货|开票|开发票|预约)|(?:现在|马上|立刻|立即|直接)(?:就)?(?:退款|退钱|赔偿|补偿|取消订单|改地址|发货)|(?:我要|我想要|我要求)(?:退款|退钱|赔偿|补偿|取消订单)/u;
 const declinedHuman =
   /(?:不用|不要|不必|无需|不需要|别)(?:你|给我|帮我|再)?(?:转(?:接)?|找|联系|接通|接入)?(?:人工|真人)/u;
 const declinedAction =
   /(?:不用|不要|不必|无需|不需要|别)(?:你|给我|帮我|替我|为我|再)?(?:办理|处理|操作|申请|发起|执行|提交|安排)?(?:退款|退钱|赔偿|补偿|退货|换货|取消订单|(?:修改|更改)(?:收货)?地址|改地址|下单|支付|发货|开票|预约)/u;
 const declinedComplaint =
   /(?:不用|不要|不必|无需|不需要|别)(?:你|帮我|替我|给我)?(?:提出|发起|进行)?(?:投诉|申诉|举报)/u;
+const hypothetical = /^(?:请问)?(?:如果|假如|假设|若是|若|倘若|比如)/u;
+const policyInquiry =
+  /什么|哪些|多久|多少|由谁|能否|是否|可否|怎么|如何|能不能|可不可以|可以.*吗|需要.*(?:条件|资料|资格)|(?:退款|取消订单|退货|换货)的(?:条件|政策|流程|要求|规则)|(?:政策|流程|条件)[？?]?$/u;
 
 export function explicitServiceReason(question: string): ControlledServiceReason | null {
   const normalized = question.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]+/gu, '');
@@ -31,7 +34,15 @@ export function explicitServiceReason(question: string): ControlledServiceReason
     return 'human_help';
   if (clauses.some((clause) => !declinedComplaint.test(clause) && complaintRequest.test(clause)))
     return 'complaint';
-  if (clauses.some((clause) => !declinedAction.test(clause) && actionRequest.test(clause)))
+  if (
+    clauses.some(
+      (clause) =>
+        !hypothetical.test(clause) &&
+        !policyInquiry.test(clause) &&
+        !declinedAction.test(clause) &&
+        actionRequest.test(clause),
+    )
+  )
     return 'transaction_action';
   return null;
 }

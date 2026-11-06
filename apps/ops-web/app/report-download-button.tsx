@@ -32,14 +32,16 @@ export function ReportDownloadButton({
         signal: AbortSignal.timeout(60_000),
       });
       if (!result.ok) {
-        const body: unknown = await result.json();
+        const body: unknown = await result.json().catch(() => null);
         throw new Error(
-          typeof body === 'object' &&
-            body !== null &&
-            'error' in body &&
-            typeof body.error === 'string'
-            ? body.error
-            : '导出失败，请稍后重试。',
+          result.status >= 500
+            ? '报表服务暂不可用，请稍后重试。'
+            : typeof body === 'object' &&
+                body !== null &&
+                'error' in body &&
+                typeof body.error === 'string'
+              ? body.error
+              : '导出失败，请稍后重试。',
         );
       }
       const filename =
@@ -66,7 +68,7 @@ export function ReportDownloadButton({
           ? '报表生成超时，请缩小范围后重试。'
           : failure instanceof TypeError
             ? '网络暂不可用，请稍后重试。'
-            : failure instanceof Error
+            : failure instanceof Error && !(failure instanceof SyntaxError)
               ? failure.message
               : '网络暂不可用，请稍后重试。',
       );

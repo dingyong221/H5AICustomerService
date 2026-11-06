@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 
 const preference = 'kelaida_usage_optout';
 function optedOut() {
@@ -217,20 +217,37 @@ export function UsageTracker({ enabled, endpoint }: { enabled: boolean; endpoint
   }, [enabled, endpoint]);
   return null;
 }
+function preferenceSnapshot() {
+  if (
+    navigator.doNotTrack === '1' ||
+    (navigator as Navigator & { globalPrivacyControl?: boolean }).globalPrivacyControl === true
+  )
+    return 'browser';
+  try {
+    return localStorage.getItem(preference) === '1' ? 'off' : 'on';
+  } catch {
+    return 'unavailable';
+  }
+}
+function subscribePreference(notify: () => void) {
+  window.addEventListener('storage', notify);
+  window.addEventListener('kelaida-privacy', notify);
+  return () => {
+    window.removeEventListener('storage', notify);
+    window.removeEventListener('kelaida-privacy', notify);
+  };
+}
 export function UsagePreference() {
-  const [disabled, setDisabled] = useState<boolean | null>(null);
-  useEffect(() => {
-    queueMicrotask(() => setDisabled(optedOut()));
-  }, []);
+  const state = useSyncExternalStore(subscribePreference, preferenceSnapshot, () => 'loading');
   return (
     <button
       type="button"
-      disabled={disabled === null}
+      disabled={state === 'loading' || state === 'browser' || state === 'unavailable'}
       onClick={() => {
         try {
-          localStorage.setItem(preference, disabled ? '0' : '1');
-          setDisabled(!disabled);
-          if (!disabled)
+          if (state !== 'on' && state !== 'off') return;
+          localStorage.setItem(preference, state === 'off' ? '0' : '1');
+          if (state === 'on')
             void fetch('/console/usage', {
               method: 'POST',
               headers: { 'content-type': 'application/json', 'x-usage-optout': '1' },
@@ -239,11 +256,19 @@ export function UsagePreference() {
             }).catch(() => undefined);
           window.dispatchEvent(new Event('kelaida-privacy'));
         } catch {
-          setDisabled(true);
+          window.dispatchEvent(new Event('kelaida-privacy'));
         }
       }}
     >
-      {disabled ? '允许基础使用统计' : '关闭基础使用统计'}
+      {state === 'loading'
+        ? '正在读取统计设置…'
+        : state === 'browser'
+          ? '浏览器隐私设置已关闭基础使用统计'
+          : state === 'unavailable'
+            ? '当前浏览器无法保存设置，基础使用统计已关闭'
+            : state === 'off'
+              ? '允许基础使用统计'
+              : '关闭基础使用统计'}
     </button>
   );
 }
