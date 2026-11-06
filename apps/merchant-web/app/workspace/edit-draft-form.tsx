@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useEffect, useId, useRef, useState } from 'react';
+import { useActionState, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -10,6 +10,10 @@ import { saveAssistantDraftAction } from './knowledge-actions';
 import { DraftFields, type DraftFieldValues } from '../writing/draft-fields';
 import { merchantPath } from '../tenant-paths';
 import { useUnsavedForm } from './use-unsaved-form';
+
+const subscribe = () => () => undefined;
+const clientReady = () => true;
+const serverReady = () => false;
 
 export function EditDraftForm({
   merchantId,
@@ -28,6 +32,7 @@ export function EditDraftForm({
   continueHref?: string;
   csrfToken: string;
 }) {
+  const hydrated = useSyncExternalStore(subscribe, clientReady, serverReady);
   const [state, action, pending] = useActionState(saveAssistantDraftAction, {
     error: null,
     saved: false,
@@ -71,7 +76,7 @@ export function EditDraftForm({
       <input name="merchantId" type="hidden" value={merchantId} />
       <input name="assistantId" type="hidden" value={assistantId} />
       <input name="draftRevision" type="hidden" value={editingRevision} />
-      <fieldset disabled={pending} className="draft-form-fields">
+      <fieldset disabled={!hydrated || pending} className="draft-form-fields">
         <DraftFields
           merchantId={merchantId}
           csrfToken={csrfToken}
@@ -111,7 +116,7 @@ export function EditDraftForm({
       ) : null}
       <div className="draft-form-actions">
         <button
-          disabled={pending}
+          disabled={!hydrated || pending}
           type="submit"
           className={next ? 'secondary' : undefined}
           onClick={() => {
@@ -122,7 +127,7 @@ export function EditDraftForm({
         </button>
         {next ? (
           <button
-            disabled={pending}
+            disabled={!hydrated || pending}
             type="submit"
             onClick={() => {
               advanceRequested.current = true;

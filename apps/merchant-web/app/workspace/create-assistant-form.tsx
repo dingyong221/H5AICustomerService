@@ -149,7 +149,7 @@ export function CreateAssistantForm({
       <label>
         行业资料引导（可选）
         <select
-          disabled={pending || state.created !== null}
+          disabled={!hydrated || pending || state.created !== null}
           onChange={(event) => {
             const selected = templates.find((template) => template.id === event.target.value);
             setSelectedTemplateId(event.target.value);
@@ -193,7 +193,7 @@ export function CreateAssistantForm({
         </details>
       ) : null}
       <fieldset
-        disabled={pending || (state.created !== null && !state.created.reusedExisting)}
+        disabled={!hydrated || pending || (state.created !== null && !state.created.reusedExisting)}
         className="draft-form-fields"
       >
         <DraftFields
