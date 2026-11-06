@@ -66,7 +66,7 @@
   text-underline-offset: 4px;
 }
 .product-caption {
-  color: #60738c;
+  color: #475c78;
   font-size: 0.82rem;
   line-height: 1.8;
 }
@@ -94,13 +94,13 @@
 }
 .product-demo__header small {
   display: block;
-  color: #6b7d95;
+  color: #475c78;
   font-size: 0.75rem;
   margin-top: 0.2rem;
 }
 .product-demo__header > span {
   margin-left: auto;
-  color: #7488a4;
+  color: #475c78;
   font-size: 0.7rem;
 }
 .product-demo__question {
@@ -124,7 +124,7 @@
   line-height: 1.8;
 }
 .product-demo__footer {
-  color: #6c809c;
+  color: #475c78;
   font-size: 0.75rem;
   text-align: center;
   padding-top: 0.5rem;

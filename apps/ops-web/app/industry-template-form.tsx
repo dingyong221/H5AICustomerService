@@ -16,7 +16,7 @@ export function IndustryTemplateForm() {
         <input
           maxLength={64}
           name="code"
-          pattern="[a-z][a-z0-9_-]+"
+          pattern="[a-z][a-z0-9_\-]+"
           placeholder="local_services"
           required
         />

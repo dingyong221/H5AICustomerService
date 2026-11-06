@@ -99,7 +99,14 @@ export function parseWritingResult(value: unknown, field: WritingField): Writing
     text.length <= max &&
     !controls.test(text);
   if (
-    !options.every((text) => valid(text, Math.min(writingFields[field].maximum, 1000))) ||
+    !options.every((text) =>
+      valid(
+        text,
+        ['pricingSummary', 'promotionSummary'].includes(field)
+          ? writingFields[field].maximum
+          : Math.min(writingFields[field].maximum, 1000),
+      ),
+    ) ||
     !reminders.every((text) => valid(text, 200))
   )
     return null;
