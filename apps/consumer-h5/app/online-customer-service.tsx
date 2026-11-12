@@ -2,6 +2,7 @@
 import { BrandMark } from '@h5cs/ui';
 
 import { HumanContactNotice } from './human-contact-notice';
+import { MessageBody } from './message-body';
 
 import { Button } from '@h5cs/ui';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -110,6 +111,7 @@ export function OnlineCustomerService({
   const sessionRequestIdRef = useRef<string | null>(null);
   const activeController = useRef<AbortController | undefined>(undefined);
   const running = useRef(false);
+  const startedPending = useRef<ConversationState['pending']>(undefined);
   const viewMessages = useMemo(
     () => toConversationView(conversation, activeSnapshot.welcomeMessage),
     [conversation, activeSnapshot.welcomeMessage],
@@ -216,7 +218,17 @@ export function OnlineCustomerService({
 
   useEffect(() => {
     const pending = conversation.pending;
-    if (restoreStatus !== 'ready' || pending?.phase !== 'sending' || running.current) return;
+    if (
+      restoreStatus !== 'ready' ||
+      pending?.phase !== 'sending' ||
+      running.current ||
+      startedPending.current === pending
+    )
+      return;
+    // Attaching the session preserves this pending object. A delayed effect for
+    // that intermediate state must not resend after a fast request failure.
+    // An explicit retry creates a new pending object with the same request ID.
+    startedPending.current = pending;
     running.current = true;
     const controller = new AbortController();
     activeController.current?.abort();
@@ -380,6 +392,8 @@ export function OnlineCustomerService({
   const inputDisabled = restoreStatus !== 'ready' || pending !== undefined || ending;
   const releaseWithdrawn =
     pending?.errorCode === 'RELEASE_WITHDRAWN' || recoveryCode === 'RELEASE_WITHDRAWN';
+  const resultUnknown = pending?.errorCode === 'MODEL_RESULT_UNKNOWN';
+  const elapsedSeconds = progress.id === pending?.clientMessageId ? progress.seconds : 0;
   const earlierVersion =
     conversation.session !== undefined && activeSnapshot.releaseRef !== snapshot.releaseRef;
 
@@ -453,13 +467,17 @@ export function OnlineCustomerService({
               ) : null}
               <div className="message-content">
                 <div className="message-bubble">
-                  <p>{message.content}</p>
+                  <MessageBody content={message.content} role={message.role} />
                 </div>
                 {message.status !== undefined || message.role === 'assistant' ? (
                   <p className={`message-status${message.status === 'failed' ? ' is-failed' : ''}`}>
                     {message.status === 'sending' ? '发送中…' : null}
-                    {message.status === 'waiting' ? 'AI 正在整理回答…' : null}
-                    {message.status === 'failed' ? '本次回复未完成，问题已保留' : null}
+                    {message.status === 'waiting' ? '等待 AI 回复…' : null}
+                    {message.status === 'failed'
+                      ? resultUnknown
+                        ? '回复结果待确认，问题已保留'
+                        : '本次回复未完成，问题已保留'
+                      : null}
                     {message.status === undefined ? (message.sourceLabel ?? 'AI 客服') : null}
                   </p>
                 ) : null}
@@ -470,12 +488,14 @@ export function OnlineCustomerService({
 
         <footer className="composer-area">
           {pending && pending.phase !== 'failed' ? (
-            <p className="reply-progress" role="status">
-              {replyProgress(
-                pending.phase,
-                progress.id === pending.clientMessageId ? progress.seconds : 0,
-              )}
-            </p>
+            <div className="reply-progress">
+              <p role="status">{replyProgress(pending.phase, elapsedSeconds)}</p>
+              {elapsedSeconds >= 45 ? (
+                <button onClick={() => window.location.reload()} type="button">
+                  刷新并恢复咨询
+                </button>
+              ) : null}
+            </div>
           ) : null}
           {restoreStatus === 'restoring' ? <p role="status">正在恢复上次咨询…</p> : null}
           {recoveryNotice ? <p role="status">{recoveryNotice}</p> : null}
@@ -505,19 +525,25 @@ export function OnlineCustomerService({
             <div className="send-failure" role="alert">
               <p>{pending.errorMessage}</p>
               <div>
-                {pending.retryable ? (
+                {pending.retryable && !resultUnknown ? (
                   <button onClick={retryMessage} type="button">
                     重试回复
                   </button>
                 ) : null}
                 <button onClick={continueQuestion} type="button">
-                  继续提问
+                  {resultUnknown ? '保留问题，继续输入' : '继续提问'}
                 </button>
                 <button onClick={() => window.location.reload()} type="button">
                   刷新客服状态
                 </button>
               </div>
-              <p>重试会继续确认同一条问题，不会作为新问题重复提交。</p>
+              <p>
+                {resultUnknown
+                  ? '刷新只核对已有咨询，不会自动重发。继续输入前请先核对原问题，避免重复提交。'
+                  : pending.retryable
+                    ? '重试会继续确认同一条问题，不会作为新问题重复提交。'
+                    : '继续输入不会自动重发上面的问题；需要业务确认时，请联系商家。'}
+              </p>
               {supportReference(pending.requestId ?? pending.turn?.traceId) ? (
                 <p>支持编号：{supportReference(pending.requestId ?? pending.turn?.traceId)}</p>
               ) : null}
@@ -525,7 +551,7 @@ export function OnlineCustomerService({
           ) : null}
           {previousQuestion ? (
             <details className="previous-question">
-              <summary>上次未完成的问题（仅保留在本页）</summary>
+              <summary>上次保留的问题（仅保留在本页）</summary>
               <p>{previousQuestion}</p>
               <p>继续输入不会自动重发上面的问题。</p>
             </details>

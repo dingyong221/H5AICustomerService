@@ -136,6 +136,19 @@ describe('consumer recovery controls', () => {
     expect(mocks.reload).toHaveBeenCalledOnce();
   });
 
+  it('provides a check-only exit for unknown results without offering retry or implying completion', () => {
+    mocks.hooks[0] = pending('MODEL_RESULT_UNKNOWN');
+    const tree = render();
+    expect(text(tree)).not.toContain('重试回复');
+    expect(text(tree)).not.toContain('重试会继续确认');
+    expect(text(tree)).toContain('刷新只核对已有咨询');
+    expect(text(tree)).toContain('避免重复提交');
+    button(tree, '保留问题，继续输入').props.onClick!();
+    expect((mocks.hooks[0] as ConversationState).pending).toBeUndefined();
+    expect(text(render())).toContain('这个商品多少钱？');
+    expect(mocks.reload).not.toHaveBeenCalled();
+  });
+
   it('routes withdrawal only through an explicit latest-page refresh, without new message or session', () => {
     mocks.hooks[0] = pending('RELEASE_WITHDRAWN');
     const tree = render();
@@ -173,5 +186,8 @@ describe('consumer recovery controls', () => {
     mocks.hooks[9] = { id: state.pending!.clientMessageId, seconds: 46 };
     expect(text(render())).toContain('请勿重复发送');
     expect(text(render())).not.toContain('正在逐字');
+    button(render(), '刷新并恢复咨询').props.onClick!();
+    expect(mocks.reload).toHaveBeenCalledOnce();
+    expect(mocks.clear).not.toHaveBeenCalled();
   });
 });

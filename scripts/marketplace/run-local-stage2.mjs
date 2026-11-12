@@ -219,6 +219,14 @@ async function tables(c) {
   );
   return rows.map((r) => r.name);
 }
+function legacyRowJson(table, row) {
+  if (table !== 'job') return JSON.stringify(row);
+  const legacy = { ...row };
+  delete legacy.claim_generation;
+  delete legacy.model_outcome;
+  delete legacy.model_attempt_id;
+  return JSON.stringify(legacy);
+}
 const report = { kind: 'a6-local-stage2', externalMarketplace: false, paidSupplierCalls: 0 };
 let source, restore;
 try {
@@ -262,27 +270,30 @@ try {
   );
   await migrate(drizzle(source), { migrationsFolder: baseline15 });
   const legacyTables = (await tables(source)).filter((t) => t !== '__drizzle_migrations');
-  const before = await snapshotTables(source, legacyTables);
+  const before = await snapshotTables(source, legacyTables, { legacyJobProjection: true });
   const legacyRows = {};
   for (const table of legacyTables) {
     const [rows] = await source.query('SELECT * FROM `' + table + '`');
-    legacyRows[table] = rows.map((row) => JSON.stringify(row));
+    legacyRows[table] = rows.map((row) => legacyRowJson(table, row));
   }
   await migrate(drizzle(source), { migrationsFolder: migrations });
-  const after = await snapshotTables(source, legacyTables);
+  const after = await snapshotTables(source, legacyTables, { legacyJobProjection: true });
   if (before.sha256 !== after.sha256) throw Error('Legacy baseline changed during marketplace DDL');
   report.upgrade = {
     from: 15,
-    to: 18,
+    to: 19,
     legacyTables: legacyTables.length,
     legacySha256: before.sha256,
     preserved: true,
   };
   await migrate(drizzle(source), { migrationsFolder: migrations });
-  if ((await snapshotTables(source, legacyTables)).sha256 !== before.sha256)
+  if (
+    (await snapshotTables(source, legacyTables, { legacyJobProjection: true })).sha256 !==
+    before.sha256
+  )
     throw Error('Replay modified legacy rows');
-  console.log('Non-empty 15→18 migration and replay preserved legacy data');
-  // Also run the existing CI 12→16 non-empty probe, rather than trusting its offline unit tests.
+  console.log('Non-empty 15→19 migration and replay preserved legacy data');
+  // Also run the existing CI 12→19 non-empty probe, rather than trusting its offline unit tests.
   await source.query(
     'CREATE DATABASE h5cs_integration_ci CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci',
   );
@@ -375,7 +386,7 @@ try {
   ]).done;
   for (const table of legacyTables) {
     const [rows] = await source.query('SELECT * FROM `' + table + '`');
-    const current = new Set(rows.map((row) => JSON.stringify(row)));
+    const current = new Set(rows.map((row) => legacyRowJson(table, row)));
     if (!legacyRows[table].every((row) => current.has(row)))
       throw Error('Legacy business row changed during browser flow: ' + table);
   }

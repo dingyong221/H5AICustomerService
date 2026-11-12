@@ -191,6 +191,10 @@ jobs:
         if: always()
         run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml down
 
+  runtime-stage1-mysql:
+    name: Real MySQL runtime recovery and upgrade
+    uses: ./.github/workflows/runtime-stage1.yml
+
   browser-e2e:
     name: Browser operator-to-consumer flow
     runs-on: ubuntu-latest

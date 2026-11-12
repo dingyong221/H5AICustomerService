@@ -127,6 +127,13 @@
       "when": 1793891484396,
       "tag": "0017_growth_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1794459177559,
+      "tag": "0018_runtime_claim_receipts",
+      "breakpoints": true
     }
   ]
 }

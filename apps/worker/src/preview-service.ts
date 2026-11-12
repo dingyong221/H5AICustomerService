@@ -9,6 +9,7 @@ import {
   loadChatCompletionsConfig,
 } from './chat-completions-generator.js';
 import { buildPreviewPrompt, type PreviewFacts } from './conversation-prompt.js';
+import type { ModelRuntime } from './model-runtime.js';
 
 export class PreviewError extends Error {
   public constructor(
@@ -230,6 +231,7 @@ export class PreviewService {
 
 export function createPreviewService(
   environment: NodeJS.ProcessEnv = process.env,
+  runtime?: ModelRuntime,
 ): PreviewService | null {
   const token = readToken(environment);
   const model = loadChatCompletionsConfig(environment);
@@ -247,14 +249,18 @@ export function createPreviewService(
     return null;
   }
   if (!database.configured) return null;
+  // The composition root must supply the conversation executor's capacity.
+  // Never silently create a second independent supplier pool for HTTP work.
+  if (!runtime) return null;
   const budget = new MySqlMarketplaceRepository(database.config);
   return new PreviewService(
     token,
     new ChatCompletionsGenerator(
       model.config,
       fetch,
-      (merchantId, operation) => budget.reserveModelCall(merchantId, operation),
+      undefined,
       (merchantId) => budget.assertModelAccess(merchantId),
+      runtime,
     ),
   );
 }

@@ -57,6 +57,24 @@ function pendingState() {
 }
 
 describe('conversation model', () => {
+  it('keeps unknown model results non-retryable even when an upstream retry flag is wrong', () => {
+    const state = markAccepted(attachSession(pendingState(), session), accepted);
+    const failed = applyTurnResult(state, {
+      messages: [visitorMessage],
+      sessionHandle: session.sessionHandle,
+      state: 'failed',
+      traceId: accepted.traceId,
+      turnId: accepted.turnId,
+      error: { code: 'MODEL_RESULT_UNKNOWN', retryable: true },
+    });
+    expect(failed.pending?.retryable).toBe(false);
+    expect(failed.pending?.errorMessage).toContain('请勿重复提交');
+    expect(retryPending(failed)).toBe(failed);
+    const incorrectlyFlagged = { ...failed, pending: { ...failed.pending!, retryable: true } };
+    expect(retryPending(incorrectlyFlagged)).toBe(incorrectlyFlagged);
+    expect(failed.session).toBe(session);
+    expect(failed.messages).toEqual([visitorMessage]);
+  });
   it('shows product quota/eligibility failures accurately and does not invite automatic retries', () => {
     for (const [code, message] of [
       ['MARKETPLACE_QUOTA_EXHAUSTED', '额度已用尽'],

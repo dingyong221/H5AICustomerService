@@ -7,6 +7,13 @@ import {
 } from './consumer-recovery';
 
 describe('customer-facing recovery guidance', () => {
+  it('does not invite a second supplier call when the original result is unknown', () => {
+    const failure = consumerFailure('MODEL_RESULT_UNKNOWN', true);
+    expect(failure.retryable).toBe(false);
+    expect(failure.message).toContain('刷新核对');
+    expect(failure.message).toContain('请勿重复提交');
+    expect(failure.message).not.toContain('重试');
+  });
   it('never retries a withdrawn release even if an upstream flag incorrectly allows retry', () => {
     expect(consumerFailure('RELEASE_WITHDRAWN', true)).toMatchObject({
       retryable: false,
@@ -26,10 +33,12 @@ describe('customer-facing recovery guidance', () => {
 
   it('explains actual waiting without claiming token streaming or a guaranteed reply time', () => {
     expect(replyProgress('sending', 60)).toContain('正在发送');
-    expect(replyProgress('waiting', 0)).toContain('根据商家资料');
+    expect(replyProgress('waiting', 0)).toContain('正在等待');
     expect(replyProgress('waiting', 15)).toContain('无需重复发送');
     expect(replyProgress('waiting', 45)).toContain('刷新恢复');
     expect(replyProgress('waiting', 90)).not.toContain('秒内完成');
+    expect(replyProgress('waiting', 15)).not.toContain('正在生成');
+    expect(replyProgress('waiting', 15)).not.toContain('整理回答');
   });
 
   it('allows only bounded safe request references', () => {

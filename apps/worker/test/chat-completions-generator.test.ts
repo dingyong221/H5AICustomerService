@@ -208,6 +208,9 @@ describe('configured Chat Completions generator', () => {
     const claim: ConversationTurnClaim = {
       jobId: '11'.repeat(16),
       leaseOwner: 'worker_test_01',
+      claimGeneration: '1',
+      leaseUntil: new Date(Date.now() + 120_000),
+      payloadVersion: 0,
       merchantId: '22'.repeat(16),
       assistantId: '33'.repeat(16),
       sessionId: '44'.repeat(16),
@@ -226,8 +229,8 @@ describe('configured Chat Completions generator', () => {
         insufficientInfoMessage: '请联系商家确认',
       },
     };
-    const complete = vi.fn(async () => undefined);
-    const fail = vi.fn(async () => undefined);
+    const complete = vi.fn(async () => 'applied' as const);
+    const fail = vi.fn(async () => 'applied' as const);
     const directory = mkdtempSync(join(tmpdir(), 'h5cs-worker-ca-'));
     const caFile = join(directory, 'ca.pem');
     writeFileSync(caFile, '-----BEGIN CERTIFICATE-----\nTEST-ONLY\n-----END CERTIFICATE-----\n');
@@ -241,8 +244,23 @@ describe('configured Chat Completions generator', () => {
         {
           fetchImpl: vi.fn<typeof fetch>(async () => response('100 元/台。')),
           assertModelAccess: async () => undefined,
-          reserveModelCall: async () => undefined,
-          storeFactory: () => ({ claimNext: async () => claim, complete, fail }),
+          attempts: {
+            unknownRiskCount: async () => 0,
+            markDispatch: async () => ({ attemptId: 'synthetic' }),
+            recordOutcome: async () => undefined,
+          },
+          storeFactory: () => ({
+            claimNext: async () => claim,
+            complete,
+            fail,
+            listRunnableMerchantHeads: async () => [],
+            releaseBeforeDispatch: async () => 'applied',
+            reconcile: async () => ({
+              state: 'completed',
+              currentGeneration: claim.claimGeneration,
+              modelOutcome: 'succeeded',
+            }),
+          }),
         },
       );
       if (!dispatch.configured) throw new Error(dispatch.reason);

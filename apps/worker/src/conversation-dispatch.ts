@@ -4,6 +4,7 @@ import {
   loadDatabaseConfig,
   MySqlConversationTurnJobRepository,
   MySqlMarketplaceRepository,
+  MySqlModelCallAttemptRepository,
   type DatabaseConnectionConfig,
 } from '@h5cs/database';
 
@@ -15,17 +16,20 @@ import {
   ConversationTurnProcessor,
   type ConversationTurnStore,
 } from './conversation-turn-processor.js';
+import { ModelRuntime, type ModelAttemptStore } from './model-runtime.js';
 
 type DispatchDependencies = Readonly<{
   fetchImpl?: typeof fetch;
   assertModelAccess?: (merchantId: string) => Promise<void>;
   reserveModelCall?: (merchantId: string, operation: string) => Promise<void>;
   storeFactory?: (database: DatabaseConnectionConfig) => ConversationTurnStore;
+  runtime?: ModelRuntime;
+  attempts?: ModelAttemptStore;
 }>;
 
 export type ConversationDispatchResult =
   | Readonly<{ configured: false; reason: string }>
-  | Readonly<{ configured: true; processor: ConversationTurnProcessor }>;
+  | Readonly<{ configured: true; processor: ConversationTurnProcessor; runtime: ModelRuntime }>;
 
 export function createConversationDispatch(
   environment: NodeJS.ProcessEnv = process.env,
@@ -44,15 +48,19 @@ export function createConversationDispatch(
     dependencies.storeFactory?.(database.config) ??
     new MySqlConversationTurnJobRepository(database.config);
   const budget = new MySqlMarketplaceRepository(database.config);
+  const runtime =
+    dependencies.runtime ??
+    new ModelRuntime(dependencies.attempts ?? new MySqlModelCallAttemptRepository(database.config));
   const generator = new ChatCompletionsGenerator(
     model.config,
     dependencies.fetchImpl,
-    dependencies.reserveModelCall ??
-      ((merchantId, operation) => budget.reserveModelCall(merchantId, operation)),
+    undefined,
     dependencies.assertModelAccess ?? ((merchantId) => budget.assertModelAccess(merchantId)),
+    runtime,
   );
   return {
     configured: true,
+    runtime,
     processor: new ConversationTurnProcessor(
       store,
       generator,

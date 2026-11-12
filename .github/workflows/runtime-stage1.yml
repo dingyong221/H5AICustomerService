@@ -1,0 +1,121 @@
+name: Runtime stage 1 MySQL
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-stage1-mysql:
+    name: Real MySQL ${{ matrix.probe }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        probe: [fresh-runtime, deployed-upgrade]
+    env:
+      CI: 'true'
+      H5CS_MYSQL_DATABASE: h5cs_integration_ci
+      H5CS_MYSQL_USER: h5cs_ci
+      H5CS_MYSQL_PASSWORD: local-dev-ci-only
+      H5CS_MYSQL_ROOT_PASSWORD: local-dev-root-only
+      H5CS_INTEGRATION_MYSQL_URL: mysql://h5cs_ci:local-dev-ci-only@127.0.0.1:3306/h5cs_integration_ci
+      MYSQL_DATABASE_URL: mysql://h5cs_ci:local-dev-ci-only@127.0.0.1:3306/h5cs_integration_ci
+    steps:
+      - name: Check out repository and deployed baseline history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pnpm 11
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build database and domain dependencies
+        run: pnpm exec turbo run build --filter=@h5cs/database --concurrency=1
+
+      - name: Extract and transpile the exact deployed public reader
+        if: matrix.probe == 'deployed-upgrade'
+        shell: bash
+        env:
+          H5CS_TEST_LEGACY_PUBLIC_READER: ${{ runner.temp }}/runtime-stage1-evidence/baseline-public-session-reader.mjs
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { execFileSync } from 'node:child_process';
+          import { createHash } from 'node:crypto';
+          import { mkdir, writeFile } from 'node:fs/promises';
+          import { dirname, resolve } from 'node:path';
+          import { pathToFileURL } from 'node:url';
+          import ts from 'typescript';
+          const baselineCommit = '1b45abe5dd9cc3404d50da12f8609437793a87df';
+          const sourcePath = 'packages/database/src/public-session-repository.ts';
+          const source = execFileSync('git', ['show', `${baselineCommit}:${sourcePath}`], { encoding: 'utf8' });
+          const outputPath = process.env.H5CS_TEST_LEGACY_PUBLIC_READER;
+          await mkdir(dirname(outputPath), { recursive: true });
+          const js = ts.transpileModule(source, { compilerOptions: {
+            target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, verbatimModuleSyntax: true,
+          } }).outputText;
+          const domainUrl = pathToFileURL(resolve('packages/domain/dist/index.js')).href;
+          await writeFile(outputPath, js.replaceAll("'@h5cs/domain'", JSON.stringify(domainUrl)));
+          await writeFile(resolve(dirname(outputPath), 'baseline-reader.json'), JSON.stringify({
+            baselineCommit, sourcePath, sourceSha256: createHash('sha256').update(source).digest('hex'),
+            transformation: 'TypeScript transpilation only; domain import resolves to current domain build',
+          }, null, 2) + '\n');
+          NODE
+
+      # Each matrix entry has its own fresh runner and volume. The upgrade probe
+      # and runtime suite must not share a database with each other or other jobs.
+      - name: Start dedicated loopback-only disposable MySQL
+        run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml up -d --wait mysql
+
+      - name: Apply nineteen reviewed migrations to the empty runtime database
+        if: matrix.probe == 'fresh-runtime'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ runner.temp }}/runtime-stage1-evidence"
+          pnpm --filter @h5cs/database exec drizzle-kit migrate --config drizzle.config.ts 2>&1 | tee "${{ runner.temp }}/runtime-stage1-evidence/migrations.log"
+
+      - name: Verify empty-database eighteen-to-nineteen upgrade and baseline reader
+        if: matrix.probe == 'deployed-upgrade'
+        shell: bash
+        env:
+          H5CS_TEST_LEGACY_PUBLIC_READER: ${{ runner.temp }}/runtime-stage1-evidence/baseline-public-session-reader.mjs
+        run: |
+          set -euo pipefail
+          node packages/database/scripts/verify-runtime-stage1-upgrade.mjs 2>&1 | tee "${{ runner.temp }}/runtime-stage1-evidence/upgrade.log"
+
+      - name: Verify runtime recovery races serially in real MySQL
+        if: matrix.probe == 'fresh-runtime'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ runner.temp }}/runtime-stage1-evidence"
+          node --test --test-concurrency=1 packages/database/test/runtime-stage1.mysql.mjs 2>&1 | tee "${{ runner.temp }}/runtime-stage1-evidence/runtime-tests.tap"
+
+      - name: Upload synthetic runtime recovery evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: runtime-stage1-mysql-${{ matrix.probe }}-${{ github.sha }}
+          path: ${{ runner.temp }}/runtime-stage1-evidence
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Stop dedicated disposable MySQL and remove its fixture volume
+        if: always()
+        run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml down --volumes

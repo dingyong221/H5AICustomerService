@@ -15,6 +15,14 @@ export function consumerFailure(code: string | undefined, retryable: boolean) {
       needsLatestVersion: false,
     };
   }
+  if (code === 'MODEL_RESULT_UNKNOWN') {
+    return {
+      message:
+        '这条问题的回复结果暂未确认，问题已保留。请先刷新核对咨询记录，或联系商家；请勿重复提交相同问题。',
+      retryable: false,
+      needsLatestVersion: false,
+    };
+  }
   return {
     message: retryable
       ? '暂时没有收到完整回复。你的问题已保留，可以重试回复；不会作为新问题重复提交。'
@@ -27,9 +35,9 @@ export function consumerFailure(code: string | undefined, retryable: boolean) {
 export function replyProgress(phase: 'sending' | 'waiting', elapsedSeconds: number): string {
   if (phase === 'sending') return '正在发送问题，请稍候…';
   if (elapsedSeconds >= 45)
-    return '回复仍在处理中，请勿重复发送。你可以保持此页等待，或稍后刷新恢复本次咨询。';
-  if (elapsedSeconds >= 15) return '比平时稍久，AI 仍在整理回答。问题已收到，无需重复发送。';
-  return '问题已收到，AI 正在根据商家资料整理回答…';
+    return '尚未收到完整回复，请勿重复发送。你可以保持此页等待，或刷新恢复本次咨询。';
+  if (elapsedSeconds >= 15) return '等待时间较长，回复尚未完成。问题已收到，无需重复发送。';
+  return '问题已收到，正在等待 AI 客服回复…';
 }
 
 export function supportReference(requestId: string | undefined): string | null {

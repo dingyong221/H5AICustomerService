@@ -712,6 +712,8 @@ export class MySqlPublicSessionRepository {
           session.merchant_id,
           createHash('sha256').update(handle.sessionId).update(turnId).digest(),
           JSON.stringify({
+            schemaVersion: 1,
+            handlerVersion: 'conversation-v1',
             merchantId: binaryId(session.merchant_id),
             assistantId: binaryId(session.assistant_id),
             sessionId: handle.sessionId.toString('hex'),

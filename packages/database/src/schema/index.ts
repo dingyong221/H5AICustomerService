@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   binary,
+  bigint,
   datetime,
   foreignKey,
   index,
@@ -1079,6 +1080,11 @@ export const jobs = mysqlTable(
     state: varchar('state', { length: 32 }).notNull().default('pending'),
     priority: int('priority').notNull().default(0),
     attempt: int('attempt', { unsigned: true }).notNull().default(0),
+    claimGeneration: bigint('claim_generation', { unsigned: true, mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    modelOutcome: varchar('model_outcome', { length: 32 }).notNull().default('none'),
+    modelAttemptId: id('model_attempt_id'),
     maxAttempts: int('max_attempts', { unsigned: true }).notNull().default(5),
     runAfter: utcDateTime('run_after').notNull(),
     leaseOwner: varchar('lease_owner', { length: 128 }),
@@ -1095,6 +1101,34 @@ export const jobs = mysqlTable(
     index('idx_job_lease_recovery').on(table.state, table.leaseUntil, table.id),
     index('idx_job_state_updated').on(table.state, table.updatedAt, table.id),
     index('idx_job_merchant').on(table.merchantId, table.createdAt, table.id),
+  ],
+);
+
+export const modelCallAttempts = mysqlTable(
+  'model_call_attempt',
+  {
+    id: id('id').notNull(),
+    merchantId: id('merchant_id').notNull(),
+    jobId: id('job_id'),
+    claimGeneration: bigint('claim_generation', { unsigned: true, mode: 'bigint' }),
+    operation: varchar('operation', { length: 64 }).notNull(),
+    state: varchar('state', { length: 32 }).notNull(),
+    providerRequestId: varchar('provider_request_id', { length: 200 }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    completedAt: utcDateTime('completed_at'),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id], name: 'pk_model_call_attempt' }),
+    uniqueIndex('uq_model_attempt_job_generation').on(table.jobId, table.claimGeneration),
+    index('idx_model_attempt_risk').on(table.state, table.createdAt, table.id),
+    index('idx_model_attempt_merchant').on(table.merchantId, table.createdAt, table.id),
+    foreignKey({
+      columns: [table.merchantId],
+      foreignColumns: [merchants.id],
+      name: 'fk_model_attempt_merchant',
+    }),
+    foreignKey({ columns: [table.jobId], foreignColumns: [jobs.id], name: 'fk_model_attempt_job' }),
   ],
 );
 

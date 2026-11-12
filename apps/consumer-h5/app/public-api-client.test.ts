@@ -42,6 +42,23 @@ const snapshotData = {
 const snapshot: OnlinePublicAssistantSnapshot = snapshotData;
 
 describe('public API response decoders', () => {
+  it('preserves MODEL_RESULT_UNKNOWN through the durable public result decoder', () => {
+    expect(
+      decodeTurnResult(
+        envelope({
+          sessionHandle,
+          turnId: 'turn_unknown_1234',
+          traceId: 'trace_unknown_1234',
+          state: 'failed',
+          messages: [],
+          error: { code: 'MODEL_RESULT_UNKNOWN', retryable: false },
+        }),
+      ),
+    ).toMatchObject({
+      state: 'failed',
+      error: { code: 'MODEL_RESULT_UNKNOWN', retryable: false },
+    });
+  });
   it('accepts an exact online public snapshot', () => {
     expect(decodePublicAssistantSnapshot(envelope(snapshotData))).toEqual(snapshotData);
     expect(
