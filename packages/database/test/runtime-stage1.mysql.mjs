@@ -408,20 +408,21 @@ test('real MySQL: commit response loss is reconciled, without a duplicate answer
 });
 
 test('real MySQL: merchant-head cursor covers more than one page without global FIFO truncation', async () => {
+  const scanAt = new Date();
   const inserted = [];
   for (let index = 0; index < 65; index++) {
     const id = randomBytes(16);
     inserted.push(id.toString('hex'));
     await sql(`INSERT INTO merchant(id,name,status) VALUES(?,'分页合成商家','active')`, [id]);
     await sql(
-      `INSERT INTO job(id,merchant_id,type,dedup_key,payload,state,run_after) VALUES(?,?,'conversation.turn',?,'{}','pending',UTC_TIMESTAMP(6))`,
-      [randomBytes(16), id, randomBytes(32)],
+      `INSERT INTO job(id,merchant_id,type,dedup_key,payload,state,run_after) VALUES(?,?,'conversation.turn',?,'{}','pending',?)`,
+      [randomBytes(16), id, randomBytes(32), scanAt],
     );
   }
   let cursor;
   const all = [];
   do {
-    const page = await jobs.listRunnableMerchantHeads(new Date(), {
+    const page = await jobs.listRunnableMerchantHeads(scanAt, {
       limit: 32,
       ...(cursor ? { afterMerchantId: cursor } : {}),
     });
