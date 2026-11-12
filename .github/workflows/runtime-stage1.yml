@@ -23,7 +23,6 @@ jobs:
       H5CS_MYSQL_ROOT_PASSWORD: local-dev-root-only
       H5CS_INTEGRATION_MYSQL_URL: mysql://h5cs_ci:local-dev-ci-only@127.0.0.1:3306/h5cs_integration_ci
       MYSQL_DATABASE_URL: mysql://h5cs_ci:local-dev-ci-only@127.0.0.1:3306/h5cs_integration_ci
-      H5CS_TEST_LEGACY_PUBLIC_READER: ${{ runner.temp }}/runtime-stage1-evidence/baseline-public-session-reader.mjs
     steps:
       - name: Check out repository and deployed baseline history
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -51,6 +50,8 @@ jobs:
       - name: Extract and transpile the exact deployed public reader
         if: matrix.probe == 'deployed-upgrade'
         shell: bash
+        env:
+          H5CS_TEST_LEGACY_PUBLIC_READER: ${{ runner.temp }}/runtime-stage1-evidence/baseline-public-session-reader.mjs
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
@@ -92,6 +93,8 @@ jobs:
       - name: Verify empty-database eighteen-to-nineteen upgrade and baseline reader
         if: matrix.probe == 'deployed-upgrade'
         shell: bash
+        env:
+          H5CS_TEST_LEGACY_PUBLIC_READER: ${{ runner.temp }}/runtime-stage1-evidence/baseline-public-session-reader.mjs
         run: |
           set -euo pipefail
           node packages/database/scripts/verify-runtime-stage1-upgrade.mjs 2>&1 | tee "${{ runner.temp }}/runtime-stage1-evidence/upgrade.log"
