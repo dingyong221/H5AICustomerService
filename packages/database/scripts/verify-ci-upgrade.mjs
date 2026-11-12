@@ -325,8 +325,13 @@ export async function snapshotTables(connection, tables, options = {}) {
     if (table === 'job' && options.legacyJobProjection) {
       // Only these three additive runtime columns are excluded. All pre-existing
       // values and the rest of the legacy schema remain byte-for-byte checked.
-      for (const row of rows) for (const field of ['claim_generation', 'model_outcome', 'model_attempt_id']) delete row[field];
-      definitionSql = definitionSql.split('\n').filter(line => !/^\s*`(?:claim_generation|model_outcome|model_attempt_id)` /u.test(line)).join('\n');
+      for (const row of rows)
+        for (const field of ['claim_generation', 'model_outcome', 'model_attempt_id'])
+          delete row[field];
+      definitionSql = definitionSql
+        .split('\n')
+        .filter((line) => !/^\s*`(?:claim_generation|model_outcome|model_attempt_id)` /u.test(line))
+        .join('\n');
     }
     output.push({
       table,

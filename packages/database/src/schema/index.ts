@@ -1080,7 +1080,9 @@ export const jobs = mysqlTable(
     state: varchar('state', { length: 32 }).notNull().default('pending'),
     priority: int('priority').notNull().default(0),
     attempt: int('attempt', { unsigned: true }).notNull().default(0),
-    claimGeneration: bigint('claim_generation', { unsigned: true, mode: 'bigint' }).notNull().default(sql`0`),
+    claimGeneration: bigint('claim_generation', { unsigned: true, mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
     modelOutcome: varchar('model_outcome', { length: 32 }).notNull().default('none'),
     modelAttemptId: id('model_attempt_id'),
     maxAttempts: int('max_attempts', { unsigned: true }).notNull().default(5),
@@ -1116,12 +1118,16 @@ export const modelCallAttempts = mysqlTable(
     updatedAt: updatedAt(),
     completedAt: utcDateTime('completed_at'),
   },
-  table => [
+  (table) => [
     primaryKey({ columns: [table.id], name: 'pk_model_call_attempt' }),
     uniqueIndex('uq_model_attempt_job_generation').on(table.jobId, table.claimGeneration),
     index('idx_model_attempt_risk').on(table.state, table.createdAt, table.id),
     index('idx_model_attempt_merchant').on(table.merchantId, table.createdAt, table.id),
-    foreignKey({ columns: [table.merchantId], foreignColumns: [merchants.id], name: 'fk_model_attempt_merchant' }),
+    foreignKey({
+      columns: [table.merchantId],
+      foreignColumns: [merchants.id],
+      name: 'fk_model_attempt_merchant',
+    }),
     foreignKey({ columns: [table.jobId], foreignColumns: [jobs.id], name: 'fk_model_attempt_job' }),
   ],
 );

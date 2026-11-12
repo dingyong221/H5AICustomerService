@@ -79,7 +79,21 @@ describe('MySQL conversation turn jobs', () => {
   it('leases one tenant-scoped job with pinned release facts and completed context', async () => {
     const { repository, calls, commit } = repositoryWith(async (statement) => {
       if (statement.includes('FROM job')) {
-        return [[{ id: jobId, merchant_id: merchantId, payload, state: 'pending', attempt: 0, max_attempts: 5, claim_generation: '0', model_outcome: 'none' }], []];
+        return [
+          [
+            {
+              id: jobId,
+              merchant_id: merchantId,
+              payload,
+              state: 'pending',
+              attempt: 0,
+              max_attempts: 5,
+              claim_generation: '0',
+              model_outcome: 'none',
+            },
+          ],
+          [],
+        ];
       }
       if (statement.includes('FROM conversation_session')) {
         return [
@@ -136,7 +150,21 @@ describe('MySQL conversation turn jobs', () => {
   it('fails a job and releases the session when pinned facts are missing', async () => {
     const { repository, calls, commit } = repositoryWith(async (statement) => {
       if (statement.includes('FROM job')) {
-        return [[{ id: jobId, merchant_id: merchantId, payload, state: 'pending', attempt: 0, max_attempts: 5, claim_generation: '0', model_outcome: 'none' }], []];
+        return [
+          [
+            {
+              id: jobId,
+              merchant_id: merchantId,
+              payload,
+              state: 'pending',
+              attempt: 0,
+              max_attempts: 5,
+              claim_generation: '0',
+              model_outcome: 'none',
+            },
+          ],
+          [],
+        ];
       }
       if (statement.includes('FROM conversation_session')) {
         return [
@@ -176,11 +204,23 @@ describe('MySQL conversation turn jobs', () => {
 
   it('atomically records the answer and clears the active turn only for its lease owner', async () => {
     const { repository, calls, commit } = repositoryWith(async (statement) => {
-      if (statement.includes('FROM job')) return [[{
-        id: jobId, merchant_id: merchantId, payload, state: 'processing',
-        lease_owner: acceptedClaim.leaseOwner, lease_until: acceptedClaim.leaseUntil,
-        claim_generation: acceptedClaim.claimGeneration, model_outcome: 'none', model_attempt_id: null,
-      }], []];
+      if (statement.includes('FROM job'))
+        return [
+          [
+            {
+              id: jobId,
+              merchant_id: merchantId,
+              payload,
+              state: 'processing',
+              lease_owner: acceptedClaim.leaseOwner,
+              lease_until: acceptedClaim.leaseUntil,
+              claim_generation: acceptedClaim.claimGeneration,
+              model_outcome: 'none',
+              model_attempt_id: null,
+            },
+          ],
+          [],
+        ];
       if (statement.includes('SELECT id FROM message')) return [[{ id: visitorMessageId }], []];
       if (statement.includes('SELECT cs.active_turn_id')) {
         return [

@@ -228,22 +228,19 @@ test('real MySQL: normal publishing pins old sessions, withdrawal closes old and
     content: '合成旧版问题',
     now: new Date(),
   });
-  const jobs = await sql(
-    `SELECT HEX(id) id,payload FROM job WHERE merchant_id=UNHEX(?) AND type='conversation.turn'`,
-    [scope.merchantId],
-  );
-  const job = jobs[0],
-    payload = typeof job.payload === 'string' ? JSON.parse(job.payload) : job.payload;
-  const messages = await sql(
-    `SELECT HEX(id) id FROM message WHERE merchant_id=UNHEX(?) AND turn_id=UNHEX(?) AND role='visitor'`,
-    [scope.merchantId, turn.turnId.slice(2)],
-  );
   const leaseOwner = 'governance-fixture-lease';
-  await sql(
-    `UPDATE job SET state='processing',lease_owner=?,lease_until=DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 2 MINUTE) WHERE id=UNHEX(?)`,
-    [leaseOwner, job.id],
+  const claim = await new MySqlConversationTurnJobRepository(database).claimNext(
+    new Date(),
+    leaseOwner,
+    { merchantId: scope.merchantId },
   );
-  await sql(`UPDATE message SET state='processing' WHERE id=UNHEX(?)`, [messages[0].id]);
+  assert.ok(claim, 'the in-flight fixture must be a real claimed turn');
+  assert.equal(claim.merchantId, scope.merchantId);
+  assert.equal(claim.turnId, turn.turnId.slice(2));
+  assert.equal(claim.releaseId, v1.releaseId);
+  assert.equal(claim.claimGeneration, '1');
+  assert.equal(claim.payloadVersion, 1);
+  assert.ok(Number.isFinite(claim.leaseUntil.getTime()));
   await repository.saveDraft({
     ...scope,
     expectedRevision: 1,
@@ -303,33 +300,23 @@ test('real MySQL: normal publishing pins old sessions, withdrawal closes old and
       const connection = await database.openConnection();
       const execute = connection.execute.bind(connection);
       connection.execute = async (statement, ...args) => {
-        if (typeof statement === 'string' && statement.includes('SELECT id FROM job'))
+        const result = await execute(statement, ...args);
+        if (
+          typeof statement === 'string' &&
+          /\bFROM\s+`?job`?\b/iu.test(statement) &&
+          /\bFOR\s+UPDATE\b/iu.test(statement) &&
+          /\bclaim_generation\b/iu.test(statement) &&
+          Buffer.isBuffer(args[0]?.[0]) &&
+          args[0][0].equals(Buffer.from(claim.jobId, 'hex'))
+        )
           checkedLease = true;
-        return execute(statement, ...args);
+        return result;
       };
       return connection;
     },
   };
   const worker = new MySqlConversationTurnJobRepository(observed);
-  await assert.rejects(() =>
-    worker.complete(
-      {
-        jobId: job.id.toLowerCase(),
-        leaseOwner,
-        merchantId: scope.merchantId,
-        assistantId: scope.assistantId,
-        sessionId: payload.sessionId,
-        releaseId: v1.releaseId,
-        turnId: turn.turnId.slice(2),
-        visitorMessageId: messages[0].id.toLowerCase(),
-        question: '合成旧版问题',
-        facts: {},
-        context: [],
-      },
-      '不得交付的旧回复',
-      new Date(),
-    ),
-  );
+  assert.equal(await worker.complete(claim, '不得交付的旧回复', new Date()), 'stale');
   assert.equal(checkedLease, true, 'valid in-flight claim must reach the durable lease guard');
   assert.equal(
     Number(
@@ -342,9 +329,22 @@ test('real MySQL: normal publishing pins old sessions, withdrawal closes old and
     ),
     0,
   );
-  assert.equal(
-    (await sql(`SELECT last_error_code FROM job WHERE id=UNHEX(?)`, [job.id]))[0].last_error_code,
-    'RELEASE_WITHDRAWN',
+  const [withdrawnJob] = await sql(`SELECT state,last_error_code FROM job WHERE id=UNHEX(?)`, [
+    claim.jobId,
+  ]);
+  assert.equal(withdrawnJob.state, 'failed');
+  assert.equal(withdrawnJob.last_error_code, 'RELEASE_WITHDRAWN');
+  const [withdrawnSession] = await sql(
+    `SELECT status,active_turn_id,ended_reason FROM conversation_session WHERE id=UNHEX(?) AND merchant_id=UNHEX(?)`,
+    [claim.sessionId, scope.merchantId],
+  );
+  assert.equal(withdrawnSession.status, 'withdrawn');
+  assert.equal(withdrawnSession.active_turn_id, null);
+  assert.equal(withdrawnSession.ended_reason, 'emergency_withdrawal');
+  await assert.rejects(
+    () => publicRepo.readHistory(session.sessionHandle, visitorNonce, new Date()),
+    (error) =>
+      error instanceof PublicReleaseWithdrawnError && error.message === 'RELEASE_WITHDRAWN',
   );
   await pass(scope, 3);
   const v3 = await publish(scope, 3);
