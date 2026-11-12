@@ -190,8 +190,8 @@ test('real MySQL: unclosed dispatch recovery races with late outcome without rev
     claim(scope),
     attempts.recordOutcome(receipt.attemptId, 'succeeded', new Date(), 'synthetic-race'),
   ]);
-  assert.equal((await jobs.reconcile(c)).state, 'failed');
   assert.equal(await claim(scope), null);
+  assert.equal((await jobs.reconcile(c)).state, 'failed');
   assert.equal(await count('model_call_attempt', scope), 1);
   assert.equal(await count('message', scope), 1);
 });
