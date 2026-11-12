@@ -1,6 +1,12 @@
 # 当前工作交接
 
-更新时间：2026-10-26 02:03（Asia/Shanghai）。本轮商家菜单改名已实现、验证、部署，没有待发布动作；不要重放旧下载/切换/迁移。
+更新时间：2026-11-12（UTC）。Actions 产物保留期改为 7 天的 PR 待合并；线上商家菜单状态仍如下，不要重放旧下载/切换/迁移。
+
+## Actions 存储
+
+私有仓库 Actions 存储配额已用尽。`.github/workflows/` 中全部 `actions/upload-artifact` 的 `retention-days` 现为 7（`release-candidate.yml` 与 `candidate-images.yml` 由 90 缩短，`ci.yml` 发布证据由 14 缩短，其余两处原本就是 7）。只改保留天数。`candidate-images.yml` 的两处 `download-artifact` 只读同一次运行内刚上传的摘要与清单，没有 `run-id`，也没有 workflow 去下载数天前的产物，7 天不会打断它们。已有产物仍按原到期时间保留。GHCR 镜像继续由 `candidate-images.yml` 推送，占用同一配额，但不受 `retention-days` 影响。YAML 已解析通过；PR 未合并。
+
+更新时间（上一阶段）：2026-10-26 02:03（Asia/Shanghai）。本轮商家菜单改名已实现、验证、部署，没有待发布动作。
 
 ## 当前状态
 

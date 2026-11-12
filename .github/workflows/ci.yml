@@ -130,7 +130,7 @@ jobs:
           name: repository-release-evidence-${{ github.sha }}
           path: ${{ runner.temp }}/release-evidence
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 7
 
   mysql-integration:
     name: Real MySQL merchant-to-consumer flow

@@ -105,7 +105,7 @@ jobs:
           name: h5cs-v${{ steps.release.outputs.version }}-${{ github.sha }}
           path: ${{ runner.temp }}/release-evidence
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 7
 
       - name: Preserve production boundary
         shell: bash

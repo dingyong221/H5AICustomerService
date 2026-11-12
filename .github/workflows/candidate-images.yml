@@ -215,7 +215,7 @@ jobs:
           name: image-digest-${{ matrix.app }}
           path: ${{ matrix.app }}.digest.txt
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 7
 
   digest-manifest:
     name: Collect five image digests
@@ -248,7 +248,7 @@ jobs:
             candidate-images.txt
             web-path-mode.txt
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 7
       - name: Preserve production boundary
         run: |
           echo "Images are candidate artifacts only. No production deployment occurred."
