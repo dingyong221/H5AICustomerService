@@ -181,7 +181,12 @@ export function failPending(
 }
 
 export function retryPending(state: ConversationState): ConversationState {
-  if (state.pending?.phase !== 'failed' || !state.pending.retryable) return state;
+  if (
+    state.pending?.phase !== 'failed' ||
+    !state.pending.retryable ||
+    state.pending.errorCode === 'MODEL_RESULT_UNKNOWN'
+  )
+    return state;
   return {
     ...state,
     pending: {

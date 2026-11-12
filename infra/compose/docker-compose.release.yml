@@ -58,6 +58,9 @@ services:
 
   worker:
     <<: *runtime-defaults
+    # Exactly one worker instance: all model entry points share its two slots.
+    # Drain 85s after stop-admission; 75s calls remain inside 120s job leases.
+    stop_grace_period: 100s
     image: ${H5CS_WORKER_IMAGE:?set H5CS_WORKER_IMAGE to an immutable image digest}
     pull_policy: always
     env_file:

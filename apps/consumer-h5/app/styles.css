@@ -305,6 +305,7 @@ textarea:focus-visible {
 
 .message-content {
   max-width: calc(100% - 2.65rem);
+  min-width: 0;
 }
 
 .message-row--visitor .message-content {
@@ -347,6 +348,7 @@ textarea:focus-visible {
   line-height: 1.68;
   max-width: 24rem;
   padding: 0.85rem 1rem;
+  overflow-wrap: anywhere;
 }
 
 .message-bubble p {
@@ -355,6 +357,36 @@ textarea:focus-visible {
 
 .message-bubble p + p {
   margin-top: 0.55rem;
+}
+
+.message-plain,
+.message-body p,
+.message-body li {
+  white-space: pre-wrap;
+}
+
+.message-body > * + * {
+  margin-top: 0.65rem;
+}
+
+.message-body ul,
+.message-body ol {
+  margin-bottom: 0;
+  margin-top: 0;
+  padding-left: 2rem;
+}
+
+.message-body > ul:not(:first-child),
+.message-body > ol:not(:first-child) {
+  margin-top: 0.65rem;
+}
+
+.message-body li + li {
+  margin-top: 0.3rem;
+}
+
+.message-body strong {
+  font-weight: 750;
 }
 
 .message-time {
@@ -627,6 +659,22 @@ textarea:focus-visible {
   line-height: 1.5;
   margin: 0 0 0.6rem;
   overflow-wrap: anywhere;
+}
+
+.reply-progress p {
+  margin: 0;
+}
+
+.reply-progress button {
+  background: #f3f7ff;
+  border: 1px solid #afc2e2;
+  border-radius: 8px;
+  color: #173f79;
+  cursor: pointer;
+  font-size: 0.74rem;
+  margin-top: 0.45rem;
+  min-height: 2.75rem;
+  padding: 0.45rem 0.65rem;
 }
 
 .previous-question summary {

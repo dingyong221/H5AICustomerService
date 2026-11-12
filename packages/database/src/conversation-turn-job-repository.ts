@@ -4,6 +4,13 @@ import { normalizeHumanContact } from '@h5cs/domain';
 import type { Connection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
 import type { DatabaseConnectionConfig } from './config.js';
+import {
+  ConversationTurnJobError, conversationClaimIds, decodeConversationTaskPayload,
+  jobBytes, lockValidConversationClaim,
+  jobObject,
+  type ClaimMutationResult, type ModelCallOutcome,
+} from './conversation-job-contract.js';
+export { ConversationTurnJobError } from './conversation-job-contract.js';
 
 type JobRow = RowDataPacket & {
   id: Buffer;
@@ -11,6 +18,9 @@ type JobRow = RowDataPacket & {
   payload: string | Record<string, unknown>;
   attempt: number;
   max_attempts: number;
+  claim_generation: string;
+  model_outcome: ModelCallOutcome;
+  state: string;
 };
 
 type SessionRow = RowDataPacket & {
@@ -49,6 +59,9 @@ export type ConversationFacts = Readonly<{
 export type ConversationTurnClaim = Readonly<{
   jobId: string;
   leaseOwner: string;
+  claimGeneration: string;
+  leaseUntil: Date;
+  payloadVersion: 0 | 1;
   merchantId: string;
   assistantId: string;
   sessionId: string;
@@ -60,21 +73,9 @@ export type ConversationTurnClaim = Readonly<{
   context: readonly Readonly<{ role: 'visitor' | 'assistant'; content: string }>[];
 }>;
 
-export class ConversationTurnJobError extends Error {
-  public constructor(message = 'Conversation turn job is unavailable') {
-    super(message);
-    this.name = 'ConversationTurnJobError';
-  }
-}
-
 const hex = (value: Buffer): string => {
   if (!Buffer.isBuffer(value) || value.byteLength !== 16) throw new ConversationTurnJobError();
   return value.toString('hex');
-};
-
-const bytes = (value: string): Buffer => {
-  if (!/^[0-9a-f]{32}$/u.test(value)) throw new ConversationTurnJobError();
-  return Buffer.from(value, 'hex');
 };
 
 const parseObject = (value: string | Record<string, unknown>): Record<string, unknown> => {
@@ -90,22 +91,7 @@ const parseObject = (value: string | Record<string, unknown>): Record<string, un
   return parsed as Record<string, unknown>;
 };
 
-const parsePayload = (value: string | Record<string, unknown>) => {
-  const payload = parseObject(value);
-  const names = ['merchantId', 'assistantId', 'sessionId', 'releaseId'] as const;
-  for (const name of names)
-    if (typeof payload[name] !== 'string') throw new ConversationTurnJobError();
-  if (typeof payload['turnId'] !== 'string' || !/^t_[0-9a-f]{32}$/u.test(payload['turnId'])) {
-    throw new ConversationTurnJobError();
-  }
-  return {
-    merchantId: bytes(payload['merchantId'] as string),
-    assistantId: bytes(payload['assistantId'] as string),
-    sessionId: bytes(payload['sessionId'] as string),
-    releaseId: bytes(payload['releaseId'] as string),
-    turnId: bytes((payload['turnId'] as string).slice(2)),
-  };
-};
+const parsePayload = decodeConversationTaskPayload;
 
 const factsFrom = (value: string | Record<string, unknown>): ConversationFacts => {
   const snapshot = parseObject(value);
@@ -134,32 +120,67 @@ const factsFrom = (value: string | Record<string, unknown>): ConversationFacts =
 export class MySqlConversationTurnJobRepository {
   public constructor(private readonly database: DatabaseConnectionConfig) {}
 
-  public async claimNext(now: Date, leaseOwner: string): Promise<ConversationTurnClaim | null> {
+  public async claimNext(now: Date, leaseOwner: string, options: { merchantId?: string } = {}): Promise<ConversationTurnClaim | null> {
     if (!Number.isFinite(now.getTime()) || !/^[A-Za-z0-9_-]{8,128}$/u.test(leaseOwner)) {
       throw new ConversationTurnJobError();
     }
     return this.#withTransaction(async (connection) => {
       const [jobs] = await connection.execute<JobRow[]>(
-        `SELECT id, merchant_id, payload, attempt, max_attempts
+        `SELECT id, merchant_id, payload, state, attempt, max_attempts,
+                CAST(claim_generation AS CHAR) claim_generation, model_outcome
            FROM job
           WHERE type = 'conversation.turn'
+            ${options.merchantId ? 'AND merchant_id = ?' : ''}
             AND ((state = 'pending' AND run_after <= ?)
               OR (state = 'processing' AND lease_until < ?))
           ORDER BY priority DESC, run_after ASC, id ASC
           LIMIT 1 FOR UPDATE SKIP LOCKED`,
-        [now, now],
+        [...(options.merchantId ? [jobBytes(options.merchantId)] : []), now, now],
       );
       const job = jobs[0];
       if (!job) return null;
       let payload: ReturnType<typeof parsePayload>;
       try {
         payload = parsePayload(job.payload);
-      } catch {
-        await this.#rejectJob(connection, job.id, now, 'INVALID_JOB_PAYLOAD');
+      } catch (error) {
+        const errorCode = error instanceof ConversationTurnJobError && error.code === 'UNSUPPORTED_JOB_VERSION'
+          ? 'UNSUPPORTED_JOB_VERSION' : 'INVALID_JOB_PAYLOAD';
+        // Known scope can be released even when the handler version is unsupported.
+        // Never interpret that task's facts or call a supplier.
+        try {
+          const scoped = parsePayload({ ...jobObject(job.payload), schemaVersion: undefined });
+          if (!job.merchant_id?.equals(scoped.merchantId)) throw new ConversationTurnJobError();
+          await this.#failLocked(connection, job.id, scoped, now, errorCode);
+        } catch (scopeError) {
+          if (!(scopeError instanceof ConversationTurnJobError)) throw scopeError;
+          await this.#rejectJob(connection, job.id, now, errorCode);
+        }
         return null;
       }
       if (!job.merchant_id || !job.merchant_id.equals(payload.merchantId)) {
         await this.#rejectJob(connection, job.id, now, 'INVALID_JOB_SCOPE');
+        return null;
+      }
+      if (job.state === 'processing' && String(job.claim_generation) === '0' && job.attempt > 0 && job.model_outcome === 'none') {
+        const attemptId = randomBytes(16);
+        await connection.execute(`INSERT INTO model_call_attempt
+          (id, merchant_id, job_id, claim_generation, operation, state, created_at, updated_at, completed_at)
+          VALUES (?, ?, ?, 0, 'consumer', 'unknown', ?, ?, ?)`,
+          [attemptId, job.merchant_id, job.id, now, now, now]);
+        await connection.execute(`UPDATE job SET model_outcome = 'unknown', model_attempt_id = ? WHERE id = ?`, [attemptId, job.id]);
+        job.model_outcome = 'unknown';
+      }
+      // A lease is not proof that a timed-out supplier request never ran.
+      // Only claims with no dispatched attempt may be automatically recovered.
+      if (job.model_outcome !== 'none' && job.model_outcome !== 'not_dispatched') {
+        await connection.execute(
+          `UPDATE model_call_attempt SET state = 'unknown', updated_at = ?, completed_at = ?
+             WHERE job_id = ? AND claim_generation = ? AND state = 'dispatched'`,
+          [now, now, job.id, job.claim_generation],
+        );
+        await connection.execute(`UPDATE job SET model_outcome = 'unknown' WHERE id = ? AND model_outcome = 'dispatched'`, [job.id]);
+        await this.#failLocked(connection, job.id, payload, now,
+          job.model_outcome === 'succeeded' ? 'TURN_RESULT_UNAVAILABLE' : 'MODEL_RESULT_UNKNOWN');
         return null;
       }
       const [sessions] = await connection.execute<SessionRow[]>(
@@ -241,6 +262,7 @@ export class MySqlConversationTurnJobRepository {
       const leaseUntil = new Date(now.getTime() + 2 * 60 * 1_000);
       const [jobResult] = await connection.execute<ResultSetHeader>(
         `UPDATE job SET state = 'processing', attempt = attempt + 1,
+            claim_generation = claim_generation + 1, model_outcome = 'none', model_attempt_id = NULL,
             lease_owner = ?, lease_until = ?, updated_at = ?
           WHERE id = ? AND type = 'conversation.turn'`,
         [leaseOwner, leaseUntil, now, job.id],
@@ -257,6 +279,9 @@ export class MySqlConversationTurnJobRepository {
       return {
         jobId: hex(job.id),
         leaseOwner,
+        claimGeneration: (BigInt(job.claim_generation) + 1n).toString(),
+        leaseUntil,
+        payloadVersion: payload.payloadVersion,
         merchantId: hex(payload.merchantId),
         assistantId: hex(payload.assistantId),
         sessionId: hex(payload.sessionId),
@@ -270,19 +295,14 @@ export class MySqlConversationTurnJobRepository {
     });
   }
 
-  public async complete(claim: ConversationTurnClaim, answer: string, now: Date): Promise<void> {
+  public async complete(claim: ConversationTurnClaim, answer: string, now: Date): Promise<ClaimMutationResult> {
     if (answer.trim().length === 0 || answer.length > 8_000 || !Number.isFinite(now.getTime())) {
       throw new ConversationTurnJobError();
     }
-    await this.#withTransaction(async (connection) => {
-      const payload = this.#claimIds(claim);
-      const [jobs] = await connection.execute<(RowDataPacket & { id: Buffer })[]>(
-        `SELECT id FROM job WHERE id = ? AND type = 'conversation.turn'
-            AND state = 'processing' AND lease_owner = ? AND lease_until > ?
-          LIMIT 1 FOR UPDATE`,
-        [payload.jobId, claim.leaseOwner, now],
-      );
-      if (!jobs[0]) throw new ConversationTurnJobError();
+    return this.#withTransaction(async (connection) => {
+      const locked = await lockValidConversationClaim(connection, claim, now);
+      if (!locked) return 'stale';
+      const payload = locked.ids;
       const [sessions] = await connection.execute<
         (RowDataPacket & {
           active_turn_id: Buffer | null;
@@ -298,8 +318,8 @@ export class MySqlConversationTurnJobRepository {
            JOIN assistant a ON a.merchant_id = cs.merchant_id AND a.id = cs.assistant_id
            JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
           WHERE cs.id = ? AND cs.merchant_id = ? AND cs.assistant_id = ?
-            AND cs.release_id = ? AND cs.status = 'active' LIMIT 1 FOR UPDATE`,
-        [payload.sessionId, payload.merchantId, payload.assistantId, payload.releaseId],
+            AND cs.release_id = ? AND cs.status = 'active' AND cs.expires_at > ? LIMIT 1 FOR UPDATE`,
+        [payload.sessionId, payload.merchantId, payload.assistantId, payload.releaseId, now],
       );
       const session = sessions[0];
       if (
@@ -309,7 +329,7 @@ export class MySqlConversationTurnJobRepository {
         !Number.isSafeInteger(session.next_sequence) ||
         session.next_sequence >= 4_294_967_295
       ) {
-        throw new ConversationTurnJobError();
+        return 'stale';
       }
       const assistantMessageId = randomBytes(16);
       await connection.execute(
@@ -359,8 +379,9 @@ export class MySqlConversationTurnJobRepository {
       const [jobResult] = await connection.execute<ResultSetHeader>(
         `UPDATE job SET state = 'completed', lease_owner = NULL, lease_until = NULL,
             updated_at = ?, completed_at = ?
-          WHERE id = ? AND state = 'processing' AND lease_owner = ?`,
-        [now, now, payload.jobId, claim.leaseOwner],
+          WHERE id = ? AND merchant_id = ? AND state = 'processing' AND lease_owner = ?
+            AND claim_generation = ? AND lease_until > ?`,
+        [now, now, payload.jobId, payload.merchantId, claim.leaseOwner, claim.claimGeneration, now],
       );
       if (
         visitorResult.affectedRows !== 1 ||
@@ -368,37 +389,83 @@ export class MySqlConversationTurnJobRepository {
         jobResult.affectedRows !== 1
       )
         throw new ConversationTurnJobError();
+      return 'applied';
     });
   }
 
-  public async fail(claim: ConversationTurnClaim, errorCode: string, now: Date): Promise<void> {
+  public async fail(claim: ConversationTurnClaim, errorCode: string, now: Date): Promise<ClaimMutationResult> {
     if (!/^[A-Z][A-Z0-9_]{2,63}$/u.test(errorCode) || !Number.isFinite(now.getTime())) {
       throw new ConversationTurnJobError();
     }
-    await this.#withTransaction(async (connection) => {
-      const payload = this.#claimIds(claim);
-      const [jobs] = await connection.execute<(RowDataPacket & { id: Buffer })[]>(
-        `SELECT id FROM job WHERE id = ? AND type = 'conversation.turn'
-            AND state = 'processing' AND lease_owner = ? AND lease_until > ?
-          LIMIT 1 FOR UPDATE`,
-        [payload.jobId, claim.leaseOwner, now],
-      );
-      if (!jobs[0]) throw new ConversationTurnJobError();
-      await this.#failLocked(connection, payload.jobId, payload, now, errorCode);
+    return this.#withTransaction(async (connection) => {
+      const locked = await lockValidConversationClaim(connection, claim, now);
+      if (!locked) return 'stale';
+      await this.#failLocked(connection, locked.ids.jobId, locked.ids, now, errorCode);
+      return 'applied';
     });
   }
 
-  #claimIds(claim: ConversationTurnClaim) {
-    if (!/^[A-Za-z0-9_-]{8,128}$/u.test(claim.leaseOwner)) throw new ConversationTurnJobError();
-    return {
-      jobId: bytes(claim.jobId),
-      merchantId: bytes(claim.merchantId),
-      assistantId: bytes(claim.assistantId),
-      sessionId: bytes(claim.sessionId),
-      releaseId: bytes(claim.releaseId),
-      turnId: bytes(claim.turnId),
-      visitorMessageId: bytes(claim.visitorMessageId),
-    };
+  public async cancel(claim: ConversationTurnClaim, now: Date): Promise<ClaimMutationResult> {
+    return this.#withTransaction(async (connection) => {
+      const locked = await lockValidConversationClaim(connection, claim, now);
+      if (!locked) return 'stale';
+      await this.#failLocked(connection, locked.ids.jobId, locked.ids, now, 'TURN_CANCELLED');
+      await connection.execute(`UPDATE job SET state = 'cancelled' WHERE id = ?`, [locked.ids.jobId]);
+      return 'applied';
+    });
+  }
+
+  public async releaseBeforeDispatch(claim: ConversationTurnClaim, now: Date): Promise<ClaimMutationResult> {
+    return this.#withTransaction(async (connection) => {
+      const locked = await lockValidConversationClaim(connection, claim, now);
+      if (!locked || !['none', 'not_dispatched'].includes(locked.job.model_outcome)) return 'stale';
+      await connection.execute(`UPDATE job SET state = 'pending', lease_owner = NULL, lease_until = NULL,
+        run_after = ?, updated_at = ? WHERE id = ?`, [now, now, locked.ids.jobId]);
+      return 'applied';
+    });
+  }
+
+  public async reconcile(claim: ConversationTurnClaim): Promise<{
+    state: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'missing';
+    currentGeneration: string | null; modelOutcome: ModelCallOutcome;
+  }> {
+    const ids = conversationClaimIds(claim);
+    const connection = await this.database.openConnection();
+    try {
+      const [rows] = await connection.execute<(RowDataPacket & {
+        state: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+        claim_generation: string; model_outcome: ModelCallOutcome; payload: string | Record<string, unknown>;
+      })[]>(`SELECT state, CAST(claim_generation AS CHAR) claim_generation, model_outcome, payload
+        FROM job WHERE id = ? AND merchant_id = ? AND type = 'conversation.turn'`, [ids.jobId, ids.merchantId]);
+      const row = rows[0];
+      if (!row) return { state: 'missing', currentGeneration: null, modelOutcome: 'none' };
+      const stored = parsePayload(row.payload);
+      if (!stored.merchantId.equals(ids.merchantId) || !stored.assistantId.equals(ids.assistantId) ||
+          !stored.sessionId.equals(ids.sessionId) || !stored.releaseId.equals(ids.releaseId) || !stored.turnId.equals(ids.turnId))
+        return { state: 'missing', currentGeneration: null, modelOutcome: 'none' };
+      return { state: row.state, currentGeneration: String(row.claim_generation), modelOutcome: row.model_outcome };
+    } finally { await connection.end(); }
+  }
+
+  public async listRunnableMerchantHeads(now: Date, options: { limit?: number; afterMerchantId?: string } = {}) {
+    const limit = options.limit ?? 64;
+    if (!Number.isFinite(now.getTime()) || !Number.isInteger(limit) || limit < 1 || limit > 256) throw new ConversationTurnJobError();
+    const connection = await this.database.openConnection();
+    try {
+      const [rows] = await connection.execute<(RowDataPacket & { merchant_id: Buffer; oldest_ready_at: Date })[]>(
+        // These aggregate fields deliberately reference every runtime job
+        // column even on an empty queue, so an old schema fails before claim.
+        `SELECT merchant_id, MIN(run_after) oldest_ready_at,
+                MAX(claim_generation) runtime_generation,
+                MAX(model_outcome) runtime_outcome,
+                COUNT(model_attempt_id) runtime_attempt_count FROM job
+          WHERE type = 'conversation.turn' AND merchant_id IS NOT NULL
+            ${options.afterMerchantId ? 'AND merchant_id > ?' : ''}
+            AND ((state = 'pending' AND run_after <= ?) OR (state = 'processing' AND lease_until < ?))
+          GROUP BY merchant_id ORDER BY merchant_id ASC LIMIT ${limit}`,
+        [...(options.afterMerchantId ? [jobBytes(options.afterMerchantId)] : []), now, now]);
+      return rows.map(row => ({ merchantId: hex(row.merchant_id), oldestReadyAt: row.oldest_ready_at }));
+    } finally { await connection.end(); }
   }
 
   async #rejectJob(

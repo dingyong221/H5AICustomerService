@@ -20,7 +20,7 @@ const tempPrefix = 'h5cs-ci-upgrade-';
 const expectedDatabase = 'h5cs_integration_ci';
 const expectedUser = 'h5cs_ci';
 const expectedBaselineCount = 12;
-const expectedFullCount = 18;
+const expectedFullCount = 19;
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
 export class UpgradeProbeError extends Error {
@@ -305,26 +305,34 @@ export function assertUpgradedTableSet(tables, baselineTables) {
     'product_usage_day',
     'product_usage_event',
     'product_usage_budget',
+    'model_call_attempt',
   ];
   if (
-    expected.length !== 47 ||
-    new Set(expected).size !== 47 ||
-    tables.length !== 47 ||
-    new Set(tables).size !== 47 ||
+    expected.length !== 48 ||
+    new Set(expected).size !== 48 ||
+    tables.length !== 48 ||
+    new Set(tables).size !== 48 ||
     tables.some((table) => !expected.includes(table))
   )
     throw new UpgradeProbeError('Upgrade produced an unexpected application-table set');
 }
-export async function snapshotTables(connection, tables) {
+export async function snapshotTables(connection, tables, options = {}) {
   const output = [];
   for (const table of tables) {
     const [rows] = await connection.query(`SELECT * FROM ${quote(table)}`);
     const [definition] = await connection.query(`SHOW CREATE TABLE ${quote(table)}`);
+    let definitionSql = definition[0]['Create Table'];
+    if (table === 'job' && options.legacyJobProjection) {
+      // Only these three additive runtime columns are excluded. All pre-existing
+      // values and the rest of the legacy schema remain byte-for-byte checked.
+      for (const row of rows) for (const field of ['claim_generation', 'model_outcome', 'model_attempt_id']) delete row[field];
+      definitionSql = definitionSql.split('\n').filter(line => !/^\s*`(?:claim_generation|model_outcome|model_attempt_id)` /u.test(line)).join('\n');
+    }
     output.push({
       table,
       count: rows.length,
       contentSha256: storedRowsDigest(rows),
-      schemaSha256: sha256(definition[0]['Create Table']),
+      schemaSha256: sha256(definitionSql),
     });
   }
   return { tables: output, sha256: sha256(JSON.stringify(output)) };
@@ -839,7 +847,7 @@ export async function runUpgradeProbe(environment = process.env) {
     phase = 'seed_baseline_data';
     const ids = await seedBaselineData(connection);
     phase = 'snapshot_baseline_data';
-    const before = await snapshotTables(connection, tables);
+    const before = await snapshotTables(connection, tables, { legacyJobProjection: true });
     for (const [table, minimum] of [
       ['merchant', 2],
       ['assistant', 3],
@@ -861,7 +869,7 @@ export async function runUpgradeProbe(environment = process.env) {
     phase = 'verify_upgraded_history';
     const upgradedHistory = await assertMigrationHistory(connection, plan.entries);
     phase = 'verify_preserved_legacy_data';
-    const after = await snapshotTables(connection, tables);
+    const after = await snapshotTables(connection, tables, { legacyJobProjection: true });
     if (before.sha256 !== after.sha256)
       throw new UpgradeProbeError('Existing business rows or schema changed during 0012 upgrade');
     phase = 'verify_upgraded_schema';
@@ -881,7 +889,7 @@ export async function runUpgradeProbe(environment = process.env) {
     phase = 'verify_replay_history';
     const replayHistory = await assertMigrationHistory(connection, plan.entries);
     phase = 'verify_replayed_data';
-    const repeated = await snapshotTables(connection, tables);
+    const repeated = await snapshotTables(connection, tables, { legacyJobProjection: true });
     const afterReplayNewData = await snapshotTables(connection, newTables);
     if (
       repeated.sha256 !== before.sha256 ||

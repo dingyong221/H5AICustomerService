@@ -6,6 +6,8 @@ import type { ApiSuccessEnvelope } from '@h5cs/contracts';
 
 import type { WorkerHealth } from './worker-health.js';
 import { PreviewError, type PreviewService } from './preview-service.js';
+import { ModelCapacityError } from './model-runtime.js';
+import { abortable } from './abortable.js';
 
 const writeJson = (
   response: import('node:http').ServerResponse,
@@ -21,22 +23,34 @@ const writeJson = (
   response.end(JSON.stringify(body));
 };
 
-const readPreviewBody = async (request: import('node:http').IncomingMessage): Promise<unknown> => {
+const readPreviewBody = async (
+  request: import('node:http').IncomingMessage,
+  signal: AbortSignal,
+): Promise<unknown> => {
   if (!request.headers['content-type']?.startsWith('application/json')) {
     throw new PreviewError(400, 'Invalid content type');
   }
-  const chunks: Buffer[] = [];
-  let length = 0;
-  for await (const chunk of request) {
-    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    length += bytes.byteLength;
-    if (length > 131_072) throw new PreviewError(400, 'Preview request is too large');
-    chunks.push(bytes);
-  }
+  signal.throwIfAborted();
+  const abort = (): void => {
+    request.destroy();
+  };
+  signal.addEventListener('abort', abort, { once: true });
   try {
-    return JSON.parse(Buffer.concat(chunks, length).toString('utf8')) as unknown;
-  } catch {
-    throw new PreviewError(400, 'Invalid preview request');
+    const chunks: Buffer[] = [];
+    let length = 0;
+    for await (const chunk of request) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      length += bytes.byteLength;
+      if (length > 131_072) throw new PreviewError(400, 'Preview request is too large');
+      chunks.push(bytes);
+    }
+    try {
+      return JSON.parse(Buffer.concat(chunks, length).toString('utf8')) as unknown;
+    } catch {
+      throw new PreviewError(400, 'Invalid preview request');
+    }
+  } finally {
+    signal.removeEventListener('abort', abort);
   }
 };
 
@@ -45,6 +59,7 @@ async function handlePreview(
   response: import('node:http').ServerResponse,
   service: PreviewService | null,
   requestId: string,
+  timeoutMs: number,
 ): Promise<void> {
   if (!service) {
     writeJson(response, 503, { error: { code: 'UNAVAILABLE' }, request_id: requestId }, requestId);
@@ -55,14 +70,28 @@ async function handlePreview(
     return;
   }
   try {
-    const payload = await readPreviewBody(request);
-    const data =
-      request.url === '/internal/knowledge'
-        ? await service.organize(payload, AbortSignal.timeout(20_000))
-        : request.url === '/internal/writing'
-          ? await service.write(payload, AbortSignal.timeout(20_000))
-          : { answer: await service.reply(payload, AbortSignal.timeout(20_000)) };
-    writeJson(response, 200, { data, request_id: requestId }, requestId);
+    const disconnected = new AbortController();
+    const onClose = (): void => {
+      if (!response.writableEnded) disconnected.abort();
+    };
+    response.once('close', onClose);
+    // Keep this synchronous budget inside the merchant server's 25s upstream
+    // deadline. It includes waiting for shared capacity, before any reservation.
+    const signal = AbortSignal.any([disconnected.signal, AbortSignal.timeout(timeoutMs)]);
+    try {
+      const payload = await abortable(readPreviewBody(request, signal), signal);
+      signal.throwIfAborted();
+      const operation: Promise<unknown> =
+        request.url === '/internal/knowledge'
+          ? service.organize(payload, signal)
+          : request.url === '/internal/writing'
+            ? service.write(payload, signal)
+            : service.reply(payload, signal).then((answer) => ({ answer }));
+      const data = await abortable(operation, signal);
+      writeJson(response, 200, { data, request_id: requestId }, requestId);
+    } finally {
+      response.off('close', onClose);
+    }
   } catch (error) {
     const marketCode =
       error instanceof MarketplaceAccessError
@@ -74,9 +103,11 @@ async function handlePreview(
       ? marketCode === 'MARKETPLACE_QUOTA_EXHAUSTED'
         ? 429
         : 403
-      : error instanceof PreviewError
-        ? error.statusCode
-        : 503;
+      : error instanceof ModelCapacityError
+        ? 429
+        : error instanceof PreviewError
+          ? error.statusCode
+          : 503;
     writeJson(
       response,
       status,
@@ -96,6 +127,7 @@ async function handlePreview(
 export const createHealthServer = (
   health: WorkerHealth,
   preview: PreviewService | null = null,
+  timeoutMs = 20_000,
 ): Server =>
   createServer((request, response) => {
     const candidate = request.headers['x-request-id'];
@@ -122,7 +154,7 @@ export const createHealthServer = (
       request.method === 'POST' &&
       ['/internal/preview', '/internal/writing', '/internal/knowledge'].includes(request.url ?? '')
     ) {
-      void handlePreview(request, response, preview, requestId);
+      void handlePreview(request, response, preview, requestId, timeoutMs);
       return;
     }
 

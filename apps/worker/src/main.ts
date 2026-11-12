@@ -1,8 +1,7 @@
-import { createHealthServer } from './health-server.js';
-import { PollLoop } from './poll-loop.js';
 import { WorkerHealth } from './worker-health.js';
 import { createConversationDispatch } from './conversation-dispatch.js';
 import { createPreviewService } from './preview-service.js';
+import { startWorkerApplication } from './worker-application.js';
 
 const parseInteger = (name: string, value: string | undefined, fallback: number): number => {
   const parsed = Number(value ?? String(fallback));
@@ -21,29 +20,15 @@ const main = async (): Promise<void> => {
   );
   const dispatch = createConversationDispatch();
 
-  const pollLoop = new PollLoop(probeIntervalMs, async (signal) => {
-    await health.probeDatabase();
-    if (!dispatch.configured || !health.databaseAvailable() || signal.aborted) {
-      health.setConversationReady(false);
-      return;
-    }
-    try {
-      await dispatch.processor.processOnce(signal);
-      health.setConversationReady(!signal.aborted);
-    } catch {
-      health.setConversationReady(false);
-    }
-  });
-  await pollLoop.runOnce();
-  pollLoop.start();
-
-  const server = createHealthServer(health, createPreviewService());
   const host = process.env['WORKER_HEALTH_HOST'] ?? '127.0.0.1';
   const port = parseInteger('WORKER_HEALTH_PORT', process.env['WORKER_HEALTH_PORT'], 3_011);
-
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, host, resolve);
+  const application = await startWorkerApplication({
+    health,
+    dispatch,
+    preview: dispatch.configured ? createPreviewService(process.env, dispatch.runtime) : null,
+    host,
+    port,
+    probeIntervalMs,
   });
 
   process.stdout.write(`Worker health endpoint listening on ${host}:${String(port)}\n`);
@@ -53,15 +38,27 @@ const main = async (): Promise<void> => {
       : `Conversation job dispatch is disabled: ${dispatch.reason}.\n`,
   );
 
-  const shutdown = async (): Promise<void> => {
-    await pollLoop.stop();
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => (error === undefined ? resolve() : reject(error)));
-    });
+  let stopping = false;
+  const stop = (): void => {
+    if (stopping) return;
+    stopping = true;
+    // Only the service entry point terminates the process. Hanging DB sockets
+    // cannot keep it alive beyond the 90s best effort + 95s hard deadline.
+    const watchdog = setTimeout(() => process.exit(1), 95_000);
+    watchdog.unref();
+    void application.stop().then(
+      () => {
+        clearTimeout(watchdog);
+        process.exit(0);
+      },
+      () => {
+        clearTimeout(watchdog);
+        process.exit(1);
+      },
+    );
   };
-
-  process.once('SIGINT', () => void shutdown());
-  process.once('SIGTERM', () => void shutdown());
+  process.once('SIGINT', stop);
+  process.once('SIGTERM', stop);
 };
 
 await main();
