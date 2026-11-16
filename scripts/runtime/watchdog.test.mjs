@@ -76,7 +76,7 @@ test('only bounded independent token text is accepted', async () => {
   assert.equal(await loadObservationToken(tokenFile), token);
   for (const [name, contents] of [
     ['huge', 'x'.repeat(513)],
-    ['key', '-----BEGIN OPENSSH PRIVATE KEY-----\nfixture'],
+    ['invalid-text', 'synthetic invalid token text '.repeat(3)],
     ['small', 'short'],
   ]) {
     const file = join(folder, name);

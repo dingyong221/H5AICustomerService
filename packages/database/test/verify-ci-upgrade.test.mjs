@@ -33,7 +33,7 @@ const sourceFolder = fileURLToPath(new URL('../migrations/', import.meta.url));
 const scriptPath = fileURLToPath(new URL('../scripts/verify-ci-upgrade.mjs', import.meta.url));
 
 describe('offline CI upgrade probe scope and argument safety', () => {
-  it('accepts only the exact baseline plus improvement and governance tables', () => {
+  it('accepts only the exact 49-table baseline plus reviewed additions including runtime control', () => {
     const baseline = Array.from({ length: 29 }, (_, index) => `baseline_${index}`);
     const upgraded = [
       ...baseline,
@@ -56,10 +56,18 @@ describe('offline CI upgrade probe scope and argument safety', () => {
       'product_usage_event',
       'product_usage_budget',
       'model_call_attempt',
+      'runtime_execution_control',
     ];
+    expect(upgraded).toHaveLength(49);
     expect(() => assertUpgradedTableSet(upgraded, baseline)).not.toThrow();
+    for (const missing of upgraded)
+      expect(() =>
+        assertUpgradedTableSet(
+          upgraded.filter((table) => table !== missing),
+          baseline,
+        ),
+      ).toThrow(UpgradeProbeError);
     for (const invalid of [
-      upgraded.slice(0, -1),
       [...upgraded, 'unexpected_table'],
       [...upgraded.slice(0, -1), 'unexpected_table'],
       [...upgraded.slice(0, -1), 'assistant_improvement'],

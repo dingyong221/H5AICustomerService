@@ -6,6 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { scanHistoricalCredentials } from './historical-credential-fixtures.mjs';
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const pnpmCommand = 'pnpm';
@@ -205,26 +206,21 @@ const assertNoHistoricalSecrets = () => {
     '--all',
     '--no-ext-diff',
     '--no-renames',
+    '--full-index',
     '--pretty=format:commit:%H',
     '-p',
   ]).stdout;
-  let commit = 'unknown';
-  const findings = [];
-  const patterns = credentialPatterns();
-  for (const line of history.split(/\r?\n/u)) {
-    if (line.startsWith('commit:')) {
-      commit = line.slice('commit:'.length);
-      continue;
-    }
-    for (const pattern of patterns) {
-      if (pattern.expression.test(line)) findings.push(`${commit} ${pattern.label}`);
-    }
-  }
+  const { findings, verifiedFixtures } = scanHistoricalCredentials(
+    history,
+    credentialPatterns(),
+    (blob) => git(['cat-file', 'blob', blob]).stdout,
+  );
   if (findings.length > 0) {
     fail(
       `Potential credential material found in reachable Git history:\n${[...new Set(findings)].join('\n')}`,
     );
   }
+  log(`[gate] verified historical synthetic fixture occurrences: ${verifiedFixtures}`);
 };
 
 const assertReleaseComposePolicy = () => {

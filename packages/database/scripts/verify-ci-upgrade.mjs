@@ -308,12 +308,13 @@ export function assertUpgradedTableSet(tables, baselineTables) {
     'product_usage_event',
     'product_usage_budget',
     'model_call_attempt',
+    'runtime_execution_control',
   ];
   if (
-    expected.length !== 48 ||
-    new Set(expected).size !== 48 ||
-    tables.length !== 48 ||
-    new Set(tables).size !== 48 ||
+    expected.length !== 49 ||
+    new Set(expected).size !== 49 ||
+    tables.length !== 49 ||
+    new Set(tables).size !== 49 ||
     tables.some((table) => !expected.includes(table))
   )
     throw new UpgradeProbeError('Upgrade produced an unexpected application-table set');
@@ -889,7 +890,11 @@ export async function runUpgradeProbe(environment = process.env) {
     const constraints = await assertNewTableConstraints(connection, ids);
     phase = 'seed_post_upgrade_data';
     await seedPostUpgradeData(connection, ids);
-    const newTables = ['assistant_evaluation_run', 'assistant_improvement'];
+    const newTables = [
+      'assistant_evaluation_run',
+      'assistant_improvement',
+      'runtime_execution_control',
+    ];
     phase = 'snapshot_new_table_data';
     const beforeReplayNewData = await snapshotTables(connection, newTables);
     if (beforeReplayNewData.tables.some((table) => table.count !== 1))

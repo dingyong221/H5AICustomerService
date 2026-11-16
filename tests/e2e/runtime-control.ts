@@ -13,6 +13,7 @@ import {
   runtimeControlRequestSchema,
   type RuntimeControlRequest,
 } from '../../packages/contracts/src/runtime-execution';
+import { requestIdSchema } from '../../packages/contracts/src/envelope';
 import { authoringTaskSchema } from '../../packages/contracts/src/authoring-task';
 import { lastPreviewSession } from './authoring-async';
 
@@ -103,12 +104,21 @@ async function readJson(page: Page, url: string) {
   return result;
 }
 type History = {
+  request_id: string;
   data: {
     sessionHandle: string;
     releaseRef: string;
     messages: { messageId: string; content: string }[];
   };
 };
+
+export function assertUnchangedHistory(history: History, response: unknown) {
+  // Request IDs describe the individual HTTP reads, not persisted business data.
+  // Compare every other envelope/data field, retaining strict snapshot equality.
+  requestIdSchema.parse(history.request_id);
+  const requestId = requestIdSchema.parse((response as Record<string, unknown>)['request_id']);
+  expect(response).toEqual({ ...history, request_id: requestId });
+}
 
 export async function verifyRuntimeControl(input: Inputs) {
   await test.step('real scoped runtime controls preserve tasks, session and manual help', async () => {
@@ -196,7 +206,7 @@ export async function verifyRuntimeControl(input: Inputs) {
       await expect(composer).toHaveValue(question);
       const unchangedHistory = await readJson(consumerPage, historyUrl);
       expect(unchangedHistory.status).toBe(200);
-      expect(unchangedHistory.body).toEqual(history);
+      assertUnchangedHistory(history, unchangedHistory.body);
       const stillPublished = await consumerPage.request.get(
         `http://127.0.0.1:3001/api/v1/public/assistants/${new URL(publicUrl).pathname.slice(3)}`,
       );
@@ -235,7 +245,7 @@ export async function verifyRuntimeControl(input: Inputs) {
       merchantPage.once('dialog', (dialog) => void dialog.accept());
       await close.click();
       await merchantPage
-        .getByLabel('试聊问题', { exact: true })
+        .getByRole('textbox', { name: '试聊问题', exact: true })
         .fill('合成验收：暂停后不应提交新模型任务');
       const deniedPreview = merchantPage.waitForResponse(
         (response) =>
@@ -252,9 +262,12 @@ export async function verifyRuntimeControl(input: Inputs) {
       await expect(
         merchantPage.getByRole('status').filter({ hasText: 'AI 任务运行已暂停' }),
       ).toBeVisible();
-      await expect(merchantPage.getByLabel('试聊问题', { exact: true })).toHaveValue(
-        '合成验收：暂停后不应提交新模型任务',
-      );
+      await expect(
+        merchantPage.getByRole('textbox', { name: '试聊问题', exact: true }),
+      ).toHaveValue('合成验收：暂停后不应提交新模型任务');
+      await expect(
+        merchantPage.getByRole('textbox', { name: '试聊问题', exact: true }),
+      ).toBeDisabled();
       await expect(
         merchantPage.getByRole('button', { name: '发送测试问题', exact: true }),
       ).toBeDisabled();
@@ -295,7 +308,9 @@ export async function verifyRuntimeControl(input: Inputs) {
           exact: true,
         }),
       ).toBeVisible();
-      expect((await readJson(consumerPage, historyUrl)).body).toEqual(history);
+      const pausedConsumerHistory = await readJson(consumerPage, historyUrl);
+      expect(pausedConsumerHistory.status).toBe(200);
+      assertUnchangedHistory(history, pausedConsumerHistory.body);
 
       // Use a real Next action captured from UI; change to a fresh request so an
       // accidental authorization bypass cannot hide behind idempotent replay.
@@ -455,7 +470,9 @@ export async function verifyRuntimeControl(input: Inputs) {
         await expect(
           consumerPage.locator('.message-row--visitor .message-bubble p').last(),
         ).toHaveText(question);
-        expect((await readJson(consumerPage, historyUrl)).body).toEqual(resumedHistory);
+        const reloadedHistory = await readJson(consumerPage, historyUrl);
+        expect(reloadedHistory.status).toBe(200);
+        assertUnchangedHistory(resumedHistory, reloadedHistory.body);
         expect(reloadWrites).toBe(0);
       } finally {
         consumerPage.off('request', countReloadWrite);

@@ -37,6 +37,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
 
       - name: Install pnpm 11
         uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
@@ -52,6 +54,9 @@ jobs:
 
       - name: Install dependencies from lockfile
         run: pnpm install --frozen-lockfile
+
+      - name: Verify exact historical synthetic-fixture proof boundaries
+        run: node --test scripts/quality/historical-credential-fixtures.test.mjs
 
       - name: Validate release policy and scan for common secrets
         run: node scripts/quality/release-gate.mjs static --version 0.1.0
