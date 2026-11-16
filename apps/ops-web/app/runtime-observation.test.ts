@@ -1,9 +1,10 @@
+import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ open: vi.fn(), close: vi.fn(), read: vi.fn(), stat: vi.fn() }));
 vi.mock('node:fs/promises', () => ({ open: mocks.open }));
 import { readWorkerObservation, workerObservationUrl } from './runtime-observation';
 const environment = {
-  WORKER_OBSERVATION_TOKEN_FILE: 'F:/synthetic/token',
+  WORKER_OBSERVATION_TOKEN_FILE: resolve('synthetic', 'token'),
   WORKER_OBSERVATION_URL: 'http://worker:3011/internal/runtime-snapshot',
 };
 const token = 'A'.repeat(43);
@@ -30,6 +31,22 @@ beforeEach(() => {
   mocks.read.mockResolvedValue(`${token}\n`);
 });
 describe('independent server-side Worker observation', () => {
+  it.each(['relative/token', '\\\\server\\share\\token'])(
+    'rejects unsafe token file path %s before opening or fetching',
+    async (path) => {
+      const fetchImpl = vi.fn();
+      expect(
+        (
+          await readWorkerObservation(
+            { ...environment, WORKER_OBSERVATION_TOKEN_FILE: path },
+            fetchImpl,
+          )
+        ).snapshot,
+      ).toBeNull();
+      expect(mocks.open).not.toHaveBeenCalled();
+      expect(fetchImpl).not.toHaveBeenCalled();
+    },
+  );
   it.each([
     'https://evil.test/internal/runtime-snapshot',
     'http://worker:3011/internal/runtime-snapshot?token=x',
