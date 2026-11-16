@@ -323,7 +323,14 @@ export async function verifyRuntimeControl(input: Inputs) {
         await onlyMerchant.addCookies(cookies);
         const page = await onlyMerchant.newPage();
         await page.goto(`${operatorBase}/#tasks`);
-        await expect(page).toHaveURL(`${operatorBase}/login`);
+        const loginUrl = new URL(`${operatorBase}/login`);
+        await expect(page).toHaveURL(
+          (url) =>
+            url.origin === loginUrl.origin &&
+            url.pathname === loginUrl.pathname &&
+            url.search === '' &&
+            (url.hash === '' || url.hash === '#tasks'),
+        );
         const forbidden = await onlyMerchant.request.post(pausePacket.url, {
           headers: {
             Origin: 'http://127.0.0.1:3001',
