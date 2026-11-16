@@ -29,7 +29,9 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm exec turbo run build --filter=@h5cs/database --concurrency=1
       - name: Verify upload budgets, cancellation and original real formats
-        run: pnpm --filter @h5cs/merchant-web exec vitest run app/knowledge/material-parser.test.ts app/knowledge/material-parser-process.test.ts app/knowledge/material-routes.test.ts
+        run: |
+          pnpm --filter @h5cs/merchant-web exec vitest run app/knowledge/material-parser.test.ts app/knowledge/material-parser-process.test.ts app/knowledge/material-routes.test.ts
+          node --test scripts/quality/material-parser-deadline.test.mjs
       - name: Build the actual merchant image (no registry publication)
         run: docker build --file infra/docker/workspace.Dockerfile --target web --build-arg APP_KIND=web --build-arg APP_NAME=merchant-web --tag h5cs-material-parser:ci .
       - name: Verify independent Docker resources, denial and Web survival

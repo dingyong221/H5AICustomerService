@@ -174,6 +174,9 @@ export function parseIsolated(bytes, mime, { signal, timeoutMs = MAX_TIME } = {}
   validateBytes(bytes, mime);
   if (signal?.aborted) return Promise.reject(new ParserFailure('cancelled'));
   if (timeoutMs <= 0) return Promise.reject(new ParserFailure('timeout'));
+  // Start the budget before request() can connect to the broker. Socket errors
+  // and timers may be delivered in either order at the absolute deadline.
+  const deadline = performance.now() + Math.min(MAX_TIME, timeoutMs);
   return new Promise((resolve, reject) => {
     let settled = false;
     const finish = (error, text) => {
@@ -194,10 +197,11 @@ export function parseIsolated(bytes, mime, { signal, timeoutMs = MAX_TIME } = {}
       headers: { 'content-type': mime, 'content-length': bytes.length, connection: 'close' },
     });
     const cancel = () => finish('cancelled');
-    const timer = setTimeout(() => finish('timeout'), Math.min(MAX_TIME, timeoutMs));
+    const timer = setTimeout(() => finish('timeout'), Math.max(0, deadline - performance.now()));
     signal?.addEventListener('abort', cancel, { once: true });
     if (signal?.aborted) cancel();
-    req.on('error', () => finish('unavailable'));
+    const disconnected = () => finish(performance.now() >= deadline ? 'timeout' : 'unavailable');
+    req.on('error', disconnected);
     req.on('response', (res) => {
       const length = res.headers['content-length'];
       if (
@@ -221,7 +225,7 @@ export function parseIsolated(bytes, mime, { signal, timeoutMs = MAX_TIME } = {}
           finish('overflow');
         } else if (!settled) chunks.push(chunk);
       });
-      res.on('error', () => finish('unavailable'));
+      res.on('error', disconnected);
       res.on('end', () => {
         if (settled) return;
         if (!res.complete || size !== Number(length)) {

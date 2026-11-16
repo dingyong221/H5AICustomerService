@@ -17,6 +17,7 @@ import {
   type KnowledgeJobRow,
 } from './knowledge-organization-contract.js';
 import { governanceFactsHash, readGovernance } from './publication-governance.js';
+import { parseAssistantDraft } from './assistant-lifecycle-repository.js';
 export type AuthoringScope = KnowledgeScope;
 type CommonPayload = {
   schemaVersion: 1;
@@ -149,7 +150,10 @@ export async function authorizeAuthoringScope(c: Connection, scope: AuthoringSco
     [authoringBytes(scope.assistantId), authoringBytes(scope.merchantId)],
   );
   if (!rows[0]) throw new AuthoringTaskError('NOT_FOUND');
-  const draft = authoringObject(rows[0].config) as AssistantDraftConfig;
+  // MySQL JSON key order is not the draft's canonical business field order.
+  // Use the same parsing/normalization as publication and synchronous preview;
+  // changing the shared hash would invalidate already-confirmed legacy records.
+  const draft = parseAssistantDraft(rows[0].config);
   return {
     revision,
     assistantName: rows[0].display_name,

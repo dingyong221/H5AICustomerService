@@ -1,6 +1,6 @@
 // Linux Docker only; fail rather than substituting mocks for OS evidence.
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -119,6 +119,25 @@ const check = async (name, fn) => {
     console.log(`PASS ${name}`);
   } catch (error) {
     checks.push({ name, passed: false, error: error.message });
+    // Capture only this disposable synthetic project before teardown. No Web
+    // environment, real secrets or unrestricted host/container logs are read.
+    if (parser) {
+      try {
+        const log = spawnSync('docker', ['logs', '--tail', '100', parser], {
+          env,
+          encoding: 'utf8',
+          timeout: 10000,
+          maxBuffer: 256 * 1024,
+        });
+        if (log.error || log.status !== 0) throw new Error('Synthetic parser log unavailable');
+        await writeFile(
+          resolve(evidence, `parser-failure-${checks.length}.log`),
+          log.stdout + log.stderr,
+        );
+      } catch {
+        /* Preserve the original assertion if a failed container has vanished. */
+      }
+    }
     await save();
     throw error;
   }
@@ -397,7 +416,7 @@ const path='/tmp/isolation-cap';let fd;let written=0;try{fd=openSync(path,'w');c
       return { exit: status, oomEvents: events.trim().split('\n').length, web: 'healthy' };
     },
   );
-  await check('service loss fails closed and recovery does not require Web restart', () => {
+  await check('service loss fails closed and recovery does not require Web restart', async () => {
     compose(['stop', 'material-parser']);
     assert.equal(
       JSON.parse(extraction(Buffer.from('not local fallback'), 'text/plain', false)).code,
@@ -405,7 +424,23 @@ const path='/tmp/isolation-cap';let fd;let written=0;try{fd=openSync(path,'w');c
     );
     assert.equal(healthy(), '200');
     compose(['start', 'material-parser']);
-    return { failClosed: true, web: 'healthy' };
+    let recovered = false;
+    for (let i = 0; i < 30; i++) {
+      try {
+        assert.equal(
+          JSON.parse(extraction(Buffer.from('post restart'), 'text/plain')).text,
+          'post restart',
+        );
+        recovered = true;
+        break;
+      } catch {
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
+    assert(recovered, 'parser RPC did not recover after restart');
+    assert.equal(compose(['ps', '-q', 'merchant-web']).trim(), web);
+    assert.equal(healthy(), '200');
+    return { failClosed: true, rpcRecovered: true, sameWebContainer: true, web: 'healthy' };
   });
   // A separate phase replaces only the trusted child implementation, to make
   // timeout/descendant/overflow behavior deterministic without product test hooks.
@@ -415,18 +450,23 @@ const path='/tmp/isolation-cap';let fd;let written=0;try{fd=openSync(path,'w');c
   );
   parser = compose(['ps', '-q', 'material-parser'], true).trim();
   await check('child-stage abort and deadline kill owned process group including descendant', () =>
-    execNode(
-      web,
-      `import assert from'node:assert/strict';import{parseIsolated}from'./scripts/material-parser-runtime.mjs';
-for(const timeout of [1500,20000]){const controller=new AbortController();const start=Date.now();const result=parseIsolated(Buffer.from('hang'),'text/plain',{signal:controller.signal});if(timeout===1500)setTimeout(()=>controller.abort(),timeout);await assert.rejects(result,e=>e.code===(timeout===1500?'cancelled':'timeout'));assert(Date.now()-start<timeout+1500);await new Promise(r=>setTimeout(r,500));}console.log('abort and timeout rejected');`,
-    ).trim(),
+    JSON.parse(
+      execNode(
+        web,
+        `import assert from'node:assert/strict';import{request}from'node:http';import{parseIsolated}from'./scripts/material-parser-runtime.mjs';
+const observed=[];for(const timeout of [1500,20000]){const controller=new AbortController();const start=Date.now();const result=parseIsolated(Buffer.from('hang'),'text/plain',{signal:controller.signal});if(timeout===1500)setTimeout(()=>controller.abort(),timeout);await assert.rejects(result,e=>{observed.push({expected:timeout===1500?'cancelled':'timeout',actual:e.code,elapsedMs:Date.now()-start});assert.equal(e.code,timeout===1500?'cancelled':'timeout',JSON.stringify(observed));return true});const elapsed=Date.now()-start;assert(elapsed>=timeout-100&&elapsed<timeout+1500,JSON.stringify(observed));await new Promise(r=>setTimeout(r,500));}
+// Bypass the client's own deadline once: the broker itself must flush 408 JSON,
+// rather than merely relying on the client to turn a closed socket into timeout.
+const start=Date.now();const rpc=await new Promise((resolve,reject)=>{const req=request({socketPath:'/run/h5cs-material-parser/parser.sock',path:'/v1/extract',method:'POST',agent:false,headers:{'content-type':'text/plain','content-length':4,connection:'close'}},res=>{const chunks=[];res.on('data',c=>chunks.push(c));res.on('error',reject);res.on('end',()=>resolve({status:res.statusCode,payload:JSON.parse(Buffer.concat(chunks))}))});const timer=setTimeout(()=>{req.destroy();reject(Error('broker timeout reply exceeded 22s'))},22000);req.on('error',reject);req.on('close',()=>clearTimeout(timer));req.end('hang')});assert.deepEqual(rpc,{status:408,payload:{error:'timeout'}});const elapsedMs=Date.now()-start;assert(elapsedMs>=19900&&elapsedMs<21500);observed.push({expected:'broker-timeout-json',...rpc,elapsedMs});console.log(JSON.stringify(observed));`,
+      ).trim(),
+    ),
   );
   await check(
     'owned descendants are gone after cancellation/deadline; output cap preserves Web',
     () => {
       const detail = execNode(
         parser,
-        `import assert from'node:assert/strict';import{readFileSync,existsSync}from'node:fs';const pairs=readFileSync('/tmp/parser-owned-pids.jsonl','utf8').trim().split('\\n').map(l=>JSON.parse(l));assert.equal(pairs.length,2);const pids=pairs.flat();for(const pid of pids)assert(!existsSync('/proc/'+pid),'owned process survived');console.log(JSON.stringify({ownedPidsGone:pids}));`,
+        `import assert from'node:assert/strict';import{readFileSync,existsSync}from'node:fs';const pairs=readFileSync('/tmp/parser-owned-pids.jsonl','utf8').trim().split('\\n').map(l=>JSON.parse(l));assert.equal(pairs.length,3);const pids=pairs.flat();const start=Date.now();while(pids.some(pid=>existsSync('/proc/'+pid))&&Date.now()-start<5000)await new Promise(r=>setTimeout(r,100));for(const pid of pids)assert(!existsSync('/proc/'+pid),'owned process survived: '+pid);console.log(JSON.stringify({ownedPidsGone:pids,cleanupWaitMs:Date.now()-start}));`,
       ).trim();
       assert.equal(
         JSON.parse(extraction(Buffer.from('overflow'), 'text/plain', false)).code,
@@ -473,11 +513,28 @@ for(const timeout of [1500,20000]){const controller=new AbortController();const 
         'node',
         'scripts/serve-material-parser.mjs',
       ]);
-    } catch {
+    } catch (error) {
+      assert.match(error.stderr ?? '', /Unsafe parser socket entry/u);
       rejected = true;
     }
     assert(rejected);
-    return { refusedNonSocket: true };
+    const preserved = run([
+      'run',
+      '--rm',
+      '--network',
+      'none',
+      '--user',
+      '1000:1000',
+      '--volume',
+      `${volume}:/run/h5cs-material-parser`,
+      image,
+      'node',
+      '--input-type=module',
+      '-e',
+      `import assert from'node:assert/strict';import{readFileSync}from'node:fs';assert.equal(readFileSync('/run/h5cs-material-parser/parser.sock','utf8'),'synthetic-do-not-unlink');console.log('preserved');`,
+    ]).trim();
+    assert.equal(preserved, 'preserved');
+    return { refusedNonSocket: true, ordinaryEntryPreserved: true };
   });
 } finally {
   // Only the unique disposable Compose project and its socket volume are removed.
