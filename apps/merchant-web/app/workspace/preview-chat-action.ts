@@ -6,7 +6,12 @@ import {
   MySqlKnowledgeMaterialRepository,
   KnowledgeMaterialAccessError,
 } from '@h5cs/database';
-import { toAssistantId, toMerchantId, toMerchantUserId } from '@h5cs/domain';
+import {
+  AssistantRevisionConflictError,
+  toAssistantId,
+  toMerchantId,
+  toMerchantUserId,
+} from '@h5cs/domain';
 import { headers } from 'next/headers';
 import { revalidatePath } from 'next/cache';
 
@@ -67,6 +72,9 @@ export async function previewChatAction(
     if (!snapshot || snapshot.draftRevision !== Number(revision) || snapshot.status === 'paused') {
       return failed('草稿已变化或不可试聊，请刷新页面。');
     }
+    // Capture the raw governance receipt before the model call. Browser fields
+    // and the filtered quality view cannot supply this concurrency precondition.
+    const expectedPreviousPreviewId = snapshot.previousPreviewCheckId;
     const answer = await requestWorkerPreview({
       merchantId,
       assistantName: snapshot.displayName,
@@ -82,19 +90,22 @@ export async function previewChatAction(
         merchantId: toMerchantId(merchantId),
         assistantId: toAssistantId(assistantId),
         expectedDraftRevision: snapshot.draftRevision,
+        expectedPreviousPreviewId,
         question: rawQuestion.trim(),
         answer,
         now: new Date(),
       });
       checkId = recorded.checkId;
-    } catch {
+    } catch (error) {
       return {
         answer,
         revision: snapshot.draftRevision,
         checkId: null,
         evidence: previewEvidence(snapshot.draft),
         error:
-          '回答已生成，但未能保存本修订的试聊记录，不能用于发布判定。请先刷新检查草稿修订，勿直接发布。',
+          error instanceof AssistantRevisionConflictError
+            ? '草稿或试聊记录已更新，这次迟到回答仅供查看，不能用于发布判定。请刷新核对当前记录。'
+            : '回答已生成，但未能保存本修订的试聊记录，不能用于发布判定。请先刷新检查草稿修订，勿直接发布。',
       };
     }
     revalidatePath(`/${merchantId}`);

@@ -8,6 +8,18 @@ import {
   lockValidConversationClaim,
 } from './conversation-job-contract.js';
 import { MarketplaceAccessError } from './marketplace-repository.js';
+import {
+  lockValidAuthoringClaim,
+  assertAuthoringInput,
+  authoringOperation,
+  type AuthoringTaskClaim,
+} from './authoring-task-contract.js';
+import {
+  lockValidKnowledgeClaim,
+  loadKnowledgeSources,
+  sameKnowledgeSources,
+  type KnowledgeOrganizationClaim,
+} from './knowledge-organization-contract.js';
 
 export type ModelOperation = 'consumer' | 'preview' | 'writing' | 'organize';
 export type RecordedModelOutcome = 'succeeded' | 'failed' | 'unknown' | 'not_dispatched';
@@ -24,6 +36,8 @@ export class MySqlModelCallAttemptRepository {
       merchantId: string;
       operation: ModelOperation;
       claim?: ConversationTurnClaim;
+      knowledgeClaim?: KnowledgeOrganizationClaim;
+      authoringClaim?: AuthoringTaskClaim;
     },
     now: Date,
   ): Promise<{ attemptId: string }> {
@@ -32,7 +46,16 @@ export class MySqlModelCallAttemptRepository {
     if (
       !['consumer', 'preview', 'writing', 'organize'].includes(input.operation) ||
       (input.operation === 'consumer') !== Boolean(input.claim) ||
-      (input.claim && input.claim.merchantId !== input.merchantId)
+      (input.claim && input.claim.merchantId !== input.merchantId) ||
+      (input.authoringClaim &&
+        (input.claim ||
+          input.knowledgeClaim ||
+          input.authoringClaim.merchantId !== input.merchantId ||
+          input.operation !== authoringOperation(input.authoringClaim.payload.kind))) ||
+      (input.knowledgeClaim &&
+        (input.operation !== 'organize' ||
+          input.claim ||
+          input.knowledgeClaim.merchantId !== input.merchantId))
     )
       throw new ConversationTurnJobError();
     const connection = await this.database.openConnection();
@@ -64,6 +87,36 @@ export class MySqlModelCallAttemptRepository {
           ],
         );
         if (!sessions[0]) throw new ConversationTurnJobError('Claim is stale', 'STALE_CLAIM');
+      } else if (input.authoringClaim) {
+        const locked = await lockValidAuthoringClaim(connection, input.authoringClaim, now);
+        await assertAuthoringInput(connection, locked.scope, locked.payload, locked.current);
+        if (
+          locked.job.model_outcome !== 'none' ||
+          (locked.payload.kind === 'preview.reply' &&
+            JSON.stringify(input.authoringClaim.facts) !==
+              JSON.stringify({
+                assistantName: locked.current.assistantName,
+                draft: locked.current.draft,
+              }))
+        )
+          throw new ConversationTurnJobError('Claim is stale', 'STALE_CLAIM');
+        jobId = locked.job.id;
+      } else if (input.knowledgeClaim) {
+        const locked = await lockValidKnowledgeClaim(connection, input.knowledgeClaim, now);
+        const source = await loadKnowledgeSources(
+          connection,
+          locked.scope,
+          locked.payload.sources.map((s) => s.id),
+          true,
+        );
+        if (
+          locked.job.model_outcome !== 'none' ||
+          locked.revision !== locked.payload.inputRevision ||
+          !sameKnowledgeSources(source.sources, locked.payload.sources) ||
+          source.text !== input.knowledgeClaim.text
+        )
+          throw new ConversationTurnJobError('Claim is stale', 'STALE_CLAIM');
+        jobId = locked.job.id;
       } else {
         const [merchants] = await connection.execute<(RowDataPacket & { id: Buffer })[]>(
           `SELECT id FROM merchant WHERE id = ? AND status = 'active' LIMIT 1 FOR UPDATE`,
@@ -113,13 +166,31 @@ export class MySqlModelCallAttemptRepository {
         `INSERT INTO model_call_attempt
         (id, merchant_id, job_id, claim_generation, operation, state, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, 'dispatched', ?, ?)`,
-        [attempt, merchant, jobId, input.claim?.claimGeneration ?? null, input.operation, now, now],
+        [
+          attempt,
+          merchant,
+          jobId,
+          input.claim?.claimGeneration ??
+            input.knowledgeClaim?.claimGeneration ??
+            input.authoringClaim?.claimGeneration ??
+            null,
+          input.operation,
+          now,
+          now,
+        ],
       );
       if (jobId) {
         await connection.execute(
           `UPDATE job SET model_outcome = 'dispatched', model_attempt_id = ?, updated_at = ?
           WHERE id = ? AND claim_generation = ?`,
-          [attempt, now, jobId, input.claim!.claimGeneration],
+          [
+            attempt,
+            now,
+            jobId,
+            input.claim?.claimGeneration ??
+              input.knowledgeClaim?.claimGeneration ??
+              input.authoringClaim!.claimGeneration,
+          ],
         );
       }
       committing = true;

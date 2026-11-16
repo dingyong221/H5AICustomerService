@@ -1,0 +1,45 @@
+# Explicit opt-in: merge AFTER release and any MySQL overlays. Use the reviewed
+# merchant-web image digest for both services. No Docker socket or shared /tmp.
+services:
+  merchant-web:
+    environment:
+      H5CS_MATERIAL_PARSER_MODE: isolated
+    volumes:
+      - material-parser-socket:/run/h5cs-material-parser:ro
+    depends_on:
+      material-parser:
+        condition: service_healthy
+
+  material-parser:
+    image: ${H5CS_MERCHANT_WEB_IMAGE:?set H5CS_MERCHANT_WEB_IMAGE to an immutable image digest}
+    pull_policy: always
+    command: [node, scripts/serve-material-parser.mjs]
+    user: '1000:1000'
+    init: true
+    restart: unless-stopped
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 0.4
+    pids_limit: 48
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    volumes:
+      - material-parser-socket:/run/h5cs-material-parser
+    stop_grace_period: 5s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('node:http').get({socketPath:'/run/h5cs-material-parser/parser.sock',path:'/livez'},r=>{r.resume();if(r.statusCode!==200)process.exit(1)}).on('error',()=>process.exit(1))"
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  material-parser-socket:

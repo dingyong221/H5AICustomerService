@@ -2,8 +2,15 @@ import { randomBytes, randomInt } from 'node:crypto';
 import { mkdir, readFile } from 'node:fs/promises';
 
 import { expect, test, type Page } from '@playwright/test';
+import {
+  applyKnowledgeAsync,
+  organizeKnowledgeAsync,
+  type AsyncKnowledgeSession,
+} from './knowledge-async';
+import { currentDraftRevision, expandDraftAsync, previewReplyAsync } from './authoring-async';
 
 type PublishedReleaseReadback = { status: number; releaseRef: string | null };
+const authoringAsync = process.env['H5CS_E2E_AUTHORING_ASYNC'] === 'true';
 
 // Worker preview, writing, material organization and improvement retests share
 // five requests per merchant in a rolling minute. Record successful completion
@@ -60,13 +67,16 @@ async function expectMerchantStep(page: Page, title: string): Promise<void> {
 }
 
 async function approveCurrentPreview(page: Page): Promise<void> {
-  const currentRevision = await page
-    .locator('.assistant-preview-form input[name="draftRevision"]')
-    .inputValue();
+  const currentRevision = authoringAsync
+    ? String(await currentDraftRevision(page))
+    : await page.locator('.assistant-preview-form input[name="draftRevision"]').inputValue();
   expect(currentRevision).toMatch(/^[1-9][0-9]{0,9}$/u);
   const verdictForm = page.locator('.preview-verdict-form');
   await expect(verdictForm.locator('input[name="draftRevision"]')).toHaveValue(currentRevision);
   await expect(verdictForm.locator('input[name="checkId"]')).toHaveValue(/^[0-9a-f]{32}$/u);
+  const approvedCheckId = authoringAsync
+    ? await verdictForm.locator('input[name="checkId"]').inputValue()
+    : null;
   const publicationChecks = page.getByRole('region', { name: '当前修订发布检查', exact: true });
   await expect(publicationChecks.getByText('等待商家判定', { exact: true })).toBeVisible();
   const reviewedAnswer = verdictForm.getByRole('checkbox', {
@@ -78,6 +88,16 @@ async function approveCurrentPreview(page: Page): Promise<void> {
   await reviewedAnswer.check();
   await verdictForm.getByRole('button', { name: '回答合格，允许发布本修订', exact: true }).click();
   await expect(publicationChecks.getByText('本修订试聊已判定通过', { exact: true })).toBeVisible();
+  if (authoringAsync) {
+    // Capture before judging because a successful verdict removes its form.
+    process.stdout.write(
+      JSON.stringify({
+        code: 'E2E_ASYNC_PREVIEW_HUMAN_APPROVED',
+        checkId: approvedCheckId,
+        inputRevision: Number(currentRevision),
+      }) + '\n',
+    );
+  }
 }
 
 async function previewAndApproveCurrentRevision(
@@ -86,8 +106,18 @@ async function previewAndApproveCurrentRevision(
   expectedAnswer: string,
 ): Promise<void> {
   await expectMerchantStep(page, '效果试聊');
-  await page.getByLabel('试聊问题').fill(question);
+  await sendCurrentPreview(page, question, expectedAnswer);
+  await approveCurrentPreview(page);
+}
+
+async function sendCurrentPreview(page: Page, question: string, expectedAnswer: string) {
   await waitForMerchantModelSlot(page);
+  if (authoringAsync) {
+    await previewReplyAsync(page, question, expectedAnswer);
+    recordMerchantModelRequest(page);
+    return;
+  }
+  await page.getByLabel('试聊问题').fill(question);
   await page.getByRole('button', { name: '发送测试问题', exact: true }).click();
   await expectPreviewResult(page);
   await expect(page.locator('.assistant-preview-form .assistant-preview-answer > p')).toContainText(
@@ -95,7 +125,6 @@ async function previewAndApproveCurrentRevision(
     { timeout: 60_000 },
   );
   recordMerchantModelRequest(page);
-  await approveCurrentPreview(page);
 }
 
 async function readPublishedRelease(
@@ -145,7 +174,7 @@ function safePublicationAlert(text: string): string {
 test('operator provisions a merchant, merchant previews and publishes, consumer receives an AI reply', async ({
   browser,
 }) => {
-  test.setTimeout(300_000);
+  test.setTimeout(authoringAsync ? 480_000 : 300_000);
   const operatorPassword = process.env['H5CS_E2E_OPERATOR_PASSWORD'];
   if (!operatorPassword) throw new Error('Browser-test operator credential is unavailable');
 
@@ -155,6 +184,7 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   const referenceNotes = '参考提示：请核实上门范围，不得把测试价格当成商家报价。';
   const merchantPassword = randomBytes(24).toString('base64url');
   const pathMode = process.env['H5CS_E2E_PATH_MODE'];
+  const knowledgeAsync = process.env['H5CS_E2E_KNOWLEDGE_ASYNC'] === 'true';
   const prefixed = pathMode !== undefined && pathMode !== 'root';
   const sameOrigin = pathMode === 'single_domain';
   const merchantOrigin = `http://127.0.0.1:${sameOrigin ? '3001' : '3000'}`;
@@ -317,6 +347,11 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await expect(merchantPage.getByRole('option', { name: '本地生活服务 · v1' })).toHaveCount(0);
   await merchantPage.goto(assistantUrl);
   await expectMerchantStep(merchantPage, '基础资料');
+  if (authoringAsync) {
+    await waitForMerchantModelSlot(merchantPage);
+    await expandDraftAsync(merchantPage, assistantId);
+    recordMerchantModelRequest(merchantPage);
+  }
   await merchantPage
     .getByRole('navigation', { name: '客服发布步骤' })
     .getByRole('link', { name: /^知识补充/u })
@@ -440,23 +475,33 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   ).toBeDisabled();
   await materialPanel.getByRole('checkbox', { name: /我同意将所选材料的文字/u }).check();
   await waitForMerchantModelSlot(merchantPage);
-  const organizationRequest = merchantPage.waitForRequest(
-    (request) =>
-      request.method() === 'POST' &&
-      new URL(request.url()).pathname.endsWith(`/knowledge/${assistantId}/materials/organize`),
-  );
-  await materialPanel.getByRole('button', { name: 'AI 整理所选材料', exact: true }).click();
-  const organization = (await organizationRequest).postDataJSON() as { sourceIds: string[] };
-  expect(organization.sourceIds).toHaveLength(1);
-  expect(organization.sourceIds).not.toContain(deletedSource.sourceId);
-  await expect(materialPanel.getByLabel('知识整理稿', { exact: true })).toHaveValue(
-    /预约需提前1天/u,
-    { timeout: 30000 },
-  );
+  let asyncKnowledge: AsyncKnowledgeSession | null = null;
+  if (knowledgeAsync) {
+    asyncKnowledge = await organizeKnowledgeAsync(
+      merchantPage,
+      materialPanel,
+      assistantId,
+      deletedSource.sourceId,
+    );
+  } else {
+    const organizationRequest = merchantPage.waitForRequest(
+      (request) =>
+        request.method() === 'POST' &&
+        new URL(request.url()).pathname.endsWith(`/knowledge/${assistantId}/materials/organize`),
+    );
+    await materialPanel.getByRole('button', { name: 'AI 整理所选材料', exact: true }).click();
+    const organization = (await organizationRequest).postDataJSON() as { sourceIds: string[] };
+    expect(organization.sourceIds).toHaveLength(1);
+    expect(organization.sourceIds).not.toContain(deletedSource.sourceId);
+    await expect(materialPanel.getByLabel('知识整理稿', { exact: true })).toHaveValue(
+      /预约需提前1天/u,
+      { timeout: 30000 },
+    );
+  }
   recordMerchantModelRequest(merchantPage);
   await mkdir('artifacts/ops-enhancement', { recursive: true });
   await materialPanel.screenshot({
-    path: `artifacts/ops-enhancement/materials-desktop-${pathMode ?? 'root'}.png`,
+    path: `artifacts/ops-enhancement/materials-desktop-${pathMode ?? 'root'}${knowledgeAsync ? '-async' : ''}.png`,
   });
   const materialViewport = merchantPage.viewportSize();
   await merchantPage.setViewportSize({ width: 390, height: 844 });
@@ -466,12 +511,16 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
     ),
   ).toBe(true);
   await materialPanel.screenshot({
-    path: `artifacts/ops-enhancement/materials-mobile-${pathMode ?? 'root'}.png`,
+    path: `artifacts/ops-enhancement/materials-mobile-${pathMode ?? 'root'}${knowledgeAsync ? '-async' : ''}.png`,
   });
   await merchantPage.setViewportSize(materialViewport ?? { width: 1280, height: 720 });
-  await materialPanel.getByRole('checkbox', { name: /我已核对整理稿/u }).check();
-  await materialPanel.getByRole('button', { name: '保存整理稿到客服草稿', exact: true }).click();
-  await expect(materialPanel.getByRole('status')).toContainText('知识已保存到草稿');
+  if (asyncKnowledge) {
+    await applyKnowledgeAsync(merchantPage, materialPanel, asyncKnowledge);
+  } else {
+    await materialPanel.getByRole('checkbox', { name: /我已核对整理稿/u }).check();
+    await materialPanel.getByRole('button', { name: '保存整理稿到客服草稿', exact: true }).click();
+    await expect(materialPanel.getByRole('status')).toContainText('知识已保存到草稿');
+  }
   await openMerchantDetails(merchantPage, '查看已保存的商品与服务资料');
   await expect(merchantPage.locator('.workflow-saved-text')).toContainText('预约需提前1天');
   await expect(
@@ -485,20 +534,20 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await expect(merchantPage.locator('.assistant-confirm-form')).toHaveCount(0);
   await expect(merchantPage.getByRole('img', { name: '扫码打开消费者 AI 客服' })).toHaveCount(0);
   await expect(merchantPage.locator('a[href^="http://127.0.0.1:3001/a/"]')).toHaveCount(0);
-  await merchantPage.getByLabel('试聊问题').fill('你们提供什么服务？');
-  await waitForMerchantModelSlot(merchantPage);
-  await merchantPage.getByRole('button', { name: '发送测试问题' }).click();
-  await expectPreviewResult(merchantPage);
+  await sendCurrentPreview(
+    merchantPage,
+    '你们提供什么服务？',
+    '我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。',
+  );
   const previewAnswer = merchantPage.locator('.assistant-preview-answer');
   await expect(previewAnswer.locator('.preview-evidence')).toContainText(
-    '不是向量检索结果或模型逐句引用',
+    authoringAsync ? '以下为本次发送的已保存草稿资料' : '不是向量检索结果或模型逐句引用',
     { timeout: 60000 },
   );
   await expect(previewAnswer).toContainText(
     '我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。',
     { timeout: 60_000 },
   );
-  recordMerchantModelRequest(merchantPage);
   await approveCurrentPreview(merchantPage);
   await expect(merchantPage.locator('a[href^="http://127.0.0.1:3001/a/"]')).toHaveCount(0);
   await expect(merchantPage.getByRole('img', { name: '扫码打开消费者 AI 客服' })).toHaveCount(0);
@@ -1266,16 +1315,18 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   await merchantPage.getByRole('button', { name: '保存并继续', exact: true }).click();
   await expectMerchantStep(merchantPage, '知识补充');
   await merchantPage.getByRole('link', { name: '下一步：效果试聊', exact: true }).click();
-  await merchantPage.getByLabel('试聊问题').fill('预约需提前几天，是否提供安装服务？');
-  await waitForMerchantModelSlot(merchantPage);
-  await merchantPage.getByRole('button', { name: '发送测试问题', exact: true }).click();
-  await expectPreviewResult(merchantPage);
-  const restoredPreview = merchantPage.locator('.assistant-preview-answer > p');
+  await sendCurrentPreview(
+    merchantPage,
+    '预约需提前几天，是否提供安装服务？',
+    '预约需提前1天；不提供安装服务。',
+  );
+  const restoredPreview = merchantPage.locator(
+    authoringAsync ? '.assistant-preview-answer' : '.assistant-preview-answer > p',
+  );
   await expect(restoredPreview).toContainText('预约需提前1天；不提供安装服务。', {
     timeout: 60000,
   });
   await expect(restoredPreview).not.toContainText('也提供洗衣机清洁咨询');
-  recordMerchantModelRequest(merchantPage);
   await approveCurrentPreview(merchantPage);
   await merchantPage.getByRole('link', { name: '下一步：发布分享', exact: true }).click();
   await merchantPage.getByLabel(/我已核对以上资料，并确认向消费者公开发布当前修订/u).check();
@@ -1324,4 +1375,12 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   process.stdout.write(
     '[history-e2e] source snapshot, draft-only recovery, reviewed publication, fixed URL and old/new sessions verified with deterministic provider\n',
   );
+  if (authoringAsync)
+    process.stdout.write(
+      JSON.stringify({
+        code: 'E2E_ASYNC_AUTHORING_CONSUMER_VERIFIED',
+        assistantId,
+        releaseRef: recoveredPublic.releaseRef,
+      }) + '\n',
+    );
 });

@@ -1,14 +1,14 @@
 import { loadDatabaseConfig, MySqlMarketplaceRepository } from '@h5cs/database';
 import { timingSafeEqual } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
-import { parseWritingInput, parseWritingResult, type WritingResult } from '@h5cs/contracts';
-import { buildWritingPrompt, groundFinancialWriting } from './writing-prompt.js';
+import { parseWritingInput, type WritingResult } from '@h5cs/contracts';
+import { generateDraftExpansion, generatePreviewReply } from './authoring-generation.js';
 
 import {
   ChatCompletionsGenerator,
   loadChatCompletionsConfig,
 } from './chat-completions-generator.js';
-import { buildPreviewPrompt, type PreviewFacts } from './conversation-prompt.js';
+import { type PreviewFacts } from './conversation-prompt.js';
 import type { ModelRuntime } from './model-runtime.js';
 
 export class PreviewError extends Error {
@@ -126,7 +126,7 @@ export class PreviewService {
   public async reply(payload: unknown, signal: AbortSignal): Promise<string> {
     const { merchantId, facts, question } = parsePayload(payload);
     this.limit(merchantId);
-    return this.#generator.generate(buildPreviewPrompt(facts, question), signal, {
+    return generatePreviewReply(this.#generator, facts, question, signal, {
       merchantId,
       operation: 'preview',
     });
@@ -159,27 +159,10 @@ export class PreviewService {
     this.limit(merchantId);
     this.#writingBusy.add(merchantId);
     try {
-      const answer = await this.#generator.generate(buildWritingPrompt(input), signal, {
+      return await generateDraftExpansion(this.#generator, input, signal, {
         merchantId,
         operation: 'writing',
       });
-      const parsed = parseWritingResult(JSON.parse(answer), input.field);
-      if (!parsed) throw new Error('Invalid writing answer');
-      const result = groundFinancialWriting(input, parsed);
-      const labeled =
-        input.field === 'welcomeMessage'
-          ? parseWritingResult(
-              {
-                ...result,
-                options: result.options.map((text) =>
-                  /\bAI\b|人工智能/iu.test(text) ? text : `您好，我是 AI 客服。${text}`,
-                ),
-              },
-              input.field,
-            )
-          : result;
-      if (!labeled) throw new Error('Invalid labeled writing answer');
-      return labeled;
     } finally {
       this.#writingBusy.delete(merchantId);
     }
@@ -206,23 +189,10 @@ export class PreviewService {
     this.limit(merchantId);
     this.#writingBusy.add(merchantId);
     try {
-      const output = await this.#generator.generate(buildKnowledgePrompt(text), signal, {
+      return await generateKnowledgeOrganization(this.#generator, text, signal, {
         merchantId,
         operation: 'organize',
       });
-      const result = parseMaterialOrganization(
-        renderKnowledgeOrganization(text, JSON.parse(output)),
-      );
-      if (!result) throw new Error('Invalid material reference plan');
-      const numbers = (value: string) => value.match(/[-+−]?\d+(?:[.,]\d+)*(?:[%％])?/gu) ?? [];
-      const allowed = new Set(numbers(text));
-      if (
-        [result.summary, ...result.warnings].some((value) =>
-          numbers(value).some((number) => !allowed.has(number)),
-        )
-      )
-        throw new Error('Invented number');
-      return result;
     } finally {
       this.#writingBusy.delete(merchantId);
     }
@@ -264,6 +234,5 @@ export function createPreviewService(
     ),
   );
 }
-import { parseMaterialOrganization, type MaterialOrganization } from '@h5cs/contracts';
-import { buildKnowledgePrompt } from './knowledge-prompt.js';
-import { renderKnowledgeOrganization } from './knowledge-grounding.js';
+import type { MaterialOrganization } from '@h5cs/contracts';
+import { generateKnowledgeOrganization } from './knowledge-organization.js';

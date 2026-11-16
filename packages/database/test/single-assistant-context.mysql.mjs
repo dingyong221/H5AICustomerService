@@ -79,8 +79,10 @@ async function seed() {
 const governed = async (scope) =>
   repository.getPublicationGovernance({ ...scope, now: new Date() });
 async function pass(scope, revision = 1) {
+  const snapshot = await repository.findManagementSnapshot(scope.merchantId, scope.assistantId);
   const check = await repository.savePreviewCheck({
     ...scope,
+    expectedPreviousPreviewId: snapshot.previousPreviewCheckId,
     expectedDraftRevision: revision,
     question: '清洗价格及适用条件是什么？',
     answer: '合成试聊回答：79元/台，仅限壁挂机。',

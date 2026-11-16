@@ -34,25 +34,34 @@ const server = createServer(async (request, response) => {
     return;
   }
   const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-  const messages = JSON.stringify(payload.messages);
+  const policy = payload.messages?.[0]?.role === 'system' ? payload.messages[0].content : '';
   // Read only the facts message, not the visitor's request or earlier replies.
   // This makes the browser regression distinguish immutable old-session facts
   // from newly published facts without pretending to evaluate real-model quality.
   const facts = payload.messages?.[1]?.content ?? '';
-  const organizing = messages.includes('商家知识资料整理助手');
-  const content = organizing
+  // Only the trusted system policy selects the output contract. Briefs, facts
+  // and questions cannot turn a consumer reply into a writing/knowledge result.
+  const organizing = typeof policy === 'string' && policy.startsWith('你是商家知识资料整理助手');
+  const writing = typeof policy === 'string' && policy.startsWith('你是商家客服资料的文字撰写助手');
+  const provided = writing ? JSON.parse(facts.split('\n')[1]) : null;
+  const content = writing
     ? JSON.stringify({
-        groups: [
-          {
-            topic: '商品/服务',
-            unitIds: JSON.parse(facts.split('\n')[1]).units.map((unit) => unit.id),
-          },
-        ],
-        reviewUnitIds: [],
+        options: [provided.brief, `商家说明：${provided.brief}`, `资料说明：${provided.brief}`],
+        reminders: ['请核对表达；未提供的事实、价格和条件需商家确认。'],
       })
-    : '我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。' +
-      (facts.includes('预约需提前1天') ? ' 预约需提前1天；不提供安装服务。' : '') +
-      (facts.includes('也提供洗衣机清洁咨询') ? ' 也提供洗衣机清洁咨询。' : '');
+    : organizing
+      ? JSON.stringify({
+          groups: [
+            {
+              topic: '商品/服务',
+              unitIds: JSON.parse(facts.split('\n')[1]).units.map((unit) => unit.id),
+            },
+          ],
+          reviewUnitIds: [],
+        })
+      : '我们提供上门空调清洗服务。具体价格和服务范围请向商家确认。' +
+        (facts.includes('预约需提前1天') ? ' 预约需提前1天；不提供安装服务。' : '') +
+        (facts.includes('也提供洗衣机清洁咨询') ? ' 也提供洗衣机清洁咨询。' : '');
   response.writeHead(200, { 'content-type': 'application/json' });
   response.end(
     JSON.stringify({

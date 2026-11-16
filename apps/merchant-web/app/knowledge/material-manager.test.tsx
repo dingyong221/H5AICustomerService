@@ -76,7 +76,7 @@ const defaultProps = {
   revision: 3,
   materials: [first, second],
 };
-function render(props = defaultProps) {
+function render(props: Parameters<typeof MaterialManager>[0] = defaultProps) {
   mocks.cursor = 0;
   const tree = MaterialManager(props);
   for (const effect of mocks.effects.splice(0)) effect();
@@ -460,5 +460,389 @@ describe('material deletion merchant experience', () => {
     await vi.waitFor(() => expect(text(render())).toContain('未能确认保存结果'));
     expect(mocks.push).not.toHaveBeenCalled();
     expect(summary(render()).props.value).toBe('仍需保存的新资料');
+  });
+});
+
+describe('persistent organization interactions (hook/events with mocked HTTP)', () => {
+  const userId = 'ff'.repeat(16),
+    taskId = '11'.repeat(16),
+    requestId = `organize_${'22'.repeat(16)}`;
+  const props = { ...defaultProps, asyncOrganization: true, recoveryScope: userId };
+  const key = `h5cs:organization:${userId}:${merchantId}:${assistantId}`;
+  const storage = new Map<string, string>();
+  const task = {
+    taskId,
+    state: 'queued',
+    inputRevision: 3,
+    sources: [{ id: sourceId, revision: 1, contentHash: 'f'.repeat(64), name: first.name }],
+    createdAt: '2026-11-16T00:00:00Z',
+    updatedAt: '2026-11-16T00:00:00Z',
+    modelOutcome: 'none',
+    stale: false,
+    canRetry: false,
+    canApply: false,
+  };
+  const complete = {
+    ...task,
+    state: 'completed',
+    modelOutcome: 'succeeded',
+    canApply: true,
+    result: { summary: '商品A售价29元', warnings: ['请核对适用条件'] },
+  };
+  const response = (data: unknown) => ({ ok: true, status: 200, json: async () => data });
+  const draw = (overrides: Partial<typeof props> = {}) => render({ ...props, ...overrides });
+  const saveForm = (tree: ReactNode) =>
+    nodes(tree).find(
+      (node) => node.type === 'form' && nodes(node).some((child) => child.type === 'textarea'),
+    )!;
+  async function start() {
+    draw();
+    let tree = draw();
+    checkbox(tree, first.name).props.onChange!({ target: { checked: true } });
+    checkbox(tree, '我同意将所选材料').props.onChange!({ target: { checked: true } });
+    tree = draw();
+    button(tree, 'AI 整理所选材料').props.onClick!();
+    await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalled());
+  }
+  async function restore(value: unknown = complete, overrides: Partial<typeof props> = {}) {
+    storage.set(key, JSON.stringify({ requestId, taskId }));
+    mocks.fetch.mockResolvedValue(response(value));
+    draw(overrides);
+    await vi.waitFor(() => expect(text(draw(overrides))).toContain('来源草稿修订'));
+    return draw(overrides);
+  }
+  beforeEach(() => {
+    mocks.hooks = [];
+    mocks.effects = [];
+    mocks.cursor = 0;
+    storage.clear();
+    vi.clearAllMocks();
+    vi.stubGlobal('React', React);
+    vi.stubGlobal('fetch', mocks.fetch);
+    vi.stubGlobal(
+      'setInterval',
+      vi.fn(() => 1),
+    );
+    vi.stubGlobal('clearInterval', vi.fn());
+    mocks.confirm.mockReturnValue(true);
+    vi.stubGlobal('window', {
+      confirm: mocks.confirm,
+      sessionStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+        removeItem: (key: string) => storage.delete(key),
+      },
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('persists one request before POST and prevents duplicate clicks from enqueuing twice', async () => {
+    let resolve!: (value: unknown) => void;
+    mocks.fetch.mockImplementation(() => {
+      expect(JSON.parse(storage.get(key)!)).toHaveProperty('requestId');
+      return new Promise((done) => {
+        resolve = done;
+      });
+    });
+    await start();
+    const submitted = JSON.parse(mocks.fetch.mock.calls[0]![1].body as string);
+    expect(submitted).toMatchObject({ sourceIds: [sourceId], revision: 3, consent: true });
+    expect(submitted.requestId).toMatch(/^organize_[a-f0-9]{32}$/u);
+    expect(mocks.fetch.mock.calls[0]![0]).toMatch(/\/organize-tasks$/u);
+    expect(button(draw(), 'AI 整理所选材料').props.disabled).toBe(true);
+    button(draw(), 'AI 整理所选材料').props.onClick!();
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+    resolve(response(task));
+    await vi.waitFor(() => expect(text(draw())).toContain('正在排队'));
+  });
+
+  it('recovers an unknown POST after refresh only with GET using the exact persisted request ID', async () => {
+    mocks.fetch.mockRejectedValueOnce(new TypeError('lost response'));
+    await start();
+    await vi.waitFor(() => expect(text(draw())).toContain('不会自动重新提交'));
+    const pointer = JSON.parse(storage.get(key)!);
+    mocks.hooks = [];
+    mocks.effects = [];
+    mocks.fetch.mockClear();
+    mocks.fetch.mockResolvedValue(response(complete));
+    draw();
+    await vi.waitFor(() => expect(summary(draw()).props.value).toBe(complete.result.summary));
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+    expect(mocks.fetch.mock.calls[0]![0]).toContain(`?requestId=${pointer.requestId}`);
+    expect(mocks.fetch.mock.calls[0]![1]).not.toHaveProperty('method');
+    expect(checkbox(draw(), '我已核对整理稿').props.checked).toBe(false);
+  });
+
+  it('does not overwrite human edits during polling, and adopts through task CAS only after confirmation', async () => {
+    let tree = await restore();
+    expect(button(tree, '保存整理稿到客服草稿').props.disabled).toBe(true);
+    summary(tree).props.onChange!({ target: { checked: false, value: '人工核对后的商品事实' } });
+    button(draw(), '刷新任务').props.onClick!();
+    await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(2));
+    tree = draw();
+    expect(summary(tree).props.value).toBe('人工核对后的商品事实');
+    checkbox(tree, '我已核对整理稿').props.onChange!({ target: { checked: true } });
+    tree = draw();
+    mocks.fetch.mockResolvedValue(response({ saved: true, revision: 4 }));
+    saveForm(tree).props.onSubmit!({ preventDefault: () => {}, currentTarget: {} });
+    await vi.waitFor(() => expect(mocks.refresh).toHaveBeenCalled());
+    const call = mocks.fetch.mock.calls.at(-1)!;
+    expect(call[0]).toContain(`/organize-tasks/${taskId}/apply`);
+    expect(JSON.parse(call[1].body as string)).toEqual({
+      summary: '人工核对后的商品事实',
+      revision: 3,
+      mode: 'append',
+      confirmed: true,
+    });
+    expect(text(draw())).toContain('已保存至草稿修订 4');
+    expect(button(draw(), '保存整理稿到客服草稿').props.disabled).toBe(true);
+  });
+
+  it.each([
+    { ...complete, stale: true, canApply: false },
+    { ...complete, inputRevision: 2 },
+  ])(
+    'blocks stale candidate adoption without detaching to the old manual endpoint',
+    async (value) => {
+      const tree = await restore(value);
+      expect(text(tree)).toContain('候选已过期');
+      expect(button(tree, '保存整理稿到客服草稿').props.disabled).toBe(true);
+      expect(button(tree, '直接使用提取文字').props.disabled).toBe(true);
+      saveForm(tree).props.onSubmit!({ preventDefault: () => {}, currentTarget: {} });
+      expect(mocks.fetch).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(['unknown', 'dispatched', 'succeeded'])(
+    'never retries a failed task with unresolved model outcome %s',
+    async (modelOutcome) => {
+      const tree = await restore({ ...task, state: 'failed', modelOutcome, canRetry: true });
+      expect(text(tree)).toContain('不能重试');
+      expect(nodes(tree).some((node) => node.type === 'button' && text(node) === '重试整理')).toBe(
+        false,
+      );
+      expect(button(tree, 'AI 整理所选材料').props.disabled).toBe(true);
+      expect(mocks.fetch).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('allows an explicit retry for a server-approved definite failure with a new idempotency ID', async () => {
+    const tree = await restore({
+      ...task,
+      state: 'failed',
+      modelOutcome: 'failed',
+      canRetry: true,
+    });
+    mocks.fetch.mockResolvedValue(response({ ...task, taskId: '33'.repeat(16) }));
+    button(tree, '重试整理').props.onClick!();
+    await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(2));
+    const call = mocks.fetch.mock.calls[1]!;
+    expect(call[0]).toContain(`/${taskId}/retry`);
+    expect(JSON.parse(call[1].body as string).requestId).not.toBe(requestId);
+  });
+
+  it('keeps pending asynchronous work recoverable when admission is disabled instead of using sync fallback', async () => {
+    let tree = await restore(task, { asyncOrganization: false });
+    expect(button(tree, 'AI 整理所选材料').props.disabled).toBe(true);
+    mocks.fetch.mockResolvedValue(response({ ...task, state: 'cancelled' }));
+    button(tree, '取消整理').props.onClick!();
+    await vi.waitFor(() =>
+      expect(text(draw({ asyncOrganization: false }))).toContain('任务已取消'),
+    );
+    expect(mocks.confirm).toHaveBeenCalledWith(expect.stringContaining('仍可能计费'));
+    tree = draw({ asyncOrganization: false });
+    button(tree, '关闭已结束任务').props.onClick!();
+    expect(storage.has(key)).toBe(false);
+    expect(mocks.fetch.mock.calls.every(([url]) => String(url).includes('organize-tasks'))).toBe(
+      true,
+    );
+  });
+
+  it('freezes uncertain adoption content across refresh and reconciles the saved revision without another write', async () => {
+    let tree = await restore();
+    summary(tree).props.onChange!({ target: { checked: false, value: '本次人工确认内容' } });
+    checkbox(draw(), '我已核对整理稿').props.onChange!({ target: { checked: true } });
+    tree = draw();
+    mocks.fetch.mockRejectedValueOnce(new TypeError('commit response lost'));
+    saveForm(tree).props.onSubmit!({ preventDefault: () => {}, currentTarget: {} });
+    await vi.waitFor(() => expect(text(draw())).toContain('保存结果待核对'));
+    expect(JSON.parse(storage.get(key)!).pendingApply.summary).toBe('本次人工确认内容');
+    expect(summary(draw()).props.disabled).toBe(true);
+    mocks.hooks = [];
+    mocks.effects = [];
+    mocks.fetch.mockClear();
+    mocks.fetch.mockResolvedValue(
+      response({ ...complete, appliedRevision: 4, canApply: false, stale: true }),
+    );
+    draw();
+    await vi.waitFor(() => expect(text(draw())).toContain('已保存至草稿修订 4'));
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+    expect(mocks.fetch.mock.calls[0]![1]).not.toHaveProperty('method');
+    expect(JSON.parse(storage.get(key)!)).not.toHaveProperty('pendingApply');
+  });
+
+  it('lets an explicitly confirmed stale pending adoption be abandoned locally after GET, including after reload', async () => {
+    let tree = await restore();
+    summary(tree).props.onChange!({
+      target: { checked: false, value: '应保留到商家明确放弃的编辑稿' },
+    });
+    checkbox(draw(), '我已核对整理稿').props.onChange!({ target: { checked: true } });
+    mocks.fetch.mockRejectedValueOnce(new TypeError('apply never committed; response unknown'));
+    saveForm(draw()).props.onSubmit!({ preventDefault: () => {}, currentTarget: {} });
+    await vi.waitFor(() => expect(text(draw())).toContain('保存结果待核对'));
+    expect(nodes(draw()).some((node) => text(node) === '放弃待确认采纳并关闭')).toBe(false);
+    mocks.hooks = [];
+    mocks.effects = [];
+    mocks.fetch.mockClear();
+    mocks.fetch.mockResolvedValue(response({ ...complete, stale: true, canApply: false }));
+    draw({ revision: 4 });
+    await vi.waitFor(() => expect(text(draw({ revision: 4 }))).toContain('放弃待确认采纳并关闭'));
+    tree = draw({ revision: 4 });
+    expect(summary(tree).props.value).toBe('应保留到商家明确放弃的编辑稿');
+    mocks.confirm.mockReturnValueOnce(false);
+    button(tree, '放弃待确认采纳并关闭').props.onClick!();
+    expect(storage.has(key)).toBe(true);
+    expect(summary(draw({ revision: 4 })).props.value).toBe('应保留到商家明确放弃的编辑稿');
+    button(draw({ revision: 4 }), '放弃待确认采纳并关闭').props.onClick!();
+    expect(mocks.confirm).toHaveBeenCalledWith(expect.stringContaining('请先复制需要保留的内容'));
+    expect(storage.has(key)).toBe(false);
+    expect(summary(draw({ revision: 4 })).props.value).toBe('');
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+    expect(mocks.fetch.mock.calls[0]![1]).not.toHaveProperty('method');
+    expect(mocks.refresh).toHaveBeenCalledOnce();
+    mocks.hooks = [];
+    mocks.effects = [];
+    draw({ revision: 4 });
+    expect(text(draw({ revision: 4 }))).not.toContain('保存结果待核对');
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+  });
+
+  it.each(['read-failed', 'not-stale', 'already-applied'])(
+    'does not offer pending-adoption abandonment for %s',
+    async (state) => {
+      storage.set(
+        key,
+        JSON.stringify({
+          requestId,
+          taskId,
+          pendingApply: {
+            revision: 3,
+            summary: '待确认稿',
+            mode: 'append',
+            confirmed: true,
+          },
+        }),
+      );
+      mocks.fetch.mockResolvedValue(
+        state === 'read-failed'
+          ? { ok: false, status: 503, json: async () => ({}) }
+          : response(
+              state === 'already-applied'
+                ? { ...complete, stale: true, appliedRevision: 4, canApply: false }
+                : complete,
+            ),
+      );
+      draw({ revision: 4 });
+      await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledOnce());
+      await vi.waitFor(() =>
+        expect(text(draw({ revision: 4 }))).toContain(
+          state === 'read-failed'
+            ? '未能确认任务状态'
+            : state === 'already-applied'
+              ? '已保存至草稿修订 4'
+              : '候选已过期',
+        ),
+      );
+      expect(
+        nodes(draw({ revision: 4 })).some((node) => text(node) === '放弃待确认采纳并关闭'),
+      ).toBe(false);
+      expect(storage.has(key)).toBe(true);
+    },
+  );
+
+  it('does not read another account recovery pointer or send a request when browser persistence fails', async () => {
+    storage.set(key.replace(userId, '44'.repeat(16)), JSON.stringify({ requestId, taskId }));
+    draw();
+    draw();
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    window.sessionStorage.setItem = () => {
+      throw new Error('storage disabled');
+    };
+    let tree = draw();
+    checkbox(tree, first.name).props.onChange!({ target: { checked: true } });
+    checkbox(tree, '我同意将所选材料').props.onChange!({ target: { checked: true } });
+    tree = draw();
+    button(tree, 'AI 整理所选材料').props.onClick!();
+    await vi.waitFor(() => expect(text(draw())).toContain('本次未发送'));
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
+  it('reconciles an unrecorded submission and only replays the same request after an explicit click', async () => {
+    mocks.fetch.mockRejectedValueOnce(new TypeError('connection lost before acceptance'));
+    await start();
+    await vi.waitFor(() => expect(text(draw())).toContain('不会自动重新提交'));
+    const originalBody = mocks.fetch.mock.calls[0]![1].body;
+    mocks.fetch.mockResolvedValueOnce(response(null));
+    button(draw(), '刷新任务').props.onClick!();
+    await vi.waitFor(() => expect(text(draw())).toContain('确认提交原任务'));
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    mocks.fetch.mockResolvedValueOnce(response(task));
+    button(draw(), '确认提交原任务').props.onClick!();
+    await vi.waitFor(() => expect(text(draw())).toContain('正在排队'));
+    expect(JSON.parse(mocks.fetch.mock.calls[2]![1].body as string)).toEqual(
+      JSON.parse(originalBody as string),
+    );
+    expect(JSON.parse(storage.get(key)!)).not.toHaveProperty('submission');
+  });
+
+  it('keeps the new retry reference after a lost retry response and cannot close or retry the old task', async () => {
+    const tree = await restore({
+      ...task,
+      state: 'failed',
+      modelOutcome: 'failed',
+      canRetry: true,
+    });
+    mocks.fetch.mockRejectedValueOnce(new TypeError('retry response lost'));
+    button(tree, '重试整理').props.onClick!();
+    await vi.waitFor(() => expect(text(draw())).toContain('不会自动重新提交'));
+    const pointer = JSON.parse(storage.get(key)!);
+    expect(pointer.submission.retryOf).toBe(taskId);
+    expect(pointer.requestId).not.toBe(requestId);
+    for (const label of ['重试整理', '关闭已结束任务'])
+      expect(nodes(draw()).some((node) => node.type === 'button' && text(node) === label)).toBe(
+        false,
+      );
+    mocks.fetch.mockResolvedValueOnce(response({ ...task, taskId: '33'.repeat(16) }));
+    button(draw(), '刷新任务').props.onClick!();
+    await vi.waitFor(() => expect(text(draw())).toContain('正在排队'));
+    expect(mocks.fetch.mock.calls[2]![0]).toContain(`?requestId=${pointer.requestId}`);
+  });
+
+  it('blocks both sync fallback and asynchronous admission when a recovery record cannot be read', () => {
+    storage.set(key, '{corrupt');
+    draw({ asyncOrganization: false });
+    const tree = draw({ asyncOrganization: false });
+    expect(text(tree)).toContain('无法读取任务恢复记录');
+    expect(button(tree, 'AI 整理所选材料').props.disabled).toBe(true);
+    expect(button(tree, '保存整理稿到客服草稿').props.disabled).toBe(true);
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
+  it('preserves edits but blocks adoption after an unreadable task until server access is verified again', async () => {
+    const tree = await restore();
+    summary(tree).props.onChange!({ target: { checked: false, value: '本地编辑仍保留' } });
+    mocks.fetch.mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      json: async () => ({ code: 'NOT_FOUND' }),
+    });
+    button(draw(), '刷新任务').props.onClick!();
+    await vi.waitFor(() => expect(text(draw())).toContain('未能确认任务状态'));
+    expect(summary(draw()).props.value).toBe('本地编辑仍保留');
+    expect(button(draw(), '保存整理稿到客服草稿').props.disabled).toBe(true);
+    mocks.fetch.mockResolvedValueOnce(response(complete));
+    button(draw(), '刷新任务').props.onClick!();
+    await vi.waitFor(() => expect(text(draw())).not.toContain('未能确认任务状态'));
+    expect(summary(draw()).props.value).toBe('本地编辑仍保留');
   });
 });

@@ -1,4 +1,8 @@
-import type { ConversationTurnClaim } from '@h5cs/database';
+import type {
+  ConversationTurnClaim,
+  KnowledgeOrganizationClaim,
+  AuthoringTaskClaim,
+} from '@h5cs/database';
 import { settlesWithin } from './shutdown-budget.js';
 import { abortable } from './abortable.js';
 
@@ -7,6 +11,8 @@ export type ModelContext = Readonly<{
   merchantId: string;
   operation: ModelOperation;
   claim?: ConversationTurnClaim;
+  knowledgeClaim?: KnowledgeOrganizationClaim;
+  authoringClaim?: AuthoringTaskClaim;
   permit?: ModelPermit;
 }>;
 export type ModelAttemptStore = Readonly<{
@@ -115,6 +121,48 @@ export class ModelRuntime {
     return this.#enqueue(merchantId, 'consumer', signal, run);
   }
 
+  public bindKnowledgeClaim(permit: ModelPermit, claim: KnowledgeOrganizationClaim): void {
+    const scope = this.#permits.get(permit);
+    if (
+      !scope ||
+      scope.operation !== 'organize' ||
+      scope.merchantId !== claim.merchantId ||
+      scope.used ||
+      scope.claimKey
+    )
+      throw new ModelCapacityError('Knowledge permit claim scope mismatch');
+    scope.claimKey = `knowledge:${claim.jobId}:${claim.claimGeneration}`;
+  }
+
+  public enqueueKnowledge<T>(
+    merchantId: string,
+    signal: AbortSignal,
+    run: (permit: ModelPermit) => Promise<T>,
+  ): Promise<T> {
+    return this.#enqueue(merchantId, 'organize', signal, run);
+  }
+  public enqueueAuthoring<T>(
+    merchantId: string,
+    operation: 'writing' | 'preview',
+    signal: AbortSignal,
+    run: (permit: ModelPermit) => Promise<T>,
+  ): Promise<T> {
+    return this.#enqueue(merchantId, operation, signal, run);
+  }
+  public bindAuthoringClaim(permit: ModelPermit, claim: AuthoringTaskClaim): void {
+    const scope = this.#permits.get(permit),
+      operation = claim.payload.kind === 'draft.expand' ? 'writing' : 'preview';
+    if (
+      !scope ||
+      scope.operation !== operation ||
+      scope.merchantId !== claim.merchantId ||
+      scope.used ||
+      scope.claimKey
+    )
+      throw new ModelCapacityError('Authoring permit claim mismatch');
+    scope.claimKey = `authoring:${claim.payload.kind}:${claim.jobId}:${claim.claimGeneration}`;
+  }
+
   public async dispatch<T>(
     context: ModelContext,
     signal: AbortSignal,
@@ -204,9 +252,24 @@ export class ModelRuntime {
         scope.used ||
         scope.merchantId !== context.merchantId ||
         scope.operation !== context.operation ||
+        (context.authoringClaim &&
+          (context.claim ||
+            context.knowledgeClaim ||
+            scope.claimKey !==
+              `authoring:${context.authoringClaim.payload.kind}:${context.authoringClaim.jobId}:${context.authoringClaim.claimGeneration}` ||
+            context.operation !==
+              (context.authoringClaim.payload.kind === 'draft.expand' ? 'writing' : 'preview'))) ||
+        (scope.claimKey?.startsWith('authoring:') && !context.authoringClaim) ||
         (context.operation === 'consumer' &&
           (!context.claim ||
-            scope.claimKey !== `${context.claim.jobId}:${context.claim.claimGeneration}`))
+            scope.claimKey !== `${context.claim.jobId}:${context.claim.claimGeneration}`)) ||
+        (context.knowledgeClaim &&
+          (context.operation !== 'organize' ||
+            scope.claimKey !==
+              `knowledge:${context.knowledgeClaim.jobId}:${context.knowledgeClaim.claimGeneration}`)) ||
+        (context.operation === 'organize' &&
+          scope.claimKey !== undefined &&
+          !context.knowledgeClaim)
       )
         throw new ModelCapacityError('Invalid model permit scope or reuse');
       scope.used = true;

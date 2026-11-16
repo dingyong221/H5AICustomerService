@@ -279,7 +279,9 @@ export async function AssistantView({
               knowledgeConfirmed={assistant.knowledgeConfirmed}
             />
             <EditDraftForm
-              key={`editor:${assistantId}`}
+              key={`editor:${assistantId}:${session.merchantUserId}`}
+              taskUserId={session.merchantUserId}
+              asyncExpandEnabled={process.env['DRAFT_EXPAND_ASYNC_ENABLED'] === 'true'}
               csrfToken={csrfToken}
               returnPath={merchantPath(merchantId, 'drafts', assistantId)}
               continueHref={merchantPath(merchantId, 'knowledge', assistantId)}
@@ -296,6 +298,7 @@ export async function AssistantView({
               有文件就上传整理；没有文件，可直接使用已保存的文字资料进入试聊。上传本身不会自动写入知识或发布。
             </p>
             <MaterialManager
+              key={`${merchantId}:${assistantId}:${session.merchantUserId}`}
               merchantId={merchantId}
               assistantId={assistantId}
               csrfToken={csrfToken}
@@ -303,6 +306,8 @@ export async function AssistantView({
               materials={materials}
               effectiveCharacters={assistant.draft.materialsSummary.length}
               hasPublishedVersion={!!assistant.activeReleaseId}
+              asyncOrganization={process.env['KNOWLEDGE_ASYNC_ENABLED'] === 'true'}
+              recoveryScope={session.merchantUserId}
             />
             <details className="workflow-disclosure">
               <summary>查看已保存的商品与服务资料</summary>
@@ -321,6 +326,9 @@ export async function AssistantView({
                 试聊使用当前已保存的修订 {assistant.draftRevision}，不会改变线上客服。
               </p>
               <PreviewChatForm
+                key={`preview:${assistantId}:${session.merchantUserId}`}
+                taskUserId={session.merchantUserId}
+                asyncPreviewEnabled={process.env['PREVIEW_ASYNC_ENABLED'] === 'true'}
                 merchantId={merchantId}
                 assistantId={assistantId}
                 draftRevision={assistant.draftRevision}

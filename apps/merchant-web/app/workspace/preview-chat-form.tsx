@@ -6,22 +6,37 @@ import { useRouter } from 'next/navigation';
 import { previewChatAction } from './preview-chat-action';
 import { PreviewVerdictForm } from './governance-controls';
 import type { PublicationGovernance } from './governance-model';
+import { TaskPreviewChatForm } from './task-preview-chat-form';
 
-export function PreviewChatForm({
-  merchantId,
-  assistantId,
-  draftRevision,
-  csrfToken,
-  available,
-  lastCheck = null,
-}: {
+export type PreviewChatProps = {
   merchantId: string;
   assistantId: string;
   draftRevision: number;
   csrfToken: string;
   available: boolean;
   lastCheck?: PublicationGovernance['quality'] | null;
-}) {
+  taskUserId?: string;
+  asyncPreviewEnabled?: boolean;
+};
+export function PreviewChatForm(props: PreviewChatProps) {
+  return props.taskUserId ? (
+    <TaskPreviewChatForm
+      {...props}
+      taskUserId={props.taskUserId}
+      fallback={<LegacyPreviewChatForm {...props} />}
+    />
+  ) : (
+    <LegacyPreviewChatForm {...props} />
+  );
+}
+function LegacyPreviewChatForm({
+  merchantId,
+  assistantId,
+  draftRevision,
+  csrfToken,
+  available,
+  lastCheck = null,
+}: PreviewChatProps) {
   const [state, action, pending] = useActionState(previewChatAction, {
     answer: null,
     error: null,

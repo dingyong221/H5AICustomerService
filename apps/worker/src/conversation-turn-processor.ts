@@ -1,5 +1,10 @@
 import { MarketplaceAccessError } from '@h5cs/database';
-import type { ConversationTurnClaim, ClaimMutationResult } from '@h5cs/database';
+import type {
+  ConversationTurnClaim,
+  ClaimMutationResult,
+  KnowledgeOrganizationClaim,
+  AuthoringTaskClaim,
+} from '@h5cs/database';
 
 import { buildConversationPrompt, type ConversationPrompt } from './conversation-prompt.js';
 import { ModelCapacityError, ModelUnknownOutcomeError, type ModelPermit } from './model-runtime.js';
@@ -40,6 +45,8 @@ export type ConversationTurnGenerator = Readonly<{
       merchantId: string;
       operation: string;
       claim?: ConversationTurnClaim;
+      knowledgeClaim?: KnowledgeOrganizationClaim;
+      authoringClaim?: AuthoringTaskClaim;
       permit?: ModelPermit;
     },
   ) => Promise<string>;

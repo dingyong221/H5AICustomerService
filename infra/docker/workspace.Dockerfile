@@ -77,7 +77,10 @@ WORKDIR /app
 COPY --from=build --chown=node:node /opt/deployed-app/ ./
 
 RUN if [ -d /app/parser-runtime ]; then \
-      chown -R root:root /app/parser-runtime && chmod -R a-w /app/parser-runtime; \
+      chown -R root:root /app/parser-runtime && chmod -R a-w /app/parser-runtime \
+      && mkdir -p /run/h5cs-material-parser \
+      && chown node:node /run/h5cs-material-parser \
+      && chmod 0700 /run/h5cs-material-parser; \
     fi
 
 USER node

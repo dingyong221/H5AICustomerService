@@ -74,6 +74,7 @@ export async function seed() {
   await lifecycle.confirmDraftKnowledge({ ...scope, expectedDraftRevision: 1, now: new Date() });
   const check = await lifecycle.savePreviewCheck({
     ...scope,
+    expectedPreviousPreviewId: null,
     expectedDraftRevision: 1,
     question: '合成价格',
     answer: '挂机清洗79元/台',

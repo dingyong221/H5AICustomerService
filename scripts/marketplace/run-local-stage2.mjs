@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { pipeline } from 'node:stream/promises';
 import { createGzip, createGunzip } from 'node:zlib';
+import { legacyRowJson } from './legacy-row-projection.mjs';
 const databaseRequire = createRequire(
   new URL('../../packages/database/package.json', import.meta.url),
 );
@@ -219,14 +220,6 @@ async function tables(c) {
   );
   return rows.map((r) => r.name);
 }
-function legacyRowJson(table, row) {
-  if (table !== 'job') return JSON.stringify(row);
-  const legacy = { ...row };
-  delete legacy.claim_generation;
-  delete legacy.model_outcome;
-  delete legacy.model_attempt_id;
-  return JSON.stringify(legacy);
-}
 const report = { kind: 'a6-local-stage2', externalMarketplace: false, paidSupplierCalls: 0 };
 let source, restore;
 try {
@@ -281,7 +274,7 @@ try {
   if (before.sha256 !== after.sha256) throw Error('Legacy baseline changed during marketplace DDL');
   report.upgrade = {
     from: 15,
-    to: 19,
+    to: journal.entries.length,
     legacyTables: legacyTables.length,
     legacySha256: before.sha256,
     preserved: true,
@@ -292,8 +285,8 @@ try {
     before.sha256
   )
     throw Error('Replay modified legacy rows');
-  console.log('Non-empty 15→19 migration and replay preserved legacy data');
-  // Also run the existing CI 12→19 non-empty probe, rather than trusting its offline unit tests.
+  console.log(`Non-empty 15→${journal.entries.length} migration and replay preserved legacy data`);
+  // Also run the existing non-empty CI upgrade probe, beyond its offline unit tests.
   await source.query(
     'CREATE DATABASE h5cs_integration_ci CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci',
   );

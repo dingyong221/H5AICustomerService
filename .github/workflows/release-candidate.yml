@@ -33,13 +33,21 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  material-parser-isolation:
+    name: Verify parser isolation before packaging evidence
+    uses: ./.github/workflows/material-parser.yml
+
+  knowledge-stage2-mysql:
+    name: Verify knowledge and authoring before packaging evidence
+    uses: ./.github/workflows/knowledge-stage2.yml
+
   runtime-stage1-mysql:
     name: Verify runtime recovery before packaging evidence
     uses: ./.github/workflows/runtime-stage1.yml
 
   evidence:
     name: Verify and package repository evidence
-    needs: runtime-stage1-mysql
+    needs: [runtime-stage1-mysql, knowledge-stage2-mysql, material-parser-isolation]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:

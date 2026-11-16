@@ -1,0 +1,70 @@
+name: Knowledge and authoring MySQL
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  knowledge-stage2-mysql:
+    name: Real MySQL knowledge and authoring
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CI: 'true'
+      APP_ENV: test
+      NODE_ENV: test
+      H5CS_MYSQL_DATABASE: h5cs_stage2_ci
+      H5CS_MYSQL_USER: h5cs_stage2
+      # Disposable, runner-local fixture credentials; never production secrets.
+      H5CS_MYSQL_PASSWORD: local-dev-ci-only
+      H5CS_MYSQL_ROOT_PASSWORD: local-dev-root-only
+      H5CS_STAGE2_MYSQL_URL: mysql://h5cs_stage2:local-dev-ci-only@127.0.0.1:3306/h5cs_stage2_ci
+    steps:
+      - name: Check out exact source and frozen stage 1 baseline
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pnpm 11
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build database and domain dependencies
+        run: pnpm exec turbo run build --filter=@h5cs/database --concurrency=1
+
+      # This job owns a new runner and volume, separate from every runtime probe.
+      - name: Start dedicated empty loopback MySQL
+        run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml up -d --wait mysql
+
+      - name: Verify knowledge and authoring concurrency recovery and revision adoption
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ runner.temp }}/knowledge-stage2-evidence"
+          node packages/database/scripts/run-knowledge-stage2-ci.mjs --authoring 2>&1 | tee "${{ runner.temp }}/knowledge-stage2-evidence/mysql-tests.tap"
+
+      - name: Upload synthetic knowledge organization evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: knowledge-stage2-mysql-${{ github.sha }}
+          path: ${{ runner.temp }}/knowledge-stage2-evidence
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Stop dedicated disposable MySQL and remove only its fixture volume
+        if: always()
+        run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml down --volumes

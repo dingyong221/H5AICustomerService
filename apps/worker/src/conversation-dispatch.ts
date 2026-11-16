@@ -5,6 +5,8 @@ import {
   MySqlConversationTurnJobRepository,
   MySqlMarketplaceRepository,
   MySqlModelCallAttemptRepository,
+  MySqlKnowledgeOrganizationRepository,
+  MySqlAuthoringTaskRepository,
   type DatabaseConnectionConfig,
 } from '@h5cs/database';
 
@@ -17,6 +19,11 @@ import {
   type ConversationTurnStore,
 } from './conversation-turn-processor.js';
 import { ModelRuntime, type ModelAttemptStore } from './model-runtime.js';
+import {
+  KnowledgeOrganizationProcessor,
+  type KnowledgeOrganizationStore,
+} from './knowledge-organization-processor.js';
+import { AuthoringTaskProcessor, type AuthoringTaskStore } from './authoring-task-processor.js';
 
 type DispatchDependencies = Readonly<{
   fetchImpl?: typeof fetch;
@@ -25,11 +32,19 @@ type DispatchDependencies = Readonly<{
   storeFactory?: (database: DatabaseConnectionConfig) => ConversationTurnStore;
   runtime?: ModelRuntime;
   attempts?: ModelAttemptStore;
+  knowledgeStoreFactory?: (database: DatabaseConnectionConfig) => KnowledgeOrganizationStore;
+  authoringStoreFactory?: (database: DatabaseConnectionConfig) => AuthoringTaskStore;
 }>;
 
 export type ConversationDispatchResult =
   | Readonly<{ configured: false; reason: string }>
-  | Readonly<{ configured: true; processor: ConversationTurnProcessor; runtime: ModelRuntime }>;
+  | Readonly<{
+      configured: true;
+      processor: ConversationTurnProcessor;
+      runtime: ModelRuntime;
+      knowledgeProcessor?: KnowledgeOrganizationProcessor;
+      authoringProcessor?: AuthoringTaskProcessor;
+    }>;
 
 export function createConversationDispatch(
   environment: NodeJS.ProcessEnv = process.env,
@@ -66,5 +81,29 @@ export function createConversationDispatch(
       generator,
       `worker_${randomBytes(16).toString('hex')}`,
     ),
+    ...(environment['KNOWLEDGE_ASYNC_ENABLED'] === 'true'
+      ? {
+          knowledgeProcessor: new KnowledgeOrganizationProcessor(
+            dependencies.knowledgeStoreFactory?.(database.config) ??
+              new MySqlKnowledgeOrganizationRepository(database.config, true),
+            generator,
+            `knowledge_${randomBytes(16).toString('hex')}`,
+          ),
+        }
+      : {}),
+    ...(environment['DRAFT_EXPAND_ASYNC_ENABLED'] === 'true' ||
+    environment['PREVIEW_ASYNC_ENABLED'] === 'true'
+      ? {
+          authoringProcessor: new AuthoringTaskProcessor(
+            dependencies.authoringStoreFactory?.(database.config) ??
+              new MySqlAuthoringTaskRepository(database.config, {
+                draftExpand: environment['DRAFT_EXPAND_ASYNC_ENABLED'] === 'true',
+                previewReply: environment['PREVIEW_ASYNC_ENABLED'] === 'true',
+              }),
+            generator,
+            `authoring_${randomBytes(16).toString('hex')}`,
+          ),
+        }
+      : {}),
   };
 }

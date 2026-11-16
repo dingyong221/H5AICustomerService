@@ -79,8 +79,10 @@ async function seed() {
 const governed = async (scope) =>
   repository.getPublicationGovernance({ ...scope, now: new Date() });
 async function pass(scope, revision = 1) {
+  const snapshot = await repository.findManagementSnapshot(scope.merchantId, scope.assistantId);
   const check = await repository.savePreviewCheck({
     ...scope,
+    expectedPreviousPreviewId: snapshot.previousPreviewCheckId,
     expectedDraftRevision: revision,
     question: '清洗价格及适用条件是什么？',
     answer: '合成试聊回答：79元/台，仅限壁挂机。',
@@ -119,6 +121,7 @@ test('real MySQL: publishing needs a successful same-revision preview and explic
   const check = await repository.savePreviewCheck({
     ...scope,
     expectedDraftRevision: 1,
+    expectedPreviousPreviewId: null,
     question: '合成问题',
     answer: '合成回答',
     now: new Date(),
@@ -269,6 +272,7 @@ test('real MySQL: normal publishing pins old sessions, withdrawal closes old and
     repository.savePreviewCheck({
       ...scope,
       expectedDraftRevision: 2,
+      expectedPreviousPreviewId: null,
       question: '撤回前已发出的旧问题',
       answer: '撤回后才返回的旧结果',
       now: new Date(),
@@ -430,6 +434,7 @@ test('real MySQL: preview concurrent with revision change never approves a stale
   const scope = await seed();
   const check = await repository.savePreviewCheck({
     ...scope,
+    expectedPreviousPreviewId: null,
     expectedDraftRevision: 1,
     question: '合成问题',
     answer: '合成回答',
@@ -478,6 +483,7 @@ test('real MySQL: emergency withdrawal preserves an existing assistant pause', a
       ...scope,
       expectedDraftRevision: 2,
       question: '暂停不能预览',
+      expectedPreviousPreviewId: null,
       answer: '不得重新激活',
       now: new Date(),
     }),
@@ -502,6 +508,7 @@ test('real MySQL: audit failure rolls back the recorded preview and cannot creat
   await assert.rejects(() =>
     new MySqlAssistantLifecycleRepository(failing).savePreviewCheck({
       ...scope,
+      expectedPreviousPreviewId: null,
       expectedDraftRevision: 1,
       question: '合成问题',
       answer: '合成回答',

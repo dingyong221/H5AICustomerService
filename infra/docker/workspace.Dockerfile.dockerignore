@@ -18,3 +18,6 @@ scripts
 !apps/merchant-web/scripts/extract-material.mjs
 !apps/merchant-web/scripts/material-container-safety.mjs
 !apps/merchant-web/scripts/warm-material-parser.mjs
+!apps/merchant-web/scripts/material-parser-runtime.mjs
+!apps/merchant-web/scripts/material-parser-runtime.d.mts
+!apps/merchant-web/scripts/serve-material-parser.mjs

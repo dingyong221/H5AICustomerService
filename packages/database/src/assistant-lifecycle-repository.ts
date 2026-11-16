@@ -28,10 +28,22 @@ import {
 import type { Connection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
 import type { DatabaseConnectionConfig } from './config.js';
+import { KnowledgeOrganizationError } from '@h5cs/domain';
+import {
+  authorizeKnowledgeScope,
+  decodeKnowledgePayload,
+  knowledgeHash,
+  knowledgeObject,
+  loadKnowledgeSources,
+  lockKnowledgeJob,
+  sameKnowledgeSources,
+} from './knowledge-organization-contract.js';
+import { parseKnowledgeResult } from './knowledge-organization-repository.js';
 import { probeDatabase } from './config.js';
 import { bindVerifiedImprovementsToRelease } from './assistant-improvement-release.js';
 import {
   assertPublicationGovernance,
+  persistPreviewCheck,
   governanceAudit,
   governanceFactsHash,
   publicationGovernanceStatus,
@@ -721,7 +733,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
   public async findManagementSnapshot(
     merchantIdValue: MerchantId,
     assistantIdValue: AssistantId,
-  ): Promise<AssistantManagementSnapshot | null> {
+  ): Promise<(AssistantManagementSnapshot & { previousPreviewCheckId: string | null }) | null> {
     const merchantId = idBuffer(merchantIdValue, 'merchantId');
     const assistantId = idBuffer(assistantIdValue, 'assistantId');
     return this.#withConnection(async (connection) =>
@@ -754,6 +766,90 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
       );
       if (current === null) throw new AssistantRevisionConflictError();
       return this.#persistDraft(connection, current, input, draft);
+    });
+  }
+
+  /** Candidate adoption is one transaction with the existing draft CAS. */
+  public async applyKnowledgeOrganization(input: {
+    merchantUserId: MerchantUserId;
+    merchantId: MerchantId;
+    assistantId: AssistantId;
+    taskId: string;
+    expectedRevision: number;
+    summary: string;
+    mode: 'append' | 'replace';
+    confirmed: true;
+    now: Date;
+  }): Promise<{ saved: true; revision: number }> {
+    validDate(input.now, 'now');
+    if (
+      input.confirmed !== true ||
+      !Number.isSafeInteger(input.expectedRevision) ||
+      input.expectedRevision < 1 ||
+      !['append', 'replace'].includes(input.mode)
+    )
+      throw new KnowledgeOrganizationError('INVALID_REQUEST');
+    const summary = parseKnowledgeResult({ summary: input.summary, warnings: [] }).summary;
+    const applyHash = knowledgeHash(
+      JSON.stringify({ summary, mode: input.mode, revision: input.expectedRevision }),
+    );
+    return this.#withTransaction(async (connection) => {
+      const current = await this.#lockManagement(
+        connection,
+        idBuffer(input.merchantUserId, 'merchantUserId'),
+        idBuffer(input.merchantId, 'merchantId'),
+        idBuffer(input.assistantId, 'assistantId'),
+      );
+      if (!current) throw new KnowledgeOrganizationError('NOT_FOUND');
+      const scope = {
+        merchantId: input.merchantId,
+        assistantId: input.assistantId,
+        userId: input.merchantUserId,
+      };
+      await authorizeKnowledgeScope(connection, scope, true);
+      const job = await lockKnowledgeJob(connection, scope, input.taskId),
+        payload = decodeKnowledgePayload(job.payload);
+      const result = job.result === null ? null : knowledgeObject(job.result);
+      if (result?.['appliedRevision'] !== undefined) {
+        if (result['applyHash'] !== applyHash || !Number.isSafeInteger(result['appliedRevision']))
+          throw new KnowledgeOrganizationError('IDEMPOTENCY_CONFLICT');
+        return { saved: true as const, revision: Number(result['appliedRevision']) };
+      }
+      if (job.state !== 'completed' || job.model_outcome !== 'succeeded' || !result)
+        throw new KnowledgeOrganizationError('TASK_NOT_READY');
+      parseKnowledgeResult(result);
+      if (
+        current.draft_revision !== input.expectedRevision ||
+        payload.inputRevision !== input.expectedRevision
+      )
+        throw new KnowledgeOrganizationError('INPUT_CHANGED');
+      const source = await loadKnowledgeSources(
+        connection,
+        scope,
+        payload.sources.map((s) => s.id),
+        true,
+      );
+      if (!sameKnowledgeSources(source.sources, payload.sources))
+        throw new KnowledgeOrganizationError('INPUT_CHANGED');
+      const draft = this.#managementFromRow(current).draft;
+      const combined =
+        input.mode === 'append'
+          ? `${draft.materialsSummary}\n\n【上传材料整理稿】\n${summary}`
+          : summary;
+      if (combined.length > 4000) throw new KnowledgeOrganizationError('INVALID_REQUEST');
+      const updated = validateDraft({ ...draft, materialsSummary: combined });
+      const saved = await this.#persistDraft(
+        connection,
+        current,
+        { ...input, draft: updated },
+        updated,
+      );
+      await connection.execute('UPDATE job SET result=?,updated_at=? WHERE id=?', [
+        JSON.stringify({ ...result, appliedRevision: saved.draftRevision, applyHash }),
+        input.now,
+        job.id,
+      ]);
+      return { saved: true as const, revision: saved.draftRevision };
     });
   }
 
@@ -801,11 +897,20 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
     merchantId: MerchantId;
     assistantId: AssistantId;
     expectedDraftRevision: number;
+    /** Raw governance ID from the server snapshot captured before the model call. */
+    expectedPreviousPreviewId: string | null;
     question: string;
     answer: string;
     now: Date;
   }): Promise<{ checkId: string; draftRevision: number }> {
     validDate(input.now, 'now');
+    // Absence is not the same as an explicitly captured empty governance record.
+    if (
+      input.expectedPreviousPreviewId !== null &&
+      (typeof input.expectedPreviousPreviewId !== 'string' ||
+        !/^[a-f0-9]{32}$/.test(input.expectedPreviousPreviewId))
+    )
+      throw new AssistantLifecyclePersistenceError('expectedPreviousPreviewId is invalid');
     const question = paragraphText(input.question, 'question', 2000);
     const answer = paragraphText(input.answer, 'answer', 8000);
     const scope = {
@@ -826,34 +931,18 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
         current.draft_revision !== input.expectedDraftRevision
       )
         throw new AssistantRevisionConflictError();
+      const governance = await readGovernance(connection, scope, true);
+      if ((governance?.preview_id?.toString('hex') ?? null) !== input.expectedPreviousPreviewId)
+        throw new AssistantRevisionConflictError();
       const checkId = randomBytes(16);
       const hash = governanceFactsHash(current.display_name, parseDraft(current.config));
-      await connection.execute(
-        `INSERT INTO assistant_publication_governance
-        (merchant_id,assistant_id,preview_id,preview_revision,preview_facts_hash,preview_question,
-         preview_answer,preview_verdict,previewed_at,judged_by,judged_at,withdrawn_through_no,updated_at)
-        VALUES (?,?,?,?,?,?,?,'pending',?,NULL,NULL,0,?) ON DUPLICATE KEY UPDATE
-         preview_id=VALUES(preview_id),preview_revision=VALUES(preview_revision),
-         preview_facts_hash=VALUES(preview_facts_hash),preview_question=VALUES(preview_question),
-         preview_answer=VALUES(preview_answer),preview_verdict='pending',previewed_at=VALUES(previewed_at),
-         judged_by=NULL,judged_at=NULL,updated_at=VALUES(updated_at)`,
-        [
-          scope.merchant,
-          scope.assistant,
-          checkId,
-          current.draft_revision,
-          hash,
-          question,
-          answer,
-          input.now,
-          input.now,
-        ],
-      );
-      await governanceAudit(connection, scope, 'assistant.preview_recorded', input.now, {
-        checkId: checkId.toString('hex'),
-        draftRevision: current.draft_revision,
-        questionHash: createHash('sha256').update(question).digest('hex'),
-        answerHash: createHash('sha256').update(answer).digest('hex'),
+      await persistPreviewCheck(connection, scope, {
+        checkId,
+        revision: current.draft_revision,
+        factsHash: hash,
+        question,
+        answer,
+        now: input.now,
       });
       return { checkId: checkId.toString('hex'), draftRevision: current.draft_revision };
     });
@@ -1580,21 +1669,30 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
     connection: Connection,
     merchantId: Buffer,
     assistantId: Buffer,
-  ): Promise<AssistantManagementSnapshot | null> {
-    const [rows] = await connection.execute<ManagementRow[]>(
+  ): Promise<(AssistantManagementSnapshot & { previousPreviewCheckId: string | null }) | null> {
+    const [rows] = await connection.execute<
+      (ManagementRow & { previous_preview_id: Buffer | null })[]
+    >(
       `SELECT a.id AS assistant_id, a.merchant_id, a.display_name, a.public_slug,
               a.status, a.draft_revision, d.config, d.validation, a.active_release_id,
-              a.created_at, a.updated_at
+              a.created_at, a.updated_at, g.preview_id AS previous_preview_id
          FROM assistant a
            JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
          JOIN assistant_draft d
            ON d.merchant_id = a.merchant_id AND d.assistant_id = a.id
+         LEFT JOIN assistant_publication_governance g
+           ON g.merchant_id = a.merchant_id AND g.assistant_id = a.id
         WHERE a.merchant_id = ? AND a.id = ?
         LIMIT 1`,
       [merchantId, assistantId],
     );
     const row = rows[0];
-    return row === undefined ? null : this.#managementFromRow(row);
+    return row === undefined
+      ? null
+      : {
+          ...this.#managementFromRow(row),
+          previousPreviewCheckId: row.previous_preview_id?.toString('hex') ?? null,
+        };
   }
 
   async #lockManagement(

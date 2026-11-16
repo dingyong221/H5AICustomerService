@@ -32,6 +32,14 @@ const operatorPassword = createHash('sha256')
   .digest('base64url');
 const operatorSalt = randomBytes(16);
 const externalServices = process.env['H5CS_E2E_EXTERNAL_SERVICES'] === 'true';
+const knowledgeAsync = process.env['H5CS_E2E_KNOWLEDGE_ASYNC'] === 'true';
+const authoringAsync = process.env['H5CS_E2E_AUTHORING_ASYNC'] === 'true';
+if (authoringAsync && !knowledgeAsync) {
+  throw new Error('Asynchronous authoring acceptance also requires H5CS_E2E_KNOWLEDGE_ASYNC=true');
+}
+if ((knowledgeAsync || authoringAsync) && externalServices) {
+  throw new Error('Asynchronous acceptance requires Playwright-managed Next and Worker services');
+}
 if (externalServices && process.env['CI'] !== 'true') {
   throw new Error('External-image browser tests are restricted to CI');
 }
@@ -99,6 +107,9 @@ export default defineConfig({
               WORKER_HEALTH_HOST: '127.0.0.1',
               WORKER_POLL_INTERVAL_MS: '1000',
               CONVERSATION_WORKER_ENABLED: 'true',
+              KNOWLEDGE_ASYNC_ENABLED: String(knowledgeAsync),
+              DRAFT_EXPAND_ASYNC_ENABLED: String(authoringAsync),
+              PREVIEW_ASYNC_ENABLED: String(authoringAsync),
               MODEL_PROVIDER: 'chat_completions',
               MODEL_NAME: 'browser-test-model',
               MODEL_API_KEY: modelKey,
@@ -143,6 +154,9 @@ export default defineConfig({
               CONSUMER_H5_ORIGIN: publicOrigin,
               PUBLIC_CONVERSATION_ENABLED: 'true',
               CONVERSATION_WORKER_ENABLED: 'true',
+              KNOWLEDGE_ASYNC_ENABLED: String(knowledgeAsync),
+              DRAFT_EXPAND_ASYNC_ENABLED: String(authoringAsync),
+              PREVIEW_ASYNC_ENABLED: String(authoringAsync),
               MODEL_PROVIDER: 'chat_completions',
               MODEL_NAME: 'browser-test-model',
               PUBLISH_PROMPT_TEMPLATE_VERSION: 'browser-v1',
