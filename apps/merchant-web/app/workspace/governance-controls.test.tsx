@@ -49,6 +49,9 @@ describe('merchant governance intent controls', () => {
     expect(html).toContain('value="pass"');
     expect(html).toContain('value="fail"');
     expect(html).toContain('不代表所有问题均已解决');
+    expect(html.match(/data-usage="preview.pass"/gu)).toHaveLength(1);
+    expect(html).toMatch(/<button[^>]*data-usage="preview.pass"[^>]*value="pass"/u);
+    expect(html).not.toMatch(/<form[^>]*data-usage="preview.pass"/u);
   });
   it('explains withdrawal impacts and requires a reason, release CAS and one explicit consent', () => {
     const html = renderToStaticMarkup(

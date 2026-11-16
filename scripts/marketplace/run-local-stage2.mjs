@@ -9,6 +9,12 @@ import { createServer } from 'node:net';
 import { pipeline } from 'node:stream/promises';
 import { createGzip, createGunzip } from 'node:zlib';
 import { legacyRowJson } from './legacy-row-projection.mjs';
+import {
+  observeOwnedChild,
+  inspectOwnedContainer,
+  cleanupOwnedResources,
+  cleanupExitCode,
+} from './owned-cleanup.mjs';
 const databaseRequire = createRequire(
   new URL('../../packages/database/package.json', import.meta.url),
 );
@@ -32,6 +38,8 @@ if (dockerMode && (process.env.CI !== 'true' || process.env.GITHUB_ACTIONS !== '
   throw Error('Docker mode is restricted to a disposable GitHub Actions runner');
 const runId = 'h5cs-free-' + Date.now();
 const dockerNames = {};
+const databases = [];
+const testPorts = [33186, 33187, 3000, 3001, 3002, 3003, 3011, 4000, 9020];
 const evidence = join(root, 'artifacts/ai-supermarket-a6-stage2', `run-${Date.now()}`);
 await mkdir(evidence, { recursive: true });
 const mysqlBase =
@@ -98,15 +106,11 @@ for (const key of [
   delete env[key];
 function launch(name, executable, args, extra = {}) {
   const child = spawn(executable, args, { cwd: root, windowsHide: true, env, ...extra });
-  const record = { name, child, output: '', done: null };
-  record.done = new Promise((resolve, reject) => {
-    child.on('error', reject);
-    child.on('close', async (code) => {
-      await writeFile(join(evidence, name + '.log'), sanitize(record.output));
-      code === 0
-        ? resolve()
-        : reject(new Error(`${name} failed (${code}); inspect its redacted log`));
-    });
+  const record = { name, child, lifecycle: observeOwnedChild(child), output: '', done: null };
+  record.done = record.lifecycle.completion.then(async ({ exitCode, error }) => {
+    await writeFile(join(evidence, name + '.log'), sanitize(record.output));
+    if (exitCode !== 0 || error)
+      throw new Error(`${name} failed (${exitCode}); inspect its redacted log`);
   });
   record.done.catch(() => {});
   const recordOutput = (d) => {
@@ -154,15 +158,18 @@ async function waitMysql(port, pwd) {
   throw Error('Local MySQL readiness failed');
 }
 async function startMysql(name, port) {
+  const database = { name, port, connection: null, server: null, container: null };
+  databases.push(database);
   if (dockerMode) {
     const container = `${runId}-${name}`;
-    dockerNames[name] = container;
-    launch(
+    database.container = { name: container, runId, cidFile: join(evidence, name + '.cid') };
+    database.server = launch(
       name + '-server',
       'docker',
       [
         'run',
-        '--rm',
+        '--cidfile',
+        database.container.cidFile,
         '--name',
         container,
         '--label',
@@ -180,7 +187,18 @@ async function startMysql(name, port) {
       ],
       { env: { ...env, MYSQL_ROOT_PASSWORD: password, MYSQL_ROOT_HOST: '%' } },
     );
+    // Never issue SHUTDOWN or stop against a name/port alone.
+    // docker run writes its full ID before the server is ready.
     const c = await waitMysql(port, password);
+    try {
+      const owned = await inspectOwnedContainer(database.container);
+      if (!owned.running) throw Error('Owned disposable MySQL container is not running');
+      dockerNames[name] = owned.id;
+    } catch (error) {
+      await c.end();
+      throw error;
+    }
+    database.connection = c;
     const [version] = await c.query('SELECT VERSION() version');
     if (!/^8\.4\./u.test(version[0].version)) throw Error('Disposable MySQL 8.4 required');
     return c;
@@ -194,7 +212,7 @@ async function startMysql(name, port) {
     '--initialize-insecure',
     '--console',
   ]).done;
-  launch(name + '-server', join(mysqlBase, 'bin/mysqld.exe'), [
+  database.server = launch(name + '-server', join(mysqlBase, 'bin/mysqld.exe'), [
     '--no-defaults',
     `--basedir=${mysqlBase}`,
     `--datadir=${data}`,
@@ -211,6 +229,7 @@ async function startMysql(name, port) {
     await c.end();
     throw Error('Refusing a different local MySQL data directory');
   }
+  database.connection = c;
   await c.query("ALTER USER 'root'@'localhost' IDENTIFIED BY ?", [password]);
   return c;
 }
@@ -223,7 +242,7 @@ async function tables(c) {
 const report = { kind: 'a6-local-stage2', externalMarketplace: false, paidSupplierCalls: 0 };
 let source, restore;
 try {
-  for (const port of [33186, 33187, 3000, 3001, 3003, 3011, 4000, 9020]) {
+  for (const port of testPorts) {
     await new Promise((resolve, reject) => {
       const probe = createServer();
       probe.once('error', () => reject(Error(`Refusing occupied local test port ${port}`)));
@@ -443,47 +462,30 @@ try {
     equal: true,
   };
   await writeFile(join(evidence, 'result.json'), JSON.stringify(report, null, 2));
-  console.log(
-    JSON.stringify({ passed: true, evidence, upgrade: report.upgrade, restore: report.restore }),
-  );
 } catch (error) {
   await writeFile(join(evidence, 'failure.txt'), sanitize(error.stack ?? String(error)));
   console.error(sanitize(error.message));
   process.exitCode = 1;
 } finally {
-  for (const c of [source, restore])
-    if (c) {
-      await c.query('SHUTDOWN').catch(() => {});
-      await c.end().catch(() => {});
-    }
-  if (dockerMode) {
-    for (const container of Object.values(dockerNames)) {
-      // Unique names belong only to this run; never use a global Docker cleanup.
-      await launch('stop-' + container, 'docker', ['stop', '--time', '10', container]).done.catch(
-        () => {},
-      );
-    }
-  }
-  for (const record of children.reverse())
-    if (record.child.exitCode === null && !record.child.killed) {
-      if (process.platform === 'win32')
-        await new Promise((resolve) => {
-          const killer = spawn('taskkill', ['/PID', String(record.child.pid), '/T', '/F'], {
-            windowsHide: true,
-            stdio: 'ignore',
-          });
-          killer.on('close', resolve);
-        });
-      else record.child.kill('SIGTERM');
-    }
+  const businessExitCode = process.exitCode || 0;
+  const cleanup = await cleanupOwnedResources({ children, databases, ports: testPorts });
+  cleanup.businessExitCode = businessExitCode;
+  process.exitCode = cleanupExitCode(businessExitCode, cleanup);
   await writeFile(
     join(evidence, 'processes-stopped.json'),
+    sanitize(JSON.stringify(cleanup, null, 2)),
+  );
+  report.businessPassed = businessExitCode === 0;
+  report.cleanupStopped = cleanup.stopped;
+  report.passed = process.exitCode === 0;
+  await writeFile(join(evidence, 'result.json'), JSON.stringify(report, null, 2));
+  console.log(
     JSON.stringify({
-      cleanupAttempted: true,
-      stopped: children.every(
-        (record) => record.child.exitCode !== null || record.child.signalCode !== null,
-      ),
-      productionTouched: false,
+      passed: report.passed,
+      evidence,
+      cleanupStopped: cleanup.stopped,
+      upgrade: report.upgrade,
+      restore: report.restore,
     }),
   );
 }

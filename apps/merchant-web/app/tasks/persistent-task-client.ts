@@ -42,3 +42,17 @@ export function fetchTask(url: string, write?: { body: unknown; csrf: string }) 
       : {}),
   });
 }
+import { EXECUTION_STATE_HEADER, executionStateSchema, type ExecutionState } from '@h5cs/contracts';
+
+export function taskExecutionState(response: Response): ExecutionState | null {
+  const parsed = executionStateSchema.safeParse(response.headers?.get(EXECUTION_STATE_HEADER));
+  return parsed.success ? parsed.data : null;
+}
+export function executionNotice(state: ExecutionState | null): string | null {
+  if (state === 'paused')
+    return 'AI 任务运行已暂停，输入、原任务和已有结果保留。可刷新原任务或联系平台运营；恢复后继续查询原任务，无需重新生成。';
+  if (state === 'draining')
+    return '任务运行已暂停，已发出的调用仍在核对结果，可能计费。请继续查询原任务，不要重复提交。';
+  if (state === 'unavailable') return '暂时无法确认运行状态；可查询原任务，已有结果仍可核对。';
+  return null;
+}

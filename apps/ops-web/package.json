@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@h5cs/contracts": "workspace:*",
     "@h5cs/database": "workspace:*",
     "@h5cs/ui": "workspace:*",
     "next": "catalog:",

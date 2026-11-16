@@ -3,6 +3,7 @@ import type {
   KnowledgeOrganizationClaim,
   AuthoringTaskClaim,
 } from '@h5cs/database';
+import { RuntimeExecutionBlockedError } from '@h5cs/database';
 import { settlesWithin } from './shutdown-budget.js';
 import { abortable } from './abortable.js';
 
@@ -30,6 +31,7 @@ export type ModelAttemptStore = Readonly<{
 }>;
 
 export class ModelCapacityError extends Error {}
+export class ModelRuntimePausedError extends ModelCapacityError {}
 export class ModelUnknownOutcomeError extends Error {}
 export class ModelResponseError extends Error {}
 
@@ -191,6 +193,8 @@ export class ModelRuntime {
         try {
           attemptId = (await this.attempts.markDispatch(dispatchContext, new Date())).attemptId;
         } catch (error) {
+          if (error instanceof RuntimeExecutionBlockedError)
+            throw new ModelRuntimePausedError('Runtime execution is paused');
           if (
             typeof error === 'object' &&
             error !== null &&

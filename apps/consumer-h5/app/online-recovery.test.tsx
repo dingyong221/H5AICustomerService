@@ -190,4 +190,35 @@ describe('consumer recovery controls', () => {
     expect(mocks.reload).toHaveBeenCalledOnce();
     expect(mocks.clear).not.toHaveBeenCalled();
   });
+  it('paused consultation retains typed input, original session and human contact with a check-only refresh', () => {
+    mocks.hooks[0] = { session, messages: [] };
+    mocks.hooks[2] = '尚未发送的输入';
+    mocks.hooks[14] = 'paused';
+    const tree = render();
+    expect(text(tree)).toContain('AI 回复暂时暂停');
+    expect(text(tree)).toContain('不会自动重发新问题');
+    expect((mocks.hooks[0] as ConversationState).session).toBe(session);
+    expect(mocks.hooks[2]).toBe('尚未发送的输入');
+    const contact = nodes(tree).find((node) => node.type === HumanContactNotice);
+    expect((contact?.props as { instructions?: string }).instructions).toBe('微信 test_service');
+    button(tree, '刷新并核对原咨询').props.onClick!();
+    expect(mocks.reload).toHaveBeenCalledOnce();
+    expect(mocks.clear).not.toHaveBeenCalled();
+  });
+  it('retry after an accepted-turn connection failure preserves the original result and event URLs', () => {
+    const original = pending();
+    const turn = {
+      eventsUrl: '/api/v1/public/original/events',
+      resultUrl: '/api/v1/public/original',
+      traceId: 'trace_original',
+      turnId: 'turn_original',
+      state: 'accepted' as const,
+    };
+    mocks.hooks[0] = { ...original, pending: { ...original.pending!, turn } };
+    button(render(), '重试回复').props.onClick!();
+    expect((mocks.hooks[0] as ConversationState).pending?.turn).toBe(turn);
+    expect((mocks.hooks[0] as ConversationState).pending?.clientMessageId).toBe(
+      original.pending?.clientMessageId,
+    );
+  });
 });

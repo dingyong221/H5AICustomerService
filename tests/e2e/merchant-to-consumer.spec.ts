@@ -8,6 +8,7 @@ import {
   type AsyncKnowledgeSession,
 } from './knowledge-async';
 import { currentDraftRevision, expandDraftAsync, previewReplyAsync } from './authoring-async';
+import { verifyRuntimeControl } from './runtime-control';
 
 type PublishedReleaseReadback = { status: number; releaseRef: string | null };
 const authoringAsync = process.env['H5CS_E2E_AUTHORING_ASYNC'] === 'true';
@@ -936,7 +937,7 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   );
   await consumerPage.getByRole('button', { name: '发送消息' }).click();
   const secondSessionPayload = (await (await secondSessionResponse).json()) as {
-    data: { releaseRef: string };
+    data: { releaseRef: string; sessionHandle: string };
   };
   expect(secondSessionPayload.data.releaseRef).toBe(latestReleaseRef);
   await expect(answer).toBeVisible({ timeout: 60_000 });
@@ -1383,4 +1384,16 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
         releaseRef: recoveredPublic.releaseRef,
       }) + '\n',
     );
+  if (process.env['H5CS_E2E_RUNTIME_CONTROL'] === 'true')
+    await verifyRuntimeControl({
+      browser,
+      operatorPage,
+      merchantPage,
+      consumerPage,
+      operatorBase,
+      managementUrl,
+      assistantId,
+      publicUrl: publicUrl!,
+      sessionHandle: secondSessionPayload.data.sessionHandle,
+    });
 });

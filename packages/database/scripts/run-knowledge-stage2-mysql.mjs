@@ -10,10 +10,11 @@ import { prepareStage2Baseline, stage2Baseline } from './prepare-knowledge-stage
 
 const packageRoot = fileURLToPath(new URL('../', import.meta.url)),
   worktree = resolve(packageRoot, '../..');
-const authoring = process.argv.length === 3 && process.argv[2] === '--authoring';
+const stage3 = process.argv.length === 3 && process.argv[2] === '--runtime-stage3';
+const authoring = stage3 || (process.argv.length === 3 && process.argv[2] === '--authoring');
 const evidenceRoot = resolve(
   worktree,
-  `../../../artifacts/agent-work/${authoring ? 'WI-20261117-004' : 'WI-20261116-005'}/local-mysql`,
+  `../../../artifacts/agent-work/${stage3 ? 'WI-20261117-008' : authoring ? 'WI-20261117-004' : 'WI-20261116-005'}/local-mysql`,
 );
 const binary =
   process.env.H5CS_TEST_MYSQLD ??
@@ -161,13 +162,16 @@ try {
   await root.query("GRANT ALL ON h5cs_stage2_ci.* TO 'h5cs_stage2'@'127.0.0.1'");
   await command(
     process.execPath,
-    ['scripts/run-knowledge-stage2-ci.mjs', ...(authoring ? ['--authoring'] : [])],
+    stage3
+      ? ['scripts/run-runtime-stage3-ci.mjs']
+      : ['scripts/run-knowledge-stage2-ci.mjs', ...(authoring ? ['--authoring'] : [])],
     join(runRoot, 'tests.tap'),
     {
       ...process.env,
       CI: 'true',
       APP_ENV: 'test',
       NODE_ENV: 'test',
+      RUNTIME_EXECUTION_CONTROL_ENABLED: 'false',
       H5CS_STAGE2_MYSQL_URL: `mysql://h5cs_stage2:${password}@127.0.0.1:${port}/h5cs_stage2_ci`,
       H5CS_STAGE2_BASELINE_MIGRATIONS: baselineMigrations,
       H5CS_STAGE2_LEGACY_READER: legacyModule,
@@ -186,6 +190,7 @@ try {
     CI: 'true',
     APP_ENV: 'test',
     NODE_ENV: 'test',
+    RUNTIME_EXECUTION_CONTROL_ENABLED: 'false',
     H5CS_TEST_LEGACY_PUBLIC_READER: legacyModule,
     H5CS_INTEGRATION_MYSQL_URL: `mysql://h5cs_ci:${regressionPassword}@127.0.0.1:${port}/h5cs_integration_ci`,
   };

@@ -11,10 +11,12 @@ import {
   PublicReleaseWithdrawnError,
   PublicSessionUnavailableError,
   PublicTurnConflictError,
+  RuntimeExecutionBlockedError,
 } from '@h5cs/database';
 import type { PublicTurnResult } from '@h5cs/database';
 
-type TurnStore = Pick<MySqlPublicSessionRepository, 'acceptTurn' | 'readTurn'>;
+type TurnStore = Pick<MySqlPublicSessionRepository, 'acceptTurn' | 'readTurn'> &
+  Partial<Pick<MySqlPublicSessionRepository, 'readTurnExecutionState'>>;
 
 const originFrom = (value: string | undefined, production: boolean): string | null => {
   if (!value) return null;
@@ -120,6 +122,7 @@ export class PublicTurnService {
         resultUrl: `${this.origin}${path}`,
       };
     } catch (error) {
+      if (error instanceof RuntimeExecutionBlockedError) throw error;
       if (error instanceof PublicReleaseWithdrawnError)
         throw new ConflictException({
           code: 'RELEASE_WITHDRAWN',
@@ -173,6 +176,20 @@ export class PublicTurnService {
         previousState = result.state;
         yield result;
       }
+    }
+  }
+  public async executionState(sessionHandle: string, visitorNonce: string | null, turnId: string) {
+    if (!this.store || !visitorNonce) throw new NotFoundException('Turn not available');
+    if (!this.store.readTurnExecutionState) return 'not-applicable' as const;
+    try {
+      return await this.store.readTurnExecutionState(
+        sessionHandle,
+        visitorNonce,
+        turnId,
+        new Date(),
+      );
+    } catch {
+      return 'unavailable' as const;
     }
   }
 }

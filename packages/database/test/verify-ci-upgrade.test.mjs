@@ -33,7 +33,7 @@ const sourceFolder = fileURLToPath(new URL('../migrations/', import.meta.url));
 const scriptPath = fileURLToPath(new URL('../scripts/verify-ci-upgrade.mjs', import.meta.url));
 
 describe('offline CI upgrade probe scope and argument safety', () => {
-  it('accepts only the exact baseline plus improvement and governance tables', () => {
+  it('accepts only the exact 49-table baseline plus reviewed additions including runtime control', () => {
     const baseline = Array.from({ length: 29 }, (_, index) => `baseline_${index}`);
     const upgraded = [
       ...baseline,
@@ -56,10 +56,18 @@ describe('offline CI upgrade probe scope and argument safety', () => {
       'product_usage_event',
       'product_usage_budget',
       'model_call_attempt',
+      'runtime_execution_control',
     ];
+    expect(upgraded).toHaveLength(49);
     expect(() => assertUpgradedTableSet(upgraded, baseline)).not.toThrow();
+    for (const missing of upgraded)
+      expect(() =>
+        assertUpgradedTableSet(
+          upgraded.filter((table) => table !== missing),
+          baseline,
+        ),
+      ).toThrow(UpgradeProbeError);
     for (const invalid of [
-      upgraded.slice(0, -1),
       [...upgraded, 'unexpected_table'],
       [...upgraded.slice(0, -1), 'unexpected_table'],
       [...upgraded.slice(0, -1), 'assistant_improvement'],
@@ -203,7 +211,7 @@ describe('offline CI upgrade probe scope and argument safety', () => {
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({
       noDatabaseConnected: true,
-      migrationCount: 20,
+      migrationCount: 21,
       target: { database: 'h5cs_integration_ci' },
     });
     expect(`${result.stdout}${result.stderr}`).not.toContain('test-secret');
@@ -271,10 +279,10 @@ describe('offline upgrade migration and data-proof helpers', () => {
     ).rejects.toThrow('expected version identifier');
   });
 
-  it('uses the exact twenty real SQL migrations and copies only the baseline twelve without changing source SQL', async () => {
+  it('uses the exact twenty-one real SQL migrations and copies only the baseline twelve without changing source SQL', async () => {
     const plan = await reviewedUpgradePlan();
     const sourceBefore = migrationInventory();
-    expect(plan.entries).toHaveLength(20);
+    expect(plan.entries).toHaveLength(21);
     expect(plan.entries[12].tag).toMatch(/^0012_/u);
     const scratch = await baselineMigrationFolder(plan);
     try {
@@ -318,7 +326,7 @@ describe('offline upgrade migration and data-proof helpers', () => {
       created_at: entry.when,
     }));
     const connection = (rows) => ({ query: vi.fn(async () => [rows, []]) });
-    expect(await assertMigrationHistory(connection(correct), plan.entries)).toHaveLength(20);
+    expect(await assertMigrationHistory(connection(correct), plan.entries)).toHaveLength(21);
     for (const [index, patch] of [
       [0, { hash: '0'.repeat(64) }],
       [5, { created_at: '1' }],

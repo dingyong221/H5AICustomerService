@@ -26,3 +26,5 @@ export { inspectBusinessFacts, normalizeHumanContact } from '@h5cs/domain';
 export * from './marketplace-repository.js';
 export * from './marketplace-local-policy.js';
 export * from './self-service-policy.js';
+export * from './runtime-control-repository.js';
+export * from './runtime-observation-repository.js';

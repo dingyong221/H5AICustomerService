@@ -20,7 +20,7 @@ const tempPrefix = 'h5cs-ci-upgrade-';
 const expectedDatabase = 'h5cs_integration_ci';
 const expectedUser = 'h5cs_ci';
 const expectedBaselineCount = 12;
-const expectedFullCount = 20;
+const expectedFullCount = 21;
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
 export class UpgradeProbeError extends Error {
@@ -152,10 +152,11 @@ export async function reviewedUpgradePlan(folder = sourceFolder) {
     !/^0012_/u.test(journal.entries[12]?.tag ?? '') ||
     journal.entries[14]?.tag !== '0014_flimsy_swarm' ||
     journal.entries[15]?.tag !== '0015_clumsy_prowler' ||
-    journal.entries[19]?.tag !== '0019_knowledge_organization_result'
+    journal.entries[19]?.tag !== '0019_knowledge_organization_result' ||
+    journal.entries[20]?.tag !== '0020_runtime_execution_control'
   ) {
     throw new UpgradeProbeError(
-      'Probe requires the reviewed twelve-to-twenty migration plan; review the probe when the plan changes',
+      'Probe requires the reviewed twelve-to-twenty-one migration plan; review the probe when the plan changes',
     );
   }
   const entries = inventory.entries.map((entry, index) => {
@@ -307,12 +308,13 @@ export function assertUpgradedTableSet(tables, baselineTables) {
     'product_usage_event',
     'product_usage_budget',
     'model_call_attempt',
+    'runtime_execution_control',
   ];
   if (
-    expected.length !== 48 ||
-    new Set(expected).size !== 48 ||
-    tables.length !== 48 ||
-    new Set(tables).size !== 48 ||
+    expected.length !== 49 ||
+    new Set(expected).size !== 49 ||
+    tables.length !== 49 ||
+    new Set(tables).size !== 49 ||
     tables.some((table) => !expected.includes(table))
   )
     throw new UpgradeProbeError('Upgrade produced an unexpected application-table set');
@@ -888,7 +890,11 @@ export async function runUpgradeProbe(environment = process.env) {
     const constraints = await assertNewTableConstraints(connection, ids);
     phase = 'seed_post_upgrade_data';
     await seedPostUpgradeData(connection, ids);
-    const newTables = ['assistant_evaluation_run', 'assistant_improvement'];
+    const newTables = [
+      'assistant_evaluation_run',
+      'assistant_improvement',
+      'runtime_execution_control',
+    ];
     phase = 'snapshot_new_table_data';
     const beforeReplayNewData = await snapshotTables(connection, newTables);
     if (beforeReplayNewData.tables.some((table) => table.count !== 1))

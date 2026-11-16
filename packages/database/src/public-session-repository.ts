@@ -630,6 +630,7 @@ export class MySqlPublicSessionRepository {
     )
       throw new PublicSessionUnavailableError();
     return this.#withTransaction(async (connection) => {
+      await lockRuntimeGate(connection);
       await assertNotWithdrawn(connection, handle.sessionId, handle.visitorCredentialId);
       const [sessions] = await connection.execute<ActiveSessionRow[]>(
         `SELECT cs.merchant_id, cs.assistant_id, cs.release_id,
@@ -658,6 +659,7 @@ export class MySqlPublicSessionRepository {
         return { turnId: turnRef(existing[0].turn_id), traceId: traceRef(existing[0].turn_id) };
       }
       if (session.active_turn_id !== null) throw new PublicTurnConflictError('TURN_IN_PROGRESS');
+      await assertRuntimeAllowed(connection, { merchantId: binaryId(session.merchant_id) });
       if (
         !Number.isSafeInteger(session.next_sequence) ||
         session.next_sequence < 1 ||
@@ -802,6 +804,42 @@ export class MySqlPublicSessionRepository {
       await connection.end();
     }
   }
+  public async readTurnExecutionState(
+    sessionHandle: string,
+    visitorNonce: string,
+    turnId: string,
+    now: Date,
+  ): Promise<ExecutionState> {
+    const authorized = await this.readTurn(sessionHandle, visitorNonce, turnId, now);
+    if (!authorized) throw new PublicSessionUnavailableError();
+    if (['completed', 'failed'].includes(authorized.state)) return 'not-applicable';
+    const handle = this.#authorizedHandle(sessionHandle, visitorNonce)!,
+      turn = turnIdBuffer(turnId)!;
+    const c = await this.#database.openConnection();
+    try {
+      const [rows] = await c.execute<
+        (RowDataPacket & {
+          id: Buffer;
+          merchant_id: Buffer;
+          state: string;
+          model_outcome: string;
+        })[]
+      >(
+        "SELECT id,merchant_id,state,model_outcome FROM job WHERE type='conversation.turn' AND dedup_key=?",
+        [createHash('sha256').update(handle.sessionId).update(turn).digest()],
+      );
+      const row = rows[0];
+      if (!row) return 'unavailable';
+      return await new MySqlRuntimeExecutionControlRepository(this.#database).readEffective({
+        merchantId: binaryId(row.merchant_id),
+        jobId: binaryId(row.id),
+        state: row.state,
+        modelOutcome: row.model_outcome,
+      });
+    } finally {
+      await c.end();
+    }
+  }
 
   async #withTransaction<TResult>(
     operation: (connection: Connection) => Promise<TResult>,
@@ -822,3 +860,6 @@ export class MySqlPublicSessionRepository {
     }
   }
 }
+import { lockRuntimeGate, assertRuntimeAllowed } from './runtime-control-contract.js';
+import { MySqlRuntimeExecutionControlRepository } from './runtime-control-repository.js';
+import type { ExecutionState } from '@h5cs/contracts';

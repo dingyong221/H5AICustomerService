@@ -192,6 +192,7 @@ export function retryPending(state: ConversationState): ConversationState {
     pending: {
       clientMessageId: state.pending.clientMessageId,
       content: state.pending.content,
+      ...(state.pending.turn ? { turn: state.pending.turn } : {}),
       phase: 'sending',
       retryable: false,
       sessionRequestId: state.pending.sessionRequestId,

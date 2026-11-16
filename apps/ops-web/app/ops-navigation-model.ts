@@ -27,7 +27,7 @@ export const opsMenuGroups = [
     icon: '运',
     items: [
       { href: '/#assistants', label: '最近客服状态' },
-      { href: '/#tasks', label: '异常与人工处置' },
+      { href: '/#tasks', label: '运行控制与异常' },
       { href: '/#audit-log', label: '审计记录' },
     ],
   },

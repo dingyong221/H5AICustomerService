@@ -1,4 +1,11 @@
 import { randomBytes } from 'node:crypto';
+import {
+  lockRuntimeGate,
+  assertRuntimeAllowed,
+  probeRuntimeSchema,
+  runtimeEligibleSql,
+} from './runtime-control-contract.js';
+import { MySqlRuntimeExecutionControlRepository } from './runtime-control-repository.js';
 import { AuthoringTaskError, safeKnowledgeRetry, type AuthoringTaskKind } from '@h5cs/domain';
 import {
   authoringRequestIdSchema,
@@ -145,6 +152,15 @@ export class MySqlAuthoringTaskRepository {
       await c.end();
     }
   }
+  async getExecutionState(scope: AuthoringScope, taskId: string) {
+    const task = await this.get(scope, taskId);
+    return new MySqlRuntimeExecutionControlRepository(this.database).readEffective({
+      merchantId: scope.merchantId,
+      jobId: taskId,
+      state: task.state,
+      modelOutcome: task.modelOutcome,
+    });
+  }
   async findByRequest(scope: AuthoringScope, kind: AuthoringTaskKind, requestId: string) {
     validRequest(requestId);
     if (!kinds.includes(kind)) throw new AuthoringTaskError('INVALID_REQUEST');
@@ -193,6 +209,7 @@ export class MySqlAuthoringTaskRepository {
     if (!this.#enabled(kind)) throw new AuthoringTaskError('UNAVAILABLE');
     const requestHash = knowledgeHash(JSON.stringify({ kind, input, retryOf: retryOf ?? null }));
     const id = await this.#tx(async (c) => {
+      await lockRuntimeGate(c);
       const current = await authorizeAuthoringScope(c, scope, true);
       await this.#schema(c);
       const [existing] = await c.execute<KnowledgeJobRow[]>(
@@ -205,6 +222,7 @@ export class MySqlAuthoringTaskRepository {
         return existing[0].id.toString('hex');
       }
       if (current.revision !== input.revision) throw new AuthoringTaskError('INPUT_CHANGED');
+      await assertRuntimeAllowed(c, { merchantId: scope.merchantId });
       let previous: AuthoringPayload | undefined;
       if (retryOf) {
         const locked = await lockAuthoringJob(c, scope, retryOf);
@@ -314,6 +332,7 @@ export class MySqlAuthoringTaskRepository {
       throw new AuthoringTaskError('INVALID_REQUEST');
     const read = await this.database.openConnection();
     try {
+      await probeRuntimeSchema(read);
       const params: (string | Buffer | Date)[] = [...enabled, now];
       if (options.afterKey) {
         const [merchant, kind] = options.afterKey.split(':');
@@ -324,7 +343,7 @@ export class MySqlAuthoringTaskRepository {
       const [rows] = await read.execute<
         (RowDataPacket & { merchant_id: Buffer; type: AuthoringTaskKind; oldest: Date })[]
       >(
-        `SELECT merchant_id,type,MIN(run_after) oldest FROM job WHERE type IN (${enabled.map(() => '?').join(',')}) AND state='pending' AND run_after<=? ${options.afterKey ? 'AND (merchant_id>? OR (merchant_id=? AND type>?))' : ''} GROUP BY merchant_id,type ORDER BY merchant_id,type LIMIT ${limit}`,
+        `SELECT merchant_id,type,MIN(run_after) oldest FROM job WHERE type IN (${enabled.map(() => '?').join(',')}) AND state='pending' AND run_after<=? ${options.afterKey ? 'AND (merchant_id>? OR (merchant_id=? AND type>?))' : ''} ${runtimeEligibleSql()} GROUP BY merchant_id,type ORDER BY merchant_id,type LIMIT ${limit}`,
         params,
       );
       return rows.map((r) => ({
@@ -346,13 +365,18 @@ export class MySqlAuthoringTaskRepository {
       throw new AuthoringTaskError('INVALID_REQUEST');
     if (!this.#enabled(options.kind)) return null;
     return this.#tx(async (c) => {
+      await lockRuntimeGate(c);
       await this.#schema(c);
       const [rows] = await c.execute<KnowledgeJobRow[]>(
-        "SELECT *,CAST(claim_generation AS CHAR) claim_generation FROM job WHERE merchant_id=? AND type=? AND state='pending' AND run_after<=? ORDER BY run_after,id LIMIT 1",
+        `SELECT *,CAST(claim_generation AS CHAR) claim_generation FROM job WHERE merchant_id=? AND type=? AND state='pending' AND run_after<=? ${runtimeEligibleSql()} ORDER BY run_after,id LIMIT 1`,
         [authoringBytes(options.merchantId), options.kind, now],
       );
       const candidate = rows[0];
       if (!candidate) return null;
+      await assertRuntimeAllowed(c, {
+        merchantId: options.merchantId,
+        jobId: candidate.id.toString('hex'),
+      });
       let p: AuthoringPayload;
       try {
         p = decodeAuthoringPayload(candidate.payload);
@@ -451,11 +475,15 @@ export class MySqlAuthoringTaskRepository {
     if (!/^[A-Z][A-Z0-9_]{0,63}$/u.test(code)) throw new AuthoringTaskError('INVALID_REQUEST');
     return this.#mutate(claim, now, (c, { job }) => this.#failLocked(c, job, code, now));
   }
-  releaseBeforeDispatch(claim: AuthoringTaskClaim, now: Date) {
+  releaseBeforeDispatch(
+    claim: AuthoringTaskClaim,
+    now: Date,
+    options?: { reason: 'runtime_paused' },
+  ) {
     return this.#mutate(claim, now, async (c, { job }) => {
       if (job.model_outcome !== 'none') throw new AuthoringTaskError('STALE_CLAIM');
       await c.execute(
-        "UPDATE job SET state='pending',lease_owner=NULL,lease_until=NULL,run_after=?,updated_at=? WHERE id=?",
+        `UPDATE job SET state='pending',lease_owner=NULL,lease_until=NULL,run_after=?,updated_at=?${options?.reason === 'runtime_paused' ? ',attempt=GREATEST(attempt,1)-1' : ''} WHERE id=?`,
         [now, now, job.id],
       );
     });

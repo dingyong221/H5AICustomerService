@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   find: vi.fn(),
   cancel: vi.fn(),
   retry: vi.fn(),
+  execution: vi.fn(),
+  effective: vi.fn(),
   AccessError: class extends Error {},
 }));
 vi.mock('../account/merchant-actions', () => ({
@@ -18,12 +20,14 @@ vi.mock('../account/merchant-actions', () => ({
 }));
 vi.mock('@h5cs/database', async () => ({
   AuthoringTaskError: (await import('@h5cs/domain')).AuthoringTaskError,
+  RuntimeExecutionBlockedError: (await import('@h5cs/domain')).RuntimeExecutionBlockedError,
   KnowledgeMaterialAccessError: mocks.AccessError,
   loadDatabaseConfig: mocks.config,
   MySqlKnowledgeMaterialRepository: class {
     list = mocks.list;
   },
   MySqlAuthoringTaskRepository: class {
+    getExecutionState = mocks.execution;
     enqueueDraftExpand = mocks.draft;
     enqueuePreviewReply = mocks.preview;
     get = mocks.get;
@@ -31,8 +35,11 @@ vi.mock('@h5cs/database', async () => ({
     cancel = mocks.cancel;
     retry = mocks.retry;
   },
+  MySqlRuntimeExecutionControlRepository: class {
+    readEffective = mocks.effective;
+  },
 }));
-import { AuthoringTaskError } from '@h5cs/domain';
+import { AuthoringTaskError, RuntimeExecutionBlockedError } from '@h5cs/domain';
 import {
   GET as draftFind,
   POST as draftCreate,
@@ -230,5 +237,38 @@ describe.each([
     expect(await (await row.get(new Request(url), params)).json()).toMatchObject({
       code: 'UNAVAILABLE',
     });
+  });
+  it('adds only the fixed execution header after authorized GET and preserves strict task JSON', async () => {
+    mocks.execution.mockResolvedValue('paused');
+    const response = await row.get(new Request(url), params);
+    expect(response.headers.get('X-H5CS-Execution-State')).toBe('paused');
+    expect(await response.json()).toEqual(row.task);
+    expect(mocks.execution).toHaveBeenCalledWith(authorized, taskId);
+  });
+  it('maps paused admission to the original 503 code and never falls back or creates a second request', async () => {
+    row.enqueue.mockRejectedValue(new RuntimeExecutionBlockedError());
+    const response = await row.create(post(row.body), params);
+    expect(response.status).toBe(503);
+    expect(response.headers.get('X-H5CS-Execution-State')).toBe('paused');
+    expect(await response.json()).toMatchObject({ code: 'UNAVAILABLE' });
+    expect(row.enqueue).toHaveBeenCalledOnce();
+  });
+  it('keeps completed results readable if the control probe fails, without leaking unauthorized status', async () => {
+    mocks.execution.mockRejectedValue(new Error('probe unavailable'));
+    const response = await row.get(new Request(url), params);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('X-H5CS-Execution-State')).toBe('unavailable');
+    expect(await response.json()).toEqual(row.task);
+    mocks.current.mockResolvedValue(null);
+    const denied = await row.get(new Request(url), params);
+    expect(denied.headers.has('X-H5CS-Execution-State')).toBe(false);
+  });
+  it('authorized missing original request carries merchant pause without fabricating a task', async () => {
+    mocks.find.mockResolvedValue(null);
+    mocks.effective.mockResolvedValue('paused');
+    const response = await row.find(new Request(`${url}?requestId=${requestId}`), params);
+    expect(await response.json()).toBeNull();
+    expect(response.headers.get('X-H5CS-Execution-State')).toBe('paused');
+    expect(row.enqueue).not.toHaveBeenCalled();
   });
 });

@@ -25,6 +25,7 @@ import { MerchantStatusForm } from '../../merchant-status-form';
 import { currentOperator } from '../../operator-actions';
 import { ReissueInvitationForm } from '../../reissue-invitation-form';
 import { MerchantAccounts } from '../../merchant-accounts';
+import { RuntimeScopeControl } from '../../runtime-panel';
 
 export const dynamic = 'force-dynamic';
 
@@ -127,7 +128,7 @@ export default async function MerchantUsageDetail({
         <h2>改进与复测</h2>
         <QualitySummary data={analytics.quality} />
         <section className="ops-status-panel" aria-label="商家状态管理">
-          <h2>商家状态管理</h2>
+          <h2>商家业务状态管理</h2>
           {merchant.status === 'pending_owner' ? (
             <>
               <p>等待负责人领取。重新签发会立即使旧领取链接失效。</p>
@@ -148,6 +149,7 @@ export default async function MerchantUsageDetail({
             暂停／恢复沿用现有服务端权限、事务与审计，不删除商家、客服和历史记录。
           </p>
         </section>
+        <RuntimeScopeControl scope={{ kind: 'merchant', merchantId }} label="此商家" />
         <MerchantAccounts merchantId={merchantId} />
         <MetricNotes />
       </section>

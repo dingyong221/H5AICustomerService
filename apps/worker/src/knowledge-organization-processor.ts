@@ -5,7 +5,12 @@ import type {
 } from '@h5cs/database';
 import type { ConversationTurnGenerator } from './conversation-turn-processor.js';
 import { generateKnowledgeOrganization } from './knowledge-organization.js';
-import { ModelCapacityError, ModelUnknownOutcomeError, type ModelPermit } from './model-runtime.js';
+import {
+  ModelCapacityError,
+  ModelRuntimePausedError,
+  ModelUnknownOutcomeError,
+  type ModelPermit,
+} from './model-runtime.js';
 export type KnowledgeOrganizationStore = Pick<
   MySqlKnowledgeOrganizationRepository,
   | 'claimNext'
@@ -57,7 +62,14 @@ export class KnowledgeOrganizationProcessor {
       execution.throwIfAborted();
     } catch (e) {
       if (e instanceof ModelCapacityError || signal.aborted) {
-        if ((await this.store.releaseBeforeDispatch(claim, new Date())) === 'applied') return true;
+        if (
+          (await this.store.releaseBeforeDispatch(
+            claim,
+            new Date(),
+            e instanceof ModelRuntimePausedError ? { reason: 'runtime_paused' } : undefined,
+          )) === 'applied'
+        )
+          return true;
       }
       if (e instanceof ModelUnknownOutcomeError) {
         const current = await this.store.reconcile(claim);

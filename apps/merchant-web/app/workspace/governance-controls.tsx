@@ -92,7 +92,13 @@ export function PreviewVerdictForm({ checkId, ...scope }: Scope & { checkId: str
       {state.error ? <p role="alert">{state.error}</p> : null}
       {state.saved ? <p role="status">判定已保存，请以当前页面的发布检查状态为准。</p> : null}
       <div className="draft-form-actions">
-        <button name="verdict" value="pass" type="submit" disabled={pending || state.saved}>
+        <button
+          data-usage="preview.pass"
+          name="verdict"
+          value="pass"
+          type="submit"
+          disabled={pending || state.saved}
+        >
           {pending ? '正在记录…' : '回答合格，允许发布本修订'}
         </button>
         <button

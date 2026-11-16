@@ -845,4 +845,32 @@ describe('persistent organization interactions (hook/events with mocked HTTP)', 
     await vi.waitFor(() => expect(text(draw())).not.toContain('未能确认任务状态'));
     expect(summary(draw()).props.value).toBe('本地编辑仍保留');
   });
+  it('paused queued organization retains original task and selected inputs, refreshes with GET and does not fall back', async () => {
+    await restore(task);
+    mocks.fetch.mockResolvedValueOnce(
+      Response.json(task, { headers: { 'X-H5CS-Execution-State': 'paused' } }),
+    );
+    button(draw(), '刷新任务').props.onClick!();
+    await vi.waitFor(() => expect(text(draw())).toContain('AI 任务运行已暂停'));
+    expect(storage.has(key)).toBe(true);
+    expect(JSON.parse(storage.get(key)!)).toMatchObject({ requestId, taskId });
+    expect(mocks.fetch.mock.calls[1]![0]).toContain(`/organize-tasks/${taskId}`);
+    expect(mocks.fetch.mock.calls[1]![1]).not.toHaveProperty('method');
+    expect(mocks.fetch.mock.calls.every(([url]) => String(url).includes('organize-tasks'))).toBe(
+      true,
+    );
+  });
+  it('completed organization keeps candidate edits and adoption available despite an unrelated pause header', async () => {
+    await restore();
+    summary(draw()).props.onChange!({ target: { checked: false, value: '暂停期间人工核对稿' } });
+    mocks.fetch.mockResolvedValueOnce(
+      Response.json(complete, { headers: { 'X-H5CS-Execution-State': 'paused' } }),
+    );
+    button(draw(), '刷新任务').props.onClick!();
+    await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(summary(draw()).props.value).toBe('暂停期间人工核对稿'));
+    expect(text(draw())).not.toContain('AI 任务运行已暂停');
+    checkbox(draw(), '我已核对整理稿').props.onChange!({ target: { checked: true } });
+    expect(button(draw(), '保存整理稿到客服草稿').props.disabled).toBe(false);
+  });
 });

@@ -1,6 +1,7 @@
 'use client';
 import type { PersistentTaskView } from './use-persistent-task';
-import { unresolvedTaskOutcome } from './persistent-task-client';
+import { executionNotice, unresolvedTaskOutcome } from './persistent-task-client';
+import type { ExecutionState } from '@h5cs/contracts';
 
 export function taskProgress(task: PersistentTaskView | null, revision: number) {
   if (!task) return '正在确认提交结果…';
@@ -26,6 +27,7 @@ export function TaskControls({
   refresh,
   write,
   onClose,
+  executionState = null,
 }: {
   task: PersistentTaskView | null;
   revision: number;
@@ -38,9 +40,14 @@ export function TaskControls({
   refresh: () => unknown;
   write: (kind: 'cancel' | 'retry' | 'resume') => unknown;
   onClose: () => void;
+  executionState?: ExecutionState | null;
 }) {
   return (
     <>
+      {executionNotice(executionState) &&
+      (!task || ['queued', 'processing'].includes(task.state)) ? (
+        <p role="status">{executionNotice(executionState)}</p>
+      ) : null}
       {error ? <p role="alert">{error}</p> : null}
       {bound ? (
         <section className="knowledge-task-status authoring-task-status" aria-label="当前生成任务">

@@ -3,11 +3,13 @@ import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 
 import type { ApiSuccessEnvelope } from '@h5cs/contracts';
+import { EXECUTION_STATE_HEADER } from '@h5cs/contracts';
 
 import type { WorkerHealth } from './worker-health.js';
 import { PreviewError, type PreviewService } from './preview-service.js';
-import { ModelCapacityError } from './model-runtime.js';
+import { ModelCapacityError, ModelRuntimePausedError } from './model-runtime.js';
 import { abortable } from './abortable.js';
+import type { RuntimeObservationService } from './runtime-observation.js';
 
 const writeJson = (
   response: import('node:http').ServerResponse,
@@ -93,21 +95,26 @@ async function handlePreview(
       response.off('close', onClose);
     }
   } catch (error) {
+    if (error instanceof ModelRuntimePausedError)
+      response.setHeader(EXECUTION_STATE_HEADER, 'paused');
     const marketCode =
       error instanceof MarketplaceAccessError
         ? error.code === 'quota_exhausted'
           ? 'MARKETPLACE_QUOTA_EXHAUSTED'
           : 'MARKETPLACE_NOT_ELIGIBLE'
         : null;
-    const status = marketCode
-      ? marketCode === 'MARKETPLACE_QUOTA_EXHAUSTED'
-        ? 429
-        : 403
-      : error instanceof ModelCapacityError
-        ? 429
-        : error instanceof PreviewError
-          ? error.statusCode
-          : 503;
+    const status =
+      error instanceof ModelRuntimePausedError
+        ? 503
+        : marketCode
+          ? marketCode === 'MARKETPLACE_QUOTA_EXHAUSTED'
+            ? 429
+            : 403
+          : error instanceof ModelCapacityError
+            ? 429
+            : error instanceof PreviewError
+              ? error.statusCode
+              : 503;
     writeJson(
       response,
       status,
@@ -128,6 +135,7 @@ export const createHealthServer = (
   health: WorkerHealth,
   preview: PreviewService | null = null,
   timeoutMs = 20_000,
+  observation: RuntimeObservationService | null = null,
 ): Server =>
   createServer((request, response) => {
     const candidate = request.headers['x-request-id'];
@@ -135,6 +143,24 @@ export const createHealthServer = (
       typeof candidate === 'string' && /^[A-Za-z0-9._:-]{8,128}$/u.test(candidate)
         ? candidate
         : `req_${randomUUID()}`;
+    if (
+      request.method === 'GET' &&
+      request.url === '/internal/runtime-snapshot' &&
+      observation?.authorized(request.headers['x-h5cs-observation-token'])
+    ) {
+      response.setHeader('Cache-Control', 'no-store');
+      void abortable(observation.snapshot(), AbortSignal.timeout(2000)).then(
+        (snapshot) => writeJson(response, 200, snapshot, requestId),
+        () =>
+          writeJson(
+            response,
+            503,
+            { error: { code: 'UNAVAILABLE' }, request_id: requestId },
+            requestId,
+          ),
+      );
+      return;
+    }
 
     if (request.method === 'GET' && request.url === '/livez') {
       const data = health.liveness();

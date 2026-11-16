@@ -5,14 +5,18 @@ import {
   authoringTaskRetrySchema,
   draftExpandRequestSchema,
   previewReplyRequestSchema,
+  EXECUTION_STATE_HEADER,
 } from '@h5cs/contracts';
 import {
   AuthoringTaskError,
   loadDatabaseConfig,
   MySqlAuthoringTaskRepository,
+  MySqlRuntimeExecutionControlRepository,
+  RuntimeExecutionBlockedError,
 } from '@h5cs/database';
 import { currentMerchant } from '../account/merchant-actions';
 import { materialAccess, materialResponse, readMaterialBody } from '../knowledge/material-http';
+import { withExecutionState } from './execution-response';
 
 type Scope = { merchantId: string; assistantId: string; taskId?: string };
 type Kind = 'draft.expand' | 'preview.reply';
@@ -62,15 +66,23 @@ export async function authoringRoute(
       if (task.kind !== kind) throw new AuthoringTaskError('NOT_FOUND');
       return task;
     };
+    const respond = (status: number, task: ReturnType<typeof checked> | null) =>
+      withExecutionState(materialResponse(status, task), () =>
+        task
+          ? repository.getExecutionState(authorized, task.taskId)
+          : new MySqlRuntimeExecutionControlRepository(database).readEffective({
+              merchantId: authorized.merchantId,
+            }),
+      );
     if (operation === 'get')
-      return materialResponse(200, checked(await repository.get(authorized, scope.taskId!)));
+      return respond(200, checked(await repository.get(authorized, scope.taskId!)));
     if (operation === 'find') {
       const requestId = authoringRequestIdSchema.safeParse(
         new URL(request.url).searchParams.get('requestId'),
       );
       if (!requestId.success) throw new AuthoringTaskError('INVALID_REQUEST');
       const task = await repository.findByRequest(authorized, kind, requestId.data);
-      return materialResponse(200, task ? checked(task) : null);
+      return respond(200, task ? checked(task) : null);
     }
     let body: unknown;
     try {
@@ -105,8 +117,16 @@ export async function authoringRoute(
         task = await repository.cancel(authorized, scope.taskId!, now);
       }
     }
-    return materialResponse(operation === 'cancel' ? 200 : 202, checked(task));
+    return respond(operation === 'cancel' ? 200 : 202, checked(task));
   } catch (error) {
+    if (error instanceof RuntimeExecutionBlockedError) {
+      const response = materialResponse(503, {
+        code: 'UNAVAILABLE',
+        error: '生成服务已暂停，原任务和输入已保留。请稍后查询原任务。',
+      });
+      response.headers.set(EXECUTION_STATE_HEADER, 'paused');
+      return response;
+    }
     const code =
       error instanceof AuthoringTaskError
         ? error.code
