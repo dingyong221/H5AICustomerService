@@ -31,6 +31,23 @@ vi.mock('@h5cs/database', () => ({
     publish = mocks.publish;
   },
 }));
+// With a prior shared-package build, Vite can resolve this workspace export to
+// its canonical dist file on Windows. Cover both resolutions; never use a DB.
+vi.mock('../../../../packages/database/dist/index.js', () => ({
+  KnowledgeMaterialAccessError: mocks.AccessError,
+  loadDatabaseConfig: mocks.config,
+  MySqlKnowledgeMaterialRepository: class {
+    list = mocks.list;
+    save = mocks.save;
+    saveWithResult = mocks.save;
+    archive = mocks.archive;
+  },
+  MySqlAssistantLifecycleRepository: class {
+    findManagementSnapshot = mocks.snapshot;
+    saveDraft = mocks.saveDraft;
+    publish = mocks.publish;
+  },
+}));
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidate }));
 vi.mock('./material-parser', () => ({
   parseMaterial: mocks.parse,
@@ -45,7 +62,7 @@ import { POST as upload } from '../[merchantId]/knowledge/[assistantId]/material
 import { POST as organize } from '../[merchantId]/knowledge/[assistantId]/materials/organize/route';
 import { POST as apply } from '../[merchantId]/knowledge/[assistantId]/materials/apply/route';
 import { POST as remove } from '../[merchantId]/knowledge/[assistantId]/materials/delete/route';
-import { readMaterialBody } from './material-http';
+import { readMaterialBody, admitMaterialUpload } from './material-http';
 
 const merchantId = 'aa'.repeat(16),
   assistantId = 'bb'.repeat(16),
@@ -95,7 +112,7 @@ function files(names = ['商品.txt']) {
 }
 describe('knowledge material HTTP access boundaries', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     vi.stubEnv('MERCHANT_PUBLIC_ORIGIN', origin);
     mocks.config.mockReturnValue({ configured: true, config: {} });
     mocks.member.mockResolvedValue({ merchantUserId: userId, merchantId });
@@ -111,7 +128,11 @@ describe('knowledge material HTTP access boundaries', () => {
     });
     mocks.saveDraft.mockResolvedValue({ draftRevision: 8 });
   });
-  afterEach(() => vi.unstubAllEnvs());
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
   it('checks origin, membership and CSRF before reading any body or parsing files', async () => {
     for (const handler of [upload, organize, apply, remove]) {
       const evil = json({}, { Origin: 'https://evil.invalid' });
@@ -158,6 +179,124 @@ describe('knowledge material HTTP access boundaries', () => {
     expect(request.body?.locked).toBe(false);
     const bytes = await readMaterialBody(json({ text: '资料' }), 100);
     expect(JSON.parse(bytes.toString('utf8'))).toEqual({ text: '资料' });
+    let remaining = 4096;
+    const tinyChunks = new Request(origin, {
+      method: 'POST',
+      duplex: 'half',
+      body: new ReadableStream({
+        pull(controller) {
+          if (remaining-- > 0) controller.enqueue(new Uint8Array([65]));
+          else controller.close();
+        },
+      }),
+    } as RequestInit);
+    const bounded = await readMaterialBody(tinyChunks, 4096);
+    expect(bounded.length).toBe(4096);
+    expect(bounded.buffer.byteLength).toBe(4096);
+  });
+  it('admits only two upload batches before body reads and releases permits idempotently', async () => {
+    const first = admitMaterialUpload(files()),
+      second = admitMaterialUpload(files());
+    try {
+      const request = files();
+      const reader = vi.spyOn(request.body!, 'getReader');
+      expect((await upload(request, params)).status).toBe(503);
+      expect(reader).not.toHaveBeenCalled();
+      expect(mocks.parse).not.toHaveBeenCalled();
+      first.release();
+      first.release();
+      expect((await upload(files(), params)).status).toBe(200);
+    } finally {
+      first.release();
+      second.release();
+    }
+  });
+  it('cancels a slow body on abort and enforces the shared 30 second batch budget', async () => {
+    vi.useFakeTimers();
+    const cancelled = vi.fn();
+    const controller = new AbortController();
+    const slow = () =>
+      new Request(origin, {
+        method: 'POST',
+        body: new ReadableStream({ cancel: cancelled }),
+        signal: controller.signal,
+        duplex: 'half',
+      } as RequestInit);
+    const admission = admitMaterialUpload(slow());
+    try {
+      const request = slow();
+      const result = readMaterialBody(request, 100, admission.signal);
+      const rejected = expect(result).rejects.toThrow(/中断|超时/u);
+      await vi.advanceTimersByTimeAsync(30000);
+      await rejected;
+      expect(cancelled).toHaveBeenCalledOnce();
+      expect(request.body?.locked).toBe(false);
+      expect(admission.remaining()).toBe(0);
+      expect(() => admission.assertActive()).toThrow();
+    } finally {
+      admission.release();
+      vi.useRealTimers();
+    }
+  });
+  it('propagates Request.signal through extraction and never saves or starts the next file after abort', async () => {
+    const request = files(['one.txt', 'two.txt']);
+    const controller = new AbortController();
+    const abortable = new Request(request, { signal: controller.signal });
+    mocks.parse.mockImplementationOnce(async (_name, _bytes, options) => {
+      expect(options.signal.aborted).toBe(false);
+      expect(options.timeoutMs).toBeLessThanOrEqual(20000);
+      controller.abort();
+      return material.text;
+    });
+    expect((await upload(abortable, params)).status).toBe(408);
+    expect(mocks.parse).toHaveBeenCalledOnce();
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect((await upload(files(), params)).status).toBe(200);
+  });
+  it('keeps the receipt of a save already issued before cancellation and stops subsequent files', async () => {
+    const controller = new AbortController();
+    mocks.save.mockImplementationOnce(async () => {
+      controller.abort();
+      return { id: sourceId, reused: false };
+    });
+    const request = new Request(files(['one.txt', 'two.txt']), { signal: controller.signal });
+    const response = await upload(request, params);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ saved: [sourceId] });
+    expect(mocks.save).toHaveBeenCalledOnce();
+    expect(mocks.parse).toHaveBeenCalledOnce();
+  });
+  it('shares one deadline across files instead of allowing five independent 20 second parses', async () => {
+    vi.useFakeTimers();
+    mocks.parse.mockImplementationOnce(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 19000));
+      return material.text;
+    });
+    mocks.parse.mockImplementationOnce(async (_name, _bytes, options) => {
+      expect(options.timeoutMs).toBeLessThanOrEqual(11000);
+      return new Promise((_resolve, reject) =>
+        options.signal.addEventListener('abort', () => reject(new mocks.ParseError('解析超时。')), {
+          once: true,
+        }),
+      );
+    });
+    try {
+      const result = upload(files(['one.txt', 'two.txt', 'three.txt']), params);
+      await vi.waitUntil(() => mocks.parse.mock.calls.length === 1);
+      await vi.advanceTimersByTimeAsync(19000);
+      expect(mocks.parse).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(11000);
+      const response = await result;
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        saved: [sourceId],
+        errors: ['two.txt：解析超时。'],
+      });
+      expect(mocks.parse).toHaveBeenCalledTimes(2);
+      expect(mocks.save).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it('requires explicit organization consent, unique bounded IDs and selected-tenant sources', async () => {
     for (const value of [
@@ -301,6 +440,21 @@ describe('knowledge material HTTP access boundaries', () => {
     for (const names of [[], ['1.txt', '2.txt', '3.txt', '4.txt', '5.txt', '6.txt']])
       expect((await upload(files(names), params)).status).toBe(400);
     expect(mocks.parse).not.toHaveBeenCalled();
+  });
+  it('bounds multipart object count and metadata before framework FormData allocation', async () => {
+    const parseForm = vi.spyOn(Response.prototype, 'formData');
+    const body = new FormData();
+    for (let i = 0; i < 10000; i++) body.append('unexpected', 'x');
+    const request = new Request(origin, {
+      method: 'POST',
+      headers: { Origin: origin, 'x-h5cs-csrf': 'test-csrf' },
+      body,
+    });
+    expect((await upload(request, params)).status).toBe(400);
+    expect(parseForm).not.toHaveBeenCalled();
+    expect(mocks.parse).not.toHaveBeenCalled();
+    expect((await upload(files(['x'.repeat(9000) + '.txt']), params)).status).toBe(400);
+    expect(parseForm).not.toHaveBeenCalled();
   });
   it('requires explicit apply confirmation and bounded nonempty summary', async () => {
     const valid = { summary: '新资料', revision: 7, mode: 'append', confirmed: true };

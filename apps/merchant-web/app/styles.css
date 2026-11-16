@@ -2713,6 +2713,7 @@ a {
 }
 .assistant-fixed-link button,
 .assistant-preview-form button,
+.authoring-task-status button,
 .knowledge-manager > button,
 .knowledge-material button {
   background: #173a6b;
@@ -2726,6 +2727,7 @@ a {
   padding: 0.6rem 0.9rem;
 }
 .assistant-preview-form button:disabled,
+.authoring-task-status button:disabled,
 .knowledge-manager button:disabled {
   cursor: not-allowed;
   opacity: 0.55;

@@ -1,5 +1,15 @@
 # Worker 阶段 1 运行边界
 
+## 阶段 2B 资料填写与试聊候选
+
+`DRAFT_EXPAND_ASYNC_ENABLED` 与 `PREVIEW_ASYNC_ENABLED` 均默认关闭。启用后，已有客服草稿的 `draft.expand`、当前保存稿的 `preview.reply` 复用原 job/result、领取代次与供应商/额度收据。新两能力每商家 pending+processing 合计最多4个，同请求重放优先于队满判断。独立文案页和首次创建的旧同步能力保持原语义。
+
+写作结果是候选，只允许填入仍与输入原文字节hash匹配的表单；不会自动保存草稿。试聊完成将 job.result 和原 publication governance 的checkId在同一事务写回，并比较受理时preview_id前值；旧异步答案不能覆盖后来写入的同步/异步试聊记录，仍必须商家人工判定。写锁序为 management→job→governance，供应商晚收据结算仍为 job→attempt。
+
+新旧同步、知识、写作、试聊、消费者共用一个ModelRuntime，总槽2，writing+organize合计最多1管理槽，preview与consumer为交互。知识/资料任务的调度复用同一个有界调度算法并进入同一执行队列，不经内部HTTP二次占槽。未知/派发后重启不自动重发；取消只拒绝业务结果，迟到供应商结果仍结算。单模型执行实例仍是前提，尚无多副本全局槽锁。
+
+可重放SQL入口：`node packages/database/scripts/run-knowledge-stage2-ci.mjs --authoring`，沿用专用空loopback知识测试库前置条件，先知识16项再资料/试聊17项。无参数时仍只运行原知识套件；本机隔离runner的同名参数另写WI-20261117-004证据并执行原消费者13项。CI接入由A0维护。未激活/未部署，实模及跨镜像切换不由本地结果证明。
+
 ## 阶段 2 知识整理候选
 
 `KNOWLEDGE_ASYNC_ENABLED=true` 才创建持久知识调度器，默认关闭；商家端也需要同名开关。旧同步整理入口继续使用同一个模型执行器。仅启用开关不等于已迁移或部署；先应用增量迁移 `0019_knowledge_organization_result.sql`，它只为原 job 表增加 nullable JSON result，保留所有原业务行、固定链接和发布快照。

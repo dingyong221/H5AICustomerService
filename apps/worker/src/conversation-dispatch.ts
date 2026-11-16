@@ -6,6 +6,7 @@ import {
   MySqlMarketplaceRepository,
   MySqlModelCallAttemptRepository,
   MySqlKnowledgeOrganizationRepository,
+  MySqlAuthoringTaskRepository,
   type DatabaseConnectionConfig,
 } from '@h5cs/database';
 
@@ -22,6 +23,7 @@ import {
   KnowledgeOrganizationProcessor,
   type KnowledgeOrganizationStore,
 } from './knowledge-organization-processor.js';
+import { AuthoringTaskProcessor, type AuthoringTaskStore } from './authoring-task-processor.js';
 
 type DispatchDependencies = Readonly<{
   fetchImpl?: typeof fetch;
@@ -31,6 +33,7 @@ type DispatchDependencies = Readonly<{
   runtime?: ModelRuntime;
   attempts?: ModelAttemptStore;
   knowledgeStoreFactory?: (database: DatabaseConnectionConfig) => KnowledgeOrganizationStore;
+  authoringStoreFactory?: (database: DatabaseConnectionConfig) => AuthoringTaskStore;
 }>;
 
 export type ConversationDispatchResult =
@@ -40,6 +43,7 @@ export type ConversationDispatchResult =
       processor: ConversationTurnProcessor;
       runtime: ModelRuntime;
       knowledgeProcessor?: KnowledgeOrganizationProcessor;
+      authoringProcessor?: AuthoringTaskProcessor;
     }>;
 
 export function createConversationDispatch(
@@ -84,6 +88,20 @@ export function createConversationDispatch(
               new MySqlKnowledgeOrganizationRepository(database.config, true),
             generator,
             `knowledge_${randomBytes(16).toString('hex')}`,
+          ),
+        }
+      : {}),
+    ...(environment['DRAFT_EXPAND_ASYNC_ENABLED'] === 'true' ||
+    environment['PREVIEW_ASYNC_ENABLED'] === 'true'
+      ? {
+          authoringProcessor: new AuthoringTaskProcessor(
+            dependencies.authoringStoreFactory?.(database.config) ??
+              new MySqlAuthoringTaskRepository(database.config, {
+                draftExpand: environment['DRAFT_EXPAND_ASYNC_ENABLED'] === 'true',
+                previewReply: environment['PREVIEW_ASYNC_ENABLED'] === 'true',
+              }),
+            generator,
+            `authoring_${randomBytes(16).toString('hex')}`,
           ),
         }
       : {}),

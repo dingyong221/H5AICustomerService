@@ -1,14 +1,14 @@
 import { loadDatabaseConfig, MySqlMarketplaceRepository } from '@h5cs/database';
 import { timingSafeEqual } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
-import { parseWritingInput, parseWritingResult, type WritingResult } from '@h5cs/contracts';
-import { buildWritingPrompt, groundFinancialWriting } from './writing-prompt.js';
+import { parseWritingInput, type WritingResult } from '@h5cs/contracts';
+import { generateDraftExpansion, generatePreviewReply } from './authoring-generation.js';
 
 import {
   ChatCompletionsGenerator,
   loadChatCompletionsConfig,
 } from './chat-completions-generator.js';
-import { buildPreviewPrompt, type PreviewFacts } from './conversation-prompt.js';
+import { type PreviewFacts } from './conversation-prompt.js';
 import type { ModelRuntime } from './model-runtime.js';
 
 export class PreviewError extends Error {
@@ -126,7 +126,7 @@ export class PreviewService {
   public async reply(payload: unknown, signal: AbortSignal): Promise<string> {
     const { merchantId, facts, question } = parsePayload(payload);
     this.limit(merchantId);
-    return this.#generator.generate(buildPreviewPrompt(facts, question), signal, {
+    return generatePreviewReply(this.#generator, facts, question, signal, {
       merchantId,
       operation: 'preview',
     });
@@ -159,27 +159,10 @@ export class PreviewService {
     this.limit(merchantId);
     this.#writingBusy.add(merchantId);
     try {
-      const answer = await this.#generator.generate(buildWritingPrompt(input), signal, {
+      return await generateDraftExpansion(this.#generator, input, signal, {
         merchantId,
         operation: 'writing',
       });
-      const parsed = parseWritingResult(JSON.parse(answer), input.field);
-      if (!parsed) throw new Error('Invalid writing answer');
-      const result = groundFinancialWriting(input, parsed);
-      const labeled =
-        input.field === 'welcomeMessage'
-          ? parseWritingResult(
-              {
-                ...result,
-                options: result.options.map((text) =>
-                  /\bAI\b|人工智能/iu.test(text) ? text : `您好，我是 AI 客服。${text}`,
-                ),
-              },
-              input.field,
-            )
-          : result;
-      if (!labeled) throw new Error('Invalid labeled writing answer');
-      return labeled;
     } finally {
       this.#writingBusy.delete(merchantId);
     }

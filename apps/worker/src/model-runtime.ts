@@ -1,4 +1,8 @@
-import type { ConversationTurnClaim, KnowledgeOrganizationClaim } from '@h5cs/database';
+import type {
+  ConversationTurnClaim,
+  KnowledgeOrganizationClaim,
+  AuthoringTaskClaim,
+} from '@h5cs/database';
 import { settlesWithin } from './shutdown-budget.js';
 import { abortable } from './abortable.js';
 
@@ -8,6 +12,7 @@ export type ModelContext = Readonly<{
   operation: ModelOperation;
   claim?: ConversationTurnClaim;
   knowledgeClaim?: KnowledgeOrganizationClaim;
+  authoringClaim?: AuthoringTaskClaim;
   permit?: ModelPermit;
 }>;
 export type ModelAttemptStore = Readonly<{
@@ -136,6 +141,27 @@ export class ModelRuntime {
   ): Promise<T> {
     return this.#enqueue(merchantId, 'organize', signal, run);
   }
+  public enqueueAuthoring<T>(
+    merchantId: string,
+    operation: 'writing' | 'preview',
+    signal: AbortSignal,
+    run: (permit: ModelPermit) => Promise<T>,
+  ): Promise<T> {
+    return this.#enqueue(merchantId, operation, signal, run);
+  }
+  public bindAuthoringClaim(permit: ModelPermit, claim: AuthoringTaskClaim): void {
+    const scope = this.#permits.get(permit),
+      operation = claim.payload.kind === 'draft.expand' ? 'writing' : 'preview';
+    if (
+      !scope ||
+      scope.operation !== operation ||
+      scope.merchantId !== claim.merchantId ||
+      scope.used ||
+      scope.claimKey
+    )
+      throw new ModelCapacityError('Authoring permit claim mismatch');
+    scope.claimKey = `authoring:${claim.payload.kind}:${claim.jobId}:${claim.claimGeneration}`;
+  }
 
   public async dispatch<T>(
     context: ModelContext,
@@ -226,6 +252,14 @@ export class ModelRuntime {
         scope.used ||
         scope.merchantId !== context.merchantId ||
         scope.operation !== context.operation ||
+        (context.authoringClaim &&
+          (context.claim ||
+            context.knowledgeClaim ||
+            scope.claimKey !==
+              `authoring:${context.authoringClaim.payload.kind}:${context.authoringClaim.jobId}:${context.authoringClaim.claimGeneration}` ||
+            context.operation !==
+              (context.authoringClaim.payload.kind === 'draft.expand' ? 'writing' : 'preview'))) ||
+        (scope.claimKey?.startsWith('authoring:') && !context.authoringClaim) ||
         (context.operation === 'consumer' &&
           (!context.claim ||
             scope.claimKey !== `${context.claim.jobId}:${context.claim.claimGeneration}`)) ||

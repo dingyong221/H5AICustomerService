@@ -3,6 +3,7 @@ import type {
   ConversationTurnClaim,
   ClaimMutationResult,
   KnowledgeOrganizationClaim,
+  AuthoringTaskClaim,
 } from '@h5cs/database';
 
 import { buildConversationPrompt, type ConversationPrompt } from './conversation-prompt.js';
@@ -45,6 +46,7 @@ export type ConversationTurnGenerator = Readonly<{
       operation: string;
       claim?: ConversationTurnClaim;
       knowledgeClaim?: KnowledgeOrganizationClaim;
+      authoringClaim?: AuthoringTaskClaim;
       permit?: ModelPermit;
     },
   ) => Promise<string>;

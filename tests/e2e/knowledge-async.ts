@@ -14,7 +14,7 @@ export type AsyncKnowledgeSession = {
 
 // Fetch from the actual authenticated Next page: Cookie/Origin come from the
 // browser. No route interception, mocked session or direct repository write.
-async function browserWrite(page: Page, url: string, body: unknown, csrf?: string) {
+export async function browserWrite(page: Page, url: string, body: unknown, csrf?: string) {
   return page.evaluate(
     async ({ url, body, csrf }) => {
       const response = await fetch(url, {
@@ -30,13 +30,13 @@ async function browserWrite(page: Page, url: string, body: unknown, csrf?: strin
   );
 }
 
-async function readTask(page: Page, url: string) {
+export async function readPersistentTask<T = KnowledgeOrganizationTask>(page: Page, url: string) {
   const request = page.waitForRequest(
     (request) => request.method() === 'GET' && request.url() === url,
   );
   const result = await page.evaluate(async (url) => {
     const response = await fetch(url, { cache: 'no-store', redirect: 'error' });
-    return { status: response.status, task: (await response.json()) as KnowledgeOrganizationTask };
+    return { status: response.status, task: (await response.json()) as T };
   }, url);
   const observed = await request;
   expect(observed.headers()).not.toHaveProperty('origin');
@@ -44,6 +44,8 @@ async function readTask(page: Page, url: string) {
   expect(result.status).toBe(200);
   return result.task;
 }
+const readTask = (page: Page, url: string) =>
+  readPersistentTask<KnowledgeOrganizationTask>(page, url);
 
 export async function organizeKnowledgeAsync(
   page: Page,

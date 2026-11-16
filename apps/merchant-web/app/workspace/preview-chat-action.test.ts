@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AssistantRevisionConflictError } from '@h5cs/domain';
 const mocks = vi.hoisted(() => ({
   origin: vi.fn(),
   member: vi.fn(),
@@ -7,11 +8,12 @@ const mocks = vi.hoisted(() => ({
   config: vi.fn(),
   editAccess: vi.fn(),
   record: vi.fn(),
+  revalidate: vi.fn(),
   AccessError: class extends Error {},
   RateLimitError: class extends Error {},
 }));
 vi.mock('next/headers', () => ({ headers: async () => ({ get: mocks.origin }) }));
-vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
+vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidate }));
 vi.mock('../account/merchant-actions', () => ({ currentMerchantForWrite: mocks.member }));
 vi.mock('@h5cs/database', () => ({
   loadDatabaseConfig: mocks.config,
@@ -36,6 +38,7 @@ const origin = 'https://h5cs.1rying.com',
 const snapshot = {
   displayName: '合成零售客服',
   draftRevision: 2,
+  previousPreviewCheckId: 'ee'.repeat(16) as string | null,
   status: 'draft',
   draft: { ...retailDefaultDraft, materialsSummary: '【来源：商品表.csv】\n保温杯39元/件' },
 };
@@ -87,6 +90,57 @@ describe('real draft input evidence boundary', () => {
     expect(result.checkId).toBeNull();
     expect(result.error).toContain('不能用于发布判定');
     expect(JSON.stringify(result)).not.toContain('private');
+  });
+  it.each([null, 'ee'.repeat(16)])(
+    'uses the raw server receipt %s, ignoring browser preconditions and a filtered empty quality view',
+    async (receipt) => {
+      mocks.snapshot.mockResolvedValue({
+        ...snapshot,
+        previousPreviewCheckId: receipt,
+        quality: { checkId: null },
+      });
+      const data = form();
+      data.set('previousPreviewCheckId', 'ff'.repeat(16));
+      data.set('expectedPreviousPreviewId', 'ff'.repeat(16));
+      const result = await previewChatAction(previous, data);
+      expect(result.checkId).toBe('dd'.repeat(16));
+      expect(mocks.record).toHaveBeenCalledWith(
+        expect.objectContaining({ expectedPreviousPreviewId: receipt, expectedDraftRevision: 2 }),
+      );
+      expect(mocks.snapshot.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.generate.mock.invocationCallOrder[0]!,
+      );
+      expect(mocks.generate.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.record.mock.invocationCallOrder[0]!,
+      );
+    },
+  );
+  it('captures the server receipt before awaiting the model and returns a late conflicting answer read-only', async () => {
+    const observed = { ...snapshot };
+    mocks.snapshot.mockResolvedValue(observed);
+    let finish!: (answer: string) => void;
+    mocks.generate.mockReturnValueOnce(
+      new Promise<string>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    mocks.record.mockImplementation(async (input) => {
+      expect(input.expectedPreviousPreviewId).toBe('ee'.repeat(16));
+      throw new AssistantRevisionConflictError();
+    });
+    const pending = previewChatAction(previous, form());
+    await vi.waitFor(() => expect(mocks.generate).toHaveBeenCalledOnce());
+    // Simulate a later task committing while the old synchronous model waits.
+    // Even a mutated returned object must not change the captured precondition.
+    observed.previousPreviewCheckId = 'ff'.repeat(16);
+    finish('迟到的合成回答');
+    const result = await pending;
+    expect(result).toMatchObject({ answer: '迟到的合成回答', revision: 2, checkId: null });
+    expect(result.error).toContain('迟到回答仅供查看');
+    expect(JSON.stringify(result)).not.toContain('private');
+    expect(mocks.generate).toHaveBeenCalledOnce();
+    expect(mocks.record).toHaveBeenCalledOnce();
+    expect(mocks.revalidate).not.toHaveBeenCalled();
   });
   it('does not call models or disclose facts for foreign origin, denied member, unavailable DB, stale revision or paused assistant', async () => {
     mocks.origin.mockReturnValue('https://untrusted.invalid');

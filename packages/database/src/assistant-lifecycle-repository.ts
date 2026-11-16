@@ -43,6 +43,7 @@ import { probeDatabase } from './config.js';
 import { bindVerifiedImprovementsToRelease } from './assistant-improvement-release.js';
 import {
   assertPublicationGovernance,
+  persistPreviewCheck,
   governanceAudit,
   governanceFactsHash,
   publicationGovernanceStatus,
@@ -732,7 +733,7 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
   public async findManagementSnapshot(
     merchantIdValue: MerchantId,
     assistantIdValue: AssistantId,
-  ): Promise<AssistantManagementSnapshot | null> {
+  ): Promise<(AssistantManagementSnapshot & { previousPreviewCheckId: string | null }) | null> {
     const merchantId = idBuffer(merchantIdValue, 'merchantId');
     const assistantId = idBuffer(assistantIdValue, 'assistantId');
     return this.#withConnection(async (connection) =>
@@ -896,11 +897,20 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
     merchantId: MerchantId;
     assistantId: AssistantId;
     expectedDraftRevision: number;
+    /** Raw governance ID from the server snapshot captured before the model call. */
+    expectedPreviousPreviewId: string | null;
     question: string;
     answer: string;
     now: Date;
   }): Promise<{ checkId: string; draftRevision: number }> {
     validDate(input.now, 'now');
+    // Absence is not the same as an explicitly captured empty governance record.
+    if (
+      input.expectedPreviousPreviewId !== null &&
+      (typeof input.expectedPreviousPreviewId !== 'string' ||
+        !/^[a-f0-9]{32}$/.test(input.expectedPreviousPreviewId))
+    )
+      throw new AssistantLifecyclePersistenceError('expectedPreviousPreviewId is invalid');
     const question = paragraphText(input.question, 'question', 2000);
     const answer = paragraphText(input.answer, 'answer', 8000);
     const scope = {
@@ -921,34 +931,18 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
         current.draft_revision !== input.expectedDraftRevision
       )
         throw new AssistantRevisionConflictError();
+      const governance = await readGovernance(connection, scope, true);
+      if ((governance?.preview_id?.toString('hex') ?? null) !== input.expectedPreviousPreviewId)
+        throw new AssistantRevisionConflictError();
       const checkId = randomBytes(16);
       const hash = governanceFactsHash(current.display_name, parseDraft(current.config));
-      await connection.execute(
-        `INSERT INTO assistant_publication_governance
-        (merchant_id,assistant_id,preview_id,preview_revision,preview_facts_hash,preview_question,
-         preview_answer,preview_verdict,previewed_at,judged_by,judged_at,withdrawn_through_no,updated_at)
-        VALUES (?,?,?,?,?,?,?,'pending',?,NULL,NULL,0,?) ON DUPLICATE KEY UPDATE
-         preview_id=VALUES(preview_id),preview_revision=VALUES(preview_revision),
-         preview_facts_hash=VALUES(preview_facts_hash),preview_question=VALUES(preview_question),
-         preview_answer=VALUES(preview_answer),preview_verdict='pending',previewed_at=VALUES(previewed_at),
-         judged_by=NULL,judged_at=NULL,updated_at=VALUES(updated_at)`,
-        [
-          scope.merchant,
-          scope.assistant,
-          checkId,
-          current.draft_revision,
-          hash,
-          question,
-          answer,
-          input.now,
-          input.now,
-        ],
-      );
-      await governanceAudit(connection, scope, 'assistant.preview_recorded', input.now, {
-        checkId: checkId.toString('hex'),
-        draftRevision: current.draft_revision,
-        questionHash: createHash('sha256').update(question).digest('hex'),
-        answerHash: createHash('sha256').update(answer).digest('hex'),
+      await persistPreviewCheck(connection, scope, {
+        checkId,
+        revision: current.draft_revision,
+        factsHash: hash,
+        question,
+        answer,
+        now: input.now,
       });
       return { checkId: checkId.toString('hex'), draftRevision: current.draft_revision };
     });
@@ -1675,21 +1669,30 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
     connection: Connection,
     merchantId: Buffer,
     assistantId: Buffer,
-  ): Promise<AssistantManagementSnapshot | null> {
-    const [rows] = await connection.execute<ManagementRow[]>(
+  ): Promise<(AssistantManagementSnapshot & { previousPreviewCheckId: string | null }) | null> {
+    const [rows] = await connection.execute<
+      (ManagementRow & { previous_preview_id: Buffer | null })[]
+    >(
       `SELECT a.id AS assistant_id, a.merchant_id, a.display_name, a.public_slug,
               a.status, a.draft_revision, d.config, d.validation, a.active_release_id,
-              a.created_at, a.updated_at
+              a.created_at, a.updated_at, g.preview_id AS previous_preview_id
          FROM assistant a
            JOIN merchant_assistant current_assistant ON current_assistant.merchant_id = a.merchant_id AND current_assistant.assistant_id = a.id
          JOIN assistant_draft d
            ON d.merchant_id = a.merchant_id AND d.assistant_id = a.id
+         LEFT JOIN assistant_publication_governance g
+           ON g.merchant_id = a.merchant_id AND g.assistant_id = a.id
         WHERE a.merchant_id = ? AND a.id = ?
         LIMIT 1`,
       [merchantId, assistantId],
     );
     const row = rows[0];
-    return row === undefined ? null : this.#managementFromRow(row);
+    return row === undefined
+      ? null
+      : {
+          ...this.#managementFromRow(row),
+          previousPreviewCheckId: row.previous_preview_id?.toString('hex') ?? null,
+        };
   }
 
   async #lockManagement(

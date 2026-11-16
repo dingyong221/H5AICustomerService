@@ -1,6 +1,13 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import {
+  fetchTask,
+  readTaskReference,
+  saveTaskReference,
+  taskRequestId,
+  unresolvedTaskOutcome,
+} from '../tasks/persistent-task-client';
+import {
   knowledgeOrganizationApplySchema,
   knowledgeOrganizationRequestIdSchema,
   knowledgeOrganizationRequestSchema,
@@ -17,10 +24,7 @@ type Reference = {
   pendingApply?: KnowledgeOrganizationApply;
   submission?: { retryOf?: string; body: KnowledgeOrganizationRequest | { requestId: string } };
 };
-const unresolved = (task: KnowledgeOrganizationTask) =>
-  task.modelOutcome === 'unknown' ||
-  task.modelOutcome === 'dispatched' ||
-  (task.modelOutcome === 'succeeded' && !task.result && !task.appliedRevision);
+const unresolved = unresolvedTaskOutcome;
 export function organizationMessage(task: KnowledgeOrganizationTask, revision: number) {
   if (task.appliedRevision) return `已保存至草稿修订 ${task.appliedRevision}，试聊并发布后生效。`;
   if (task.state === 'cancelled') return '任务已取消，结果不会采纳；已发出的模型请求仍可能计费。';
@@ -60,9 +64,7 @@ export function useOrganizationTask(options: {
     latest.current = options;
   }, [options]);
   function remember(value: Reference | null) {
-    if (!options.recoveryKey) throw new Error('无法保存任务恢复信息，请刷新后重试。');
-    if (value) window.sessionStorage.setItem(options.recoveryKey, JSON.stringify(value));
-    else window.sessionStorage.removeItem(options.recoveryKey);
+    saveTaskReference(options.recoveryKey, value);
     current.current = value;
     setReference(value);
   }
@@ -105,11 +107,7 @@ export function useOrganizationTask(options: {
       const url = pointer.taskId
         ? `/${pointer.taskId}`
         : `?requestId=${encodeURIComponent(pointer.requestId)}`;
-      const response = await fetch(`${options.endpoint}/organize-tasks${url}`, {
-        cache: 'no-store',
-        redirect: 'error',
-        signal: AbortSignal.timeout(15000),
-      });
+      const response = await fetchTask(`${options.endpoint}/organize-tasks${url}`);
       const value: unknown = await response.json();
       if (version !== epoch.current) return;
       if (!response.ok) throw new Error('任务暂不可读，请确认登录及管理权限后再刷新。');
@@ -134,9 +132,8 @@ export function useOrganizationTask(options: {
   useEffect(() => {
     if (!options.recoveryKey) return;
     try {
-      const raw = window.sessionStorage.getItem(options.recoveryKey);
-      if (raw) {
-        const value = JSON.parse(raw) as Reference;
+      const value = readTaskReference(options.recoveryKey, (value) => value as Reference);
+      if (value) {
         if (
           !knowledgeOrganizationRequestIdSchema.safeParse(value.requestId).success ||
           (value.taskId !== undefined && !/^[a-f0-9]{32}$/u.test(value.taskId)) ||
@@ -212,7 +209,7 @@ export function useOrganizationTask(options: {
               unresolved(task)))
         )
           return false;
-        pointer = { requestId: `organize_${crypto.randomUUID().replaceAll('-', '')}` };
+        pointer = { requestId: taskRequestId('organize') };
         payload = { ...body, requestId: pointer.requestId };
         pointer.submission =
           kind === 'create'
@@ -238,13 +235,9 @@ export function useOrganizationTask(options: {
         remember({ ...previous, pendingApply: parsed });
       }
       sent = true;
-      const response = await fetch(`${options.endpoint}/organize-tasks${suffix}`, {
-        method: 'POST',
-        cache: 'no-store',
-        redirect: 'error',
-        headers: { 'Content-Type': 'application/json', 'x-h5cs-csrf': options.csrfToken },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(30000),
+      const response = await fetchTask(`${options.endpoint}/organize-tasks${suffix}`, {
+        body: payload,
+        csrf: options.csrfToken,
       });
       const value = (await response.json()) as {
         code?: string;

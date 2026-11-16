@@ -1,4 +1,4 @@
-name: Knowledge organization MySQL
+name: Knowledge and authoring MySQL
 
 on:
   workflow_call:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   knowledge-stage2-mysql:
-    name: Real MySQL knowledge organization
+    name: Real MySQL knowledge and authoring
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -49,12 +49,12 @@ jobs:
       - name: Start dedicated empty loopback MySQL
         run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml up -d --wait mysql
 
-      - name: Verify knowledge concurrency recovery and revision adoption
+      - name: Verify knowledge and authoring concurrency recovery and revision adoption
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "${{ runner.temp }}/knowledge-stage2-evidence"
-          node packages/database/scripts/run-knowledge-stage2-ci.mjs 2>&1 | tee "${{ runner.temp }}/knowledge-stage2-evidence/mysql-tests.tap"
+          node packages/database/scripts/run-knowledge-stage2-ci.mjs --authoring 2>&1 | tee "${{ runner.temp }}/knowledge-stage2-evidence/mysql-tests.tap"
 
       - name: Upload synthetic knowledge organization evidence
         if: always()

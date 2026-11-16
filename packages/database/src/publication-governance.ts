@@ -8,6 +8,47 @@ import {
 } from '@h5cs/domain';
 
 export type GovernanceScope = Readonly<{ merchant: Buffer; assistant: Buffer; user: Buffer }>;
+/** Caller holds management, and any task row, before entering this shared write. */
+export async function persistPreviewCheck(
+  connection: Connection,
+  scope: GovernanceScope,
+  input: {
+    checkId: Buffer;
+    revision: number;
+    factsHash: Buffer;
+    question: string;
+    answer: string;
+    now: Date;
+  },
+) {
+  await connection.execute(
+    `INSERT INTO assistant_publication_governance
+ (merchant_id,assistant_id,preview_id,preview_revision,preview_facts_hash,preview_question,
+ preview_answer,preview_verdict,previewed_at,judged_by,judged_at,withdrawn_through_no,updated_at)
+ VALUES (?,?,?,?,?,?,?,'pending',?,NULL,NULL,0,?) ON DUPLICATE KEY UPDATE
+ preview_id=VALUES(preview_id),preview_revision=VALUES(preview_revision),
+ preview_facts_hash=VALUES(preview_facts_hash),preview_question=VALUES(preview_question),
+ preview_answer=VALUES(preview_answer),preview_verdict='pending',previewed_at=VALUES(previewed_at),
+ judged_by=NULL,judged_at=NULL,updated_at=VALUES(updated_at)`,
+    [
+      scope.merchant,
+      scope.assistant,
+      input.checkId,
+      input.revision,
+      input.factsHash,
+      input.question,
+      input.answer,
+      input.now,
+      input.now,
+    ],
+  );
+  await governanceAudit(connection, scope, 'assistant.preview_recorded', input.now, {
+    checkId: input.checkId.toString('hex'),
+    draftRevision: input.revision,
+    questionHash: createHash('sha256').update(input.question).digest('hex'),
+    answerHash: createHash('sha256').update(input.answer).digest('hex'),
+  });
+}
 export type GovernanceRow = RowDataPacket & {
   preview_id: Buffer | null;
   preview_revision: number | null;

@@ -89,8 +89,8 @@ services:
 
   merchant-web:
     <<: *web-defaults
-    # Native document parsing runs in at most two owned child processes.
-    # V8's child heap limit does not bound native allocations; cgroups do.
+    # Local compatibility uses two children. Explicitly add the material-parser
+    # overlay for independent cgroups/network/mounts; isolated never falls back.
     mem_limit: 1024m
     pids_limit: 128
     cpus: 0.6

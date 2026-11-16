@@ -10,12 +10,18 @@ import { prepareStage2Baseline, stage2Baseline } from './prepare-knowledge-stage
 
 const packageRoot = fileURLToPath(new URL('../', import.meta.url)),
   worktree = resolve(packageRoot, '../..');
-const evidenceRoot = resolve(worktree, '../../../artifacts/agent-work/WI-20261116-005/local-mysql');
+const authoring = process.argv.length === 3 && process.argv[2] === '--authoring';
+const evidenceRoot = resolve(
+  worktree,
+  `../../../artifacts/agent-work/${authoring ? 'WI-20261117-004' : 'WI-20261116-005'}/local-mysql`,
+);
 const binary =
   process.env.H5CS_TEST_MYSQLD ??
   'F:/WorkStation/CODEX/implementations/ai-supermarket/H5AICustomerService/artifacts/ai-supermarket-a6/mysql-runtime/mysql-8.4.13-winx64/bin/mysqld.exe';
-if (process.argv.length !== 2)
-  throw Error('No arguments accepted; this runner owns a new synthetic local instance');
+if (!authoring && process.argv.length !== 2)
+  throw Error(
+    'Only optional --authoring is accepted; this runner owns a new synthetic local instance',
+  );
 const basedir = resolve(dirname(binary), '..');
 await mkdir(evidenceRoot, { recursive: true });
 const runRoot = await mkdtemp(join(evidenceRoot, 'stage2-'));
@@ -155,7 +161,7 @@ try {
   await root.query("GRANT ALL ON h5cs_stage2_ci.* TO 'h5cs_stage2'@'127.0.0.1'");
   await command(
     process.execPath,
-    ['scripts/run-knowledge-stage2-ci.mjs'],
+    ['scripts/run-knowledge-stage2-ci.mjs', ...(authoring ? ['--authoring'] : [])],
     join(runRoot, 'tests.tap'),
     {
       ...process.env,
@@ -195,6 +201,21 @@ try {
     join(runRoot, 'consumer-regression.tap'),
     regressionEnvironment,
   );
+  if (authoring) {
+    // The synchronous preview CAS contract also affects the existing governance
+    // and single-assistant fixtures. Exercise them on this same owned test DB.
+    await command(
+      process.execPath,
+      [
+        '--test',
+        '--test-concurrency=1',
+        'test/publication-governance.mysql.mjs',
+        'test/single-assistant-context.mysql.mjs',
+      ],
+      join(runRoot, 'preview-compatibility.tap'),
+      regressionEnvironment,
+    );
+  }
   result.passed = true;
 } catch (e) {
   failure = e;

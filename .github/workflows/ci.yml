@@ -15,8 +15,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  material-parser-isolation:
+    name: Material parser operating-system isolation
+    uses: ./.github/workflows/material-parser.yml
+
   knowledge-stage2-mysql:
-    name: Real MySQL knowledge organization and recovery
+    name: Real MySQL knowledge and authoring recovery
     uses: ./.github/workflows/knowledge-stage2.yml
 
   quality:
@@ -242,6 +246,9 @@ jobs:
       - name: Install Chromium for isolated browser acceptance
         run: pnpm exec playwright install --with-deps chromium
 
+      - name: Verify synthetic model protocols used by browser acceptance
+        run: node --test tests/e2e/fake-model.test.mjs
+
       - name: Verify production-build operator, merchant and consumer browser workflow
         run: pnpm test:e2e
 
@@ -271,6 +278,15 @@ jobs:
         env:
           H5CS_E2E_PATH_MODE: single_domain
           H5CS_E2E_KNOWLEDGE_ASYNC: 'true'
+          NEXT_PUBLIC_MERCHANT_BASE_PATH: /console
+          NEXT_PUBLIC_OPS_BASE_PATH: /ops
+        run: pnpm test:e2e
+
+      - name: Verify asynchronous writing and preview with real Next sessions and MySQL
+        env:
+          H5CS_E2E_PATH_MODE: single_domain
+          H5CS_E2E_KNOWLEDGE_ASYNC: 'true'
+          H5CS_E2E_AUTHORING_ASYNC: 'true'
           NEXT_PUBLIC_MERCHANT_BASE_PATH: /console
           NEXT_PUBLIC_OPS_BASE_PATH: /ops
         run: pnpm test:e2e

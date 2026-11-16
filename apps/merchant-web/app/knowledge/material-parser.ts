@@ -1,6 +1,8 @@
-import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import {
+  parseNative,
+  parseIsolated,
+  ParserFailure,
+} from '../../scripts/material-parser-runtime.mjs';
 export const materialTypes = {
   pdf: 'application/pdf',
   doc: 'application/msword',
@@ -14,9 +16,6 @@ export const materialTypes = {
   md: 'text/markdown',
 } as const;
 export class MaterialParseError extends Error {}
-// Shared across requests in this server worker. Reject rather than retain
-// unbounded queues of 10 MB uploads while native extraction is occupied.
-let activeParsers = 0;
 export function materialMime(name: string, bytes: Buffer): string {
   const extension = name.toLowerCase().split('.').at(-1) as keyof typeof materialTypes;
   if (
@@ -49,76 +48,20 @@ export function materialMime(name: string, bytes: Buffer): string {
   }
   return materialTypes[extension];
 }
-export async function parseMaterial(name: string, bytes: Buffer): Promise<string> {
+export async function parseMaterial(
+  name: string,
+  bytes: Buffer,
+  options: { signal?: AbortSignal; timeoutMs?: number } = {},
+): Promise<string> {
   const mime = materialMime(name, bytes);
-  if (activeParsers >= 2) throw new MaterialParseError('材料解析繁忙，请稍后重试。');
-  activeParsers += 1;
-  return new Promise((resolve, reject) => {
-    // No shell, filenames or secrets are passed to the parser. Only bytes and
-    // an allowlisted MIME. Kill the entire owned child on timeout or overflow.
-    const child = spawn(
-      process.execPath,
-      ['--max-old-space-size=256', join(process.cwd(), 'scripts/extract-material.mjs'), mime],
-      {
-        windowsHide: true,
-        stdio: ['pipe', 'pipe', 'ignore'],
-        env: {
-          NODE_ENV: 'production',
-          // Production pre-extracts the version-pinned bundled PDFium library
-          // into a root-owned read-only image directory. Reuse it there without
-          // making the normal /tmp mount executable. Local/CI has no such path.
-          ...(process.platform === 'linux' &&
-          existsSync('/app/parser-runtime/kreuzberg-pdfium/libpdfium.so')
-            ? { TMPDIR: '/app/parser-runtime' }
-            : {}),
-          PATH: process.env.PATH ?? '',
-          SystemRoot: process.env.SystemRoot ?? '',
-          TEMP: process.env.TEMP ?? '',
-          TMP: process.env.TMP ?? '',
-        },
-      },
+  const mode = process.env['H5CS_MATERIAL_PARSER_MODE'] ?? 'local';
+  try {
+    if (mode === 'isolated') return await parseIsolated(bytes, mime, options);
+    if (mode === 'local') return await parseNative(bytes, mime, options);
+    throw new ParserFailure('unavailable');
+  } catch (error) {
+    throw new MaterialParseError(
+      error instanceof ParserFailure ? error.message : '文件解析服务暂不可用。',
     );
-    const chunks: Buffer[] = [];
-    let size = 0,
-      settled = false;
-    const finish = (error?: string, text?: string) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (error) {
-        child.kill('SIGKILL');
-        reject(new MaterialParseError(error));
-      } else resolve(text!);
-    };
-    const timer = setTimeout(() => finish('解析超时，请拆分文件后重试。'), 20000);
-    child.stdout.on('data', (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > 150000) finish('文件文字过多，请拆分材料。');
-      else chunks.push(chunk);
-    });
-    child.on('error', () => finish('文件解析服务暂不可用。'));
-    child.stdin.on('error', () => {
-      /* Exit is handled below; never print supplied data. */
-    });
-    child.on('close', (code) => {
-      activeParsers -= 1;
-      if (code !== 0) {
-        finish(
-          code === 3
-            ? '文件无可提取文字，或文字超过 24000 字；请使用含文字的文件或拆分材料。'
-            : '文件无法解析，可能已损坏、加密或格式不兼容。',
-        );
-        return;
-      }
-      try {
-        const payload: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-        const text = (payload as { text?: unknown })?.text;
-        if (typeof text !== 'string' || !text.trim() || text.length > 24000) throw new Error();
-        finish(undefined, text);
-      } catch {
-        finish('文件解析结果无效。');
-      }
-    });
-    child.stdin.end(bytes);
-  });
+  }
 }

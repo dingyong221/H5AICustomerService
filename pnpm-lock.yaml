@@ -335,6 +335,9 @@ importers:
 
   packages/database:
     dependencies:
+      '@h5cs/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@h5cs/domain':
         specifier: workspace:*
         version: link:../domain

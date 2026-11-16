@@ -1,3 +1,4 @@
+import { merchantJobTransaction, recoverMerchantJobs } from './persistent-merchant-job.js';
 import { randomBytes } from 'node:crypto';
 import { KnowledgeOrganizationError, safeKnowledgeRetry } from '@h5cs/domain';
 import type { KnowledgeOrganizationResult, KnowledgeOrganizationTask } from '@h5cs/domain';
@@ -76,21 +77,11 @@ export class MySqlKnowledgeOrganizationRepository {
     }
   }
   async #transaction<T>(run: (connection: Connection) => Promise<T>): Promise<T> {
-    const c = await this.database.openConnection();
-    let committing = false;
-    try {
-      await c.beginTransaction();
-      const r = await run(c);
-      committing = true;
-      await c.commit();
-      return r;
-    } catch (e) {
-      await c.rollback().catch(() => undefined);
-      if (committing) throw new KnowledgeOrganizationError('WRITE_OUTCOME_UNKNOWN');
-      throw e;
-    } finally {
-      await c.end();
-    }
+    return merchantJobTransaction(
+      this.database,
+      () => new KnowledgeOrganizationError('WRITE_OUTCOME_UNKNOWN'),
+      run,
+    );
   }
   async #readJob(c: Connection, scope: KnowledgeScope, taskId: string): Promise<KnowledgeJobRow> {
     const [rows] = await c.execute<KnowledgeJobRow[]>(
@@ -297,37 +288,7 @@ export class MySqlKnowledgeOrganizationRepository {
   }
   async recoverExpired(now: Date): Promise<void> {
     validNow(now);
-    await this.#transaction(async (c) => {
-      const [rows] = await c.execute<KnowledgeJobRow[]>(
-        "SELECT *,CAST(claim_generation AS CHAR) claim_generation FROM job WHERE type='knowledge.organize' AND state='processing' AND lease_until<=? ORDER BY lease_until,id LIMIT 64 FOR UPDATE SKIP LOCKED",
-        [now],
-      );
-      for (const row of rows) {
-        if (row.model_outcome === 'none') {
-          await c.execute(
-            "UPDATE job SET state='pending',lease_owner=NULL,lease_until=NULL,run_after=?,updated_at=? WHERE id=?",
-            [now, now, row.id],
-          );
-          continue;
-        }
-        const uncertain = row.model_outcome === 'dispatched' || row.model_outcome === 'unknown';
-        if (uncertain && row.model_attempt_id)
-          await c.execute(
-            "UPDATE model_call_attempt SET state='unknown',updated_at=?,completed_at=? WHERE id=? AND state='dispatched'",
-            [now, now, row.model_attempt_id],
-          );
-        await c.execute(
-          "UPDATE job SET state='failed',model_outcome=?,last_error_code=?,lease_owner=NULL,lease_until=NULL,updated_at=?,completed_at=? WHERE id=?",
-          [
-            uncertain ? 'unknown' : row.model_outcome,
-            uncertain ? 'MODEL_RESULT_UNKNOWN' : 'RESULT_FINALIZATION_FAILED',
-            now,
-            now,
-            row.id,
-          ],
-        );
-      }
-    });
+    await this.#transaction((c) => recoverMerchantJobs(c, ['knowledge.organize'], now));
   }
   async listRunnableMerchantHeads(
     now: Date,

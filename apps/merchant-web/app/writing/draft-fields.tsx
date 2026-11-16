@@ -1,8 +1,9 @@
 'use client';
 
-import { useId, useRef, useState, type ReactNode } from 'react';
-import { writingFields, type WritingField } from '@h5cs/contracts';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { isWritingField, writingFields, type WritingField } from '@h5cs/contracts';
 import { WritingAssistant } from './writing-assistant';
+import { TaskWritingAssistant, type DraftTaskScope } from './task-writing-assistant';
 
 export type DraftFieldValues = Record<WritingField, string>;
 export function DraftFields({
@@ -12,6 +13,7 @@ export function DraftFields({
   onChange,
   includeName = false,
   responseFields,
+  taskScope,
 }: {
   merchantId: string;
   csrfToken: string;
@@ -19,6 +21,7 @@ export function DraftFields({
   onChange: (field: WritingField, value: string) => void;
   includeName?: boolean;
   responseFields?: ReactNode;
+  taskScope?: DraftTaskScope;
 }) {
   const fieldId = useId();
   const root = useRef<HTMLDivElement>(null);
@@ -27,6 +30,39 @@ export function DraftFields({
     null,
   );
   const [message, setMessage] = useState<string | null>(null);
+  const selectionKey = taskScope
+    ? `h5cs:draft-field:${taskScope.userId}:${merchantId}:${taskScope.assistantId}`
+    : null;
+  useEffect(() => {
+    if (!selectionKey) return;
+    try {
+      const field = sessionStorage.getItem(selectionKey);
+      // Hydrate browser-only navigation state after SSR, not from the URL or props.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (isWritingField(field)) setSelected({ field, original: values[field] });
+    } catch {
+      /* The task panel handles unavailable recovery storage. */
+    }
+    // Only restore selection on a new authenticated assistant scope.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionKey]);
+  useEffect(() => {
+    if (selected) {
+      const group = root.current?.querySelector(`[name="${selected.field}"]`)?.closest('details');
+      if (group) group.open = true;
+    }
+  }, [selected]);
+  function select(next: typeof selected) {
+    if (selectionKey) {
+      try {
+        if (next) sessionStorage.setItem(selectionKey, next.field);
+        else sessionStorage.removeItem(selectionKey);
+      } catch {
+        setMessage('无法保存填写助手的位置，请恢复浏览器存储后再生成。');
+      }
+    }
+    setSelected(next);
+  }
   function apply(text: string) {
     if (!selected) return;
     if (values[selected.field] !== selected.original) {
@@ -36,7 +72,7 @@ export function DraftFields({
     const normalized = writingFields[selected.field].multiline ? text : text.replace(/\s+/gu, ' ');
     setUndo({ field: selected.field, before: selected.original, applied: normalized });
     onChange(selected.field, normalized);
-    setSelected(null);
+    select(null);
     setMessage('已填入表单，尚未保存。请核对后点击创建或保存草稿。');
     root.current?.querySelector<HTMLElement>(`[name="${selected.field}"]`)?.focus();
   }
@@ -95,9 +131,7 @@ export function DraftFields({
                   className="writing-launcher"
                   onClick={() => {
                     setMessage(null);
-                    setSelected(
-                      selected?.field === field ? null : { field, original: values[field] },
-                    );
+                    select(selected?.field === field ? null : { field, original: values[field] });
                   }}
                 >
                   {selected?.field === field
@@ -105,14 +139,36 @@ export function DraftFields({
                     : `帮我写${writingFields[field].label}`}
                 </button>
                 {selected?.field === field ? (
-                  <WritingAssistant
-                    key={field}
-                    merchantId={merchantId}
-                    csrfToken={csrfToken}
-                    field={field}
-                    currentText={selected.original}
-                    onApply={apply}
-                  />
+                  taskScope ? (
+                    <TaskWritingAssistant
+                      key={`${taskScope.userId}:${taskScope.assistantId}:${field}`}
+                      merchantId={merchantId}
+                      csrfToken={csrfToken}
+                      field={field}
+                      currentText={selected.original}
+                      localText={values[field]}
+                      scope={taskScope}
+                      onApply={apply}
+                      fallback={
+                        <WritingAssistant
+                          merchantId={merchantId}
+                          csrfToken={csrfToken}
+                          field={field}
+                          currentText={selected.original}
+                          onApply={apply}
+                        />
+                      }
+                    />
+                  ) : (
+                    <WritingAssistant
+                      key={field}
+                      merchantId={merchantId}
+                      csrfToken={csrfToken}
+                      field={field}
+                      currentText={selected.original}
+                      onApply={apply}
+                    />
+                  )
                 ) : null}
               </div>
             ))}

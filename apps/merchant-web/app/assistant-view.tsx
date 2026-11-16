@@ -279,7 +279,9 @@ export async function AssistantView({
               knowledgeConfirmed={assistant.knowledgeConfirmed}
             />
             <EditDraftForm
-              key={`editor:${assistantId}`}
+              key={`editor:${assistantId}:${session.merchantUserId}`}
+              taskUserId={session.merchantUserId}
+              asyncExpandEnabled={process.env['DRAFT_EXPAND_ASYNC_ENABLED'] === 'true'}
               csrfToken={csrfToken}
               returnPath={merchantPath(merchantId, 'drafts', assistantId)}
               continueHref={merchantPath(merchantId, 'knowledge', assistantId)}
@@ -324,6 +326,9 @@ export async function AssistantView({
                 试聊使用当前已保存的修订 {assistant.draftRevision}，不会改变线上客服。
               </p>
               <PreviewChatForm
+                key={`preview:${assistantId}:${session.merchantUserId}`}
+                taskUserId={session.merchantUserId}
+                asyncPreviewEnabled={process.env['PREVIEW_ASYNC_ENABLED'] === 'true'}
                 merchantId={merchantId}
                 assistantId={assistantId}
                 draftRevision={assistant.draftRevision}

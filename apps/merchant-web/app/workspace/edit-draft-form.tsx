@@ -23,6 +23,8 @@ export function EditDraftForm({
   returnPath,
   continueHref,
   csrfToken,
+  taskUserId,
+  asyncExpandEnabled = false,
 }: {
   merchantId: string;
   assistantId: string;
@@ -31,6 +33,8 @@ export function EditDraftForm({
   returnPath?: string;
   continueHref?: string;
   csrfToken: string;
+  taskUserId?: string;
+  asyncExpandEnabled?: boolean;
 }) {
   const hydrated = useSyncExternalStore(subscribe, clientReady, serverReady);
   const [state, action, pending] = useActionState(saveAssistantDraftAction, {
@@ -80,6 +84,17 @@ export function EditDraftForm({
         <DraftFields
           merchantId={merchantId}
           csrfToken={csrfToken}
+          {...(taskUserId
+            ? {
+                taskScope: {
+                  userId: taskUserId,
+                  assistantId,
+                  revision: editingRevision,
+                  currentRevision: draftRevision,
+                  enabled: asyncExpandEnabled,
+                },
+              }
+            : {})}
           values={values}
           onChange={(field, value) => setValues((previous) => ({ ...previous, [field]: value }))}
           responseFields={

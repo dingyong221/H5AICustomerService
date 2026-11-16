@@ -9,6 +9,12 @@ import {
 } from './conversation-job-contract.js';
 import { MarketplaceAccessError } from './marketplace-repository.js';
 import {
+  lockValidAuthoringClaim,
+  assertAuthoringInput,
+  authoringOperation,
+  type AuthoringTaskClaim,
+} from './authoring-task-contract.js';
+import {
   lockValidKnowledgeClaim,
   loadKnowledgeSources,
   sameKnowledgeSources,
@@ -31,6 +37,7 @@ export class MySqlModelCallAttemptRepository {
       operation: ModelOperation;
       claim?: ConversationTurnClaim;
       knowledgeClaim?: KnowledgeOrganizationClaim;
+      authoringClaim?: AuthoringTaskClaim;
     },
     now: Date,
   ): Promise<{ attemptId: string }> {
@@ -40,6 +47,11 @@ export class MySqlModelCallAttemptRepository {
       !['consumer', 'preview', 'writing', 'organize'].includes(input.operation) ||
       (input.operation === 'consumer') !== Boolean(input.claim) ||
       (input.claim && input.claim.merchantId !== input.merchantId) ||
+      (input.authoringClaim &&
+        (input.claim ||
+          input.knowledgeClaim ||
+          input.authoringClaim.merchantId !== input.merchantId ||
+          input.operation !== authoringOperation(input.authoringClaim.payload.kind))) ||
       (input.knowledgeClaim &&
         (input.operation !== 'organize' ||
           input.claim ||
@@ -75,6 +87,20 @@ export class MySqlModelCallAttemptRepository {
           ],
         );
         if (!sessions[0]) throw new ConversationTurnJobError('Claim is stale', 'STALE_CLAIM');
+      } else if (input.authoringClaim) {
+        const locked = await lockValidAuthoringClaim(connection, input.authoringClaim, now);
+        await assertAuthoringInput(connection, locked.scope, locked.payload, locked.current);
+        if (
+          locked.job.model_outcome !== 'none' ||
+          (locked.payload.kind === 'preview.reply' &&
+            JSON.stringify(input.authoringClaim.facts) !==
+              JSON.stringify({
+                assistantName: locked.current.assistantName,
+                draft: locked.current.draft,
+              }))
+        )
+          throw new ConversationTurnJobError('Claim is stale', 'STALE_CLAIM');
+        jobId = locked.job.id;
       } else if (input.knowledgeClaim) {
         const locked = await lockValidKnowledgeClaim(connection, input.knowledgeClaim, now);
         const source = await loadKnowledgeSources(
@@ -144,7 +170,10 @@ export class MySqlModelCallAttemptRepository {
           attempt,
           merchant,
           jobId,
-          input.claim?.claimGeneration ?? input.knowledgeClaim?.claimGeneration ?? null,
+          input.claim?.claimGeneration ??
+            input.knowledgeClaim?.claimGeneration ??
+            input.authoringClaim?.claimGeneration ??
+            null,
           input.operation,
           now,
           now,
@@ -158,7 +187,9 @@ export class MySqlModelCallAttemptRepository {
             attempt,
             now,
             jobId,
-            input.claim?.claimGeneration ?? input.knowledgeClaim!.claimGeneration,
+            input.claim?.claimGeneration ??
+              input.knowledgeClaim?.claimGeneration ??
+              input.authoringClaim!.claimGeneration,
           ],
         );
       }
