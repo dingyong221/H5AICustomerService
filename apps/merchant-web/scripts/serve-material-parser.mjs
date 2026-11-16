@@ -46,8 +46,12 @@ try {
 let active = false;
 const controllers = new Set();
 const arrivals = new WeakMap();
+const pending = new WeakMap();
+// Work still stops at MAX_TIME. Only a finite timeout response may flush after
+// that deadline; incomplete headers/bodies are closed immediately.
+const RESPONSE_GRACE = 250;
 const reply = (res, status, payload) => {
-  if (res.destroyed) return;
+  if (res.destroyed || res.writableEnded) return;
   const bytes = Buffer.from(JSON.stringify(payload));
   res.writeHead(status, {
     'content-type': 'application/json',
@@ -61,6 +65,7 @@ const server = createServer(
   async (req, res) => {
     const started = arrivals.get(req.socket) ?? Date.now();
     const controller = new AbortController();
+    pending.set(req.socket, { req, res, controller });
     const timer = setTimeout(
       () => controller.abort(),
       Math.max(0, MAX_TIME - (Date.now() - started)),
@@ -132,6 +137,7 @@ const server = createServer(
       // parseNative retains its own slot until child close even if this RPC was aborted.
       if (admitted) active = false;
       controllers.delete(controller);
+      pending.delete(req.socket);
       clearTimeout(timer);
       req.removeListener('aborted', abort);
       res.removeListener('close', abort);
@@ -147,7 +153,19 @@ server.on('connection', (socket) => {
   arrivals.set(socket, Date.now());
   // Absolute connection deadline also bounds slow/incomplete headers. Idle
   // socket timeouts alone could be kept alive forever with occasional bytes.
-  const timer = setTimeout(() => socket.destroy(), MAX_TIME);
+  const timer = setTimeout(() => {
+    const work = pending.get(socket);
+    work?.controller.abort(); // Kill the owned child before sending timeout.
+    if (!work?.req.complete) {
+      socket.destroy();
+      return;
+    }
+    // This timer was registered before the native timer. Destroying the socket
+    // here would race away its timeout JSON and report a false service outage.
+    reply(work.res, 408, { error: 'timeout' });
+    const flush = setTimeout(() => socket.destroy(), RESPONSE_GRACE);
+    socket.once('close', () => clearTimeout(flush));
+  }, MAX_TIME);
   socket.once('close', () => clearTimeout(timer));
 });
 server.on('checkContinue', (_req, res) => reply(res, 400, { error: 'invalid' }));

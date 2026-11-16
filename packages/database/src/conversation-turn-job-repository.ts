@@ -1,4 +1,11 @@
 import { randomBytes } from 'node:crypto';
+import {
+  lockRuntimeGate,
+  assertRuntimeAllowed,
+  probeRuntimeSchema,
+  runtimeEligibleSql,
+  runtimeControlEnabled,
+} from './runtime-control-contract.js';
 import { normalizeHumanContact } from '@h5cs/domain';
 
 import type { Connection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
@@ -133,6 +140,7 @@ export class MySqlConversationTurnJobRepository {
       throw new ConversationTurnJobError();
     }
     return this.#withTransaction(async (connection) => {
+      await lockRuntimeGate(connection);
       const [jobs] = await connection.execute<JobRow[]>(
         `SELECT id, merchant_id, payload, state, attempt, max_attempts,
                 CAST(claim_generation AS CHAR) claim_generation, model_outcome
@@ -141,12 +149,26 @@ export class MySqlConversationTurnJobRepository {
             ${options.merchantId ? 'AND merchant_id = ?' : ''}
             AND ((state = 'pending' AND run_after <= ?)
               OR (state = 'processing' AND lease_until < ?))
+          ${runtimeEligibleSql()}
           ORDER BY priority DESC, run_after ASC, id ASC
-          LIMIT 1 FOR UPDATE SKIP LOCKED`,
+          LIMIT 1 ${runtimeControlEnabled() ? '' : 'FOR UPDATE SKIP LOCKED'}`,
         [...(options.merchantId ? [jobBytes(options.merchantId)] : []), now, now],
       );
       const job = jobs[0];
       if (!job) return null;
+      if (runtimeControlEnabled()) {
+        if (!job.merchant_id) throw new ConversationTurnJobError();
+        await assertRuntimeAllowed(connection, {
+          merchantId: hex(job.merchant_id),
+          jobId: hex(job.id),
+        });
+        const [current] = await connection.execute<JobRow[]>(
+          `SELECT id,merchant_id,payload,state,attempt,max_attempts,CAST(claim_generation AS CHAR) claim_generation,model_outcome FROM job WHERE id=? AND ((state='pending' AND run_after<=?) OR (state='processing' AND lease_until<?)) FOR UPDATE SKIP LOCKED`,
+          [job.id, now, now],
+        );
+        if (!current[0] || !current[0].merchant_id?.equals(job.merchant_id)) return null;
+        Object.assign(job, current[0]);
+      }
       let payload: ReturnType<typeof parsePayload>;
       try {
         payload = parsePayload(job.payload);
@@ -456,13 +478,16 @@ export class MySqlConversationTurnJobRepository {
   public async releaseBeforeDispatch(
     claim: ConversationTurnClaim,
     now: Date,
+    options?: { reason: 'runtime_paused' },
   ): Promise<ClaimMutationResult> {
     return this.#withTransaction(async (connection) => {
       const locked = await lockValidConversationClaim(connection, claim, now);
       if (!locked || !['none', 'not_dispatched'].includes(locked.job.model_outcome)) return 'stale';
+      if (options?.reason === 'runtime_paused' && locked.job.model_outcome !== 'none')
+        return 'stale';
       await connection.execute(
         `UPDATE job SET state = 'pending', lease_owner = NULL, lease_until = NULL,
-        run_after = ?, updated_at = ? WHERE id = ?`,
+            run_after = ?, updated_at = ? ${options?.reason === 'runtime_paused' ? ',attempt=GREATEST(attempt,1)-1' : ''} WHERE id = ?`,
         [now, now, locked.ids.jobId],
       );
       return 'applied';
@@ -519,6 +544,7 @@ export class MySqlConversationTurnJobRepository {
       throw new ConversationTurnJobError();
     const connection = await this.database.openConnection();
     try {
+      await probeRuntimeSchema(connection);
       const [rows] = await connection.execute<
         (RowDataPacket & { merchant_id: Buffer; oldest_ready_at: Date })[]
       >(
@@ -531,7 +557,7 @@ export class MySqlConversationTurnJobRepository {
           WHERE type = 'conversation.turn' AND merchant_id IS NOT NULL
             ${options.afterMerchantId ? 'AND merchant_id > ?' : ''}
             AND ((state = 'pending' AND run_after <= ?) OR (state = 'processing' AND lease_until < ?))
-          GROUP BY merchant_id ORDER BY merchant_id ASC LIMIT ${limit}`,
+          ${runtimeEligibleSql()} GROUP BY merchant_id ORDER BY merchant_id ASC LIMIT ${limit}`,
         [...(options.afterMerchantId ? [jobBytes(options.afterMerchantId)] : []), now, now],
       );
       return rows.map((row) => ({

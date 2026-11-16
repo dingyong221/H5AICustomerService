@@ -16,16 +16,17 @@ import {
   initialConversationState,
   markAccepted,
   retryPending,
-  shouldContinuePolling,
   toConversationView,
   type ConversationState,
 } from './conversation-model';
-import { pollDelayMilliseconds, shouldSubmitComposerKey } from './interaction-policy';
+import { shouldSubmitComposerKey } from './interaction-policy';
+import { observePublicTurn } from './turn-observation';
 import { consumerFailure, replyProgress, supportReference } from './consumer-recovery';
 import {
   createPublicAssistantApiClient,
   PublicApiClientError,
   type OnlinePublicAssistantSnapshot,
+  type PublicExecutionState,
 } from './public-api-client';
 import {
   clearBrowserSessionReference,
@@ -49,20 +50,6 @@ function SendIcon() {
 
 function clientId(prefix: 'message' | 'session_request'): string {
   return `${prefix}_${crypto.randomUUID().replaceAll('-', '')}`;
-}
-
-function wait(milliseconds: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(resolve, milliseconds);
-    signal.addEventListener(
-      'abort',
-      () => {
-        window.clearTimeout(timeout);
-        reject(new DOMException('Aborted', 'AbortError'));
-      },
-      { once: true },
-    );
-  });
 }
 
 function failureDetails(error: unknown): {
@@ -116,8 +103,16 @@ export function OnlineCustomerService({
     () => toConversationView(conversation, activeSnapshot.welcomeMessage),
     [conversation, activeSnapshot.welcomeMessage],
   );
+  const [executionState, setExecutionState] = useState<PublicExecutionState | null>(null);
 
-  useEffect(() => () => activeController.current?.abort(), []);
+  useEffect(
+    () => () => {
+      activeController.current?.abort();
+      activeController.current = undefined;
+      running.current = false;
+    },
+    [],
+  );
 
   const waitingId =
     conversation.pending && conversation.pending.phase !== 'failed'
@@ -137,10 +132,14 @@ export function OnlineCustomerService({
 
   useEffect(() => {
     const controller = new AbortController();
+    activeController.current?.abort();
+    activeController.current = controller;
+    running.current = false;
+    const current = () => !controller.signal.aborted && activeController.current === controller;
     const sessionRequestId = readBrowserSessionReference(publicSlug);
     if (!sessionRequestId) {
       queueMicrotask(() => {
-        if (!controller.signal.aborted) setRestoreStatus('ready');
+        if (current()) setRestoreStatus('ready');
       });
       return () => controller.abort();
     }
@@ -150,12 +149,16 @@ export function OnlineCustomerService({
         const client = createPublicAssistantApiClient({
           apiBaseUrl,
           origin: window.location.origin,
+          onExecutionState: (state) => {
+            if (current()) setExecutionState(state);
+          },
         });
         const session = await client.resumeSession({
           publicSlug,
           sessionRequestId,
           signal: controller.signal,
         });
+        if (!current()) return;
         if (!session) {
           clearBrowserSessionReference(publicSlug);
           setRecoveryNotice('上次咨询已结束，发送消息将开始新咨询。');
@@ -166,6 +169,7 @@ export function OnlineCustomerService({
           sessionHandle: session.sessionHandle,
           signal: controller.signal,
         });
+        if (!current()) return;
         if (
           !history ||
           history.session.sessionHandle !== session.sessionHandle ||
@@ -179,7 +183,7 @@ export function OnlineCustomerService({
         }
         sessionRequestIdRef.current = sessionRequestId;
         setActiveSnapshot(history.snapshot);
-        setConversation({
+        let recovered: ConversationState = {
           session,
           messages: history.messages,
           ...(history.activeTurn
@@ -193,13 +197,39 @@ export function OnlineCustomerService({
                 },
               }
             : {}),
-        });
+        };
+        if (history.activeTurn) {
+          const active = history.activeTurn;
+          // Reconstruct only the original, authenticated turn endpoint from the
+          // server's history reference. Reload resumes GET; it never sends the
+          // question again to rediscover a receipt.
+          const resultUrl = `${apiBaseUrl.replace(/\/$/u, '')}/sessions/${session.sessionHandle}/turns/${active.turnId}`;
+          const result = await client.readTurn({
+            clientMessageId: active.clientMessageId,
+            resultUrl,
+            sessionHandle: session.sessionHandle,
+            turnId: active.turnId,
+            signal: controller.signal,
+          });
+          if (!current()) return;
+          recovered = markAccepted(recovered, {
+            resultUrl,
+            eventsUrl: `${resultUrl}/events`,
+            state: 'accepted',
+            traceId: result.traceId,
+            turnId: active.turnId,
+          });
+          recovered = applyTurnResult(recovered, result);
+          if (recovered.pending?.phase === 'waiting')
+            recovered = { ...recovered, pending: { ...recovered.pending, phase: 'sending' } };
+        }
+        setConversation(recovered);
         if (history.hasEarlierMessages) {
           setRecoveryNotice('已恢复本次咨询，当前仅展示最近 200 条消息。');
         }
         setRestoreStatus('ready');
       } catch (error) {
-        if (controller.signal.aborted) return;
+        if (!current()) return;
         const failure = failureDetails(error);
         setRecoveryNotice(
           failure.code === 'RELEASE_WITHDRAWN'
@@ -209,7 +239,7 @@ export function OnlineCustomerService({
         setRecoveryCode(failure.code);
         setRestoreStatus('failed');
       } finally {
-        running.current = false;
+        if (current()) running.current = false;
       }
     };
     void restore();
@@ -233,6 +263,7 @@ export function OnlineCustomerService({
     const controller = new AbortController();
     activeController.current?.abort();
     activeController.current = controller;
+    const current = () => !controller.signal.aborted && activeController.current === controller;
     let workingState: ConversationState = conversation;
 
     const execute = async () => {
@@ -240,6 +271,9 @@ export function OnlineCustomerService({
         const client = createPublicAssistantApiClient({
           apiBaseUrl,
           origin: window.location.origin,
+          onExecutionState: (state) => {
+            if (current()) setExecutionState(state);
+          },
         });
         const session =
           workingState.session ??
@@ -249,6 +283,7 @@ export function OnlineCustomerService({
             signal: controller.signal,
             snapshot: activeSnapshot,
           }));
+        if (!current()) return;
         if (!workingState.session) {
           sessionRequestIdRef.current = pending.sessionRequestId;
           try {
@@ -260,53 +295,39 @@ export function OnlineCustomerService({
         workingState = attachSession(workingState, session);
         setConversation(workingState);
 
-        const accepted = await client.sendMessage({
-          clientMessageId: pending.clientMessageId,
-          content: pending.content,
-          sessionHandle: session.sessionHandle,
-          signal: controller.signal,
-        });
+        const accepted =
+          pending.turn ??
+          (await client.sendMessage({
+            clientMessageId: pending.clientMessageId,
+            content: pending.content,
+            sessionHandle: session.sessionHandle,
+            signal: controller.signal,
+          }));
+        if (!current()) return;
         workingState = markAccepted(workingState, accepted);
         setConversation(workingState);
 
-        try {
-          for await (const result of client.streamTurn({
-            clientMessageId: pending.clientMessageId,
-            eventsUrl: accepted.eventsUrl,
-            sessionHandle: session.sessionHandle,
-            signal: controller.signal,
-            turnId: accepted.turnId,
-          })) {
+        await observePublicTurn({
+          client,
+          accepted,
+          clientMessageId: pending.clientMessageId,
+          sessionHandle: session.sessionHandle,
+          signal: controller.signal,
+          onResult: (result) => {
+            if (!current()) return;
             workingState = applyTurnResult(workingState, result);
             setConversation(workingState);
-            if (!shouldContinuePolling(result.state)) return;
-          }
-        } catch (error) {
-          if (controller.signal.aborted) throw error;
-          // A dropped or unsupported event stream resumes through the durable result endpoint.
-        }
-
-        let completedPolls = 0;
-        while (!controller.signal.aborted) {
-          const result = await client.readTurn({
-            clientMessageId: pending.clientMessageId,
-            resultUrl: accepted.resultUrl,
-            sessionHandle: session.sessionHandle,
-            signal: controller.signal,
-            turnId: accepted.turnId,
-          });
-          workingState = applyTurnResult(workingState, result);
-          setConversation(workingState);
-          if (!shouldContinuePolling(result.state)) return;
-          await wait(pollDelayMilliseconds(completedPolls), controller.signal);
-          completedPolls += 1;
-        }
+          },
+        });
       } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') return;
+        if (!current()) return;
         setConversation(failPending(workingState, failureDetails(error)));
       } finally {
-        if (activeController.current === controller) activeController.current = undefined;
-        running.current = false;
+        if (activeController.current === controller) {
+          controller.abort();
+          activeController.current = undefined;
+          running.current = false;
+        }
       }
     };
     void execute();
@@ -365,6 +386,7 @@ export function OnlineCustomerService({
       return;
     }
     const controller = new AbortController();
+    activeController.current?.abort();
     activeController.current = controller;
     setEnding(true);
     try {
@@ -373,6 +395,7 @@ export function OnlineCustomerService({
         origin: window.location.origin,
       });
       await client.endSession({ sessionHandle: session.sessionHandle, signal: controller.signal });
+      if (controller.signal.aborted || activeController.current !== controller) return;
       try {
         clearBrowserSessionReference(publicSlug);
       } catch {
@@ -381,10 +404,13 @@ export function OnlineCustomerService({
       sessionRequestIdRef.current = null;
       window.location.reload();
     } catch (error) {
-      if (!controller.signal.aborted) setRecoveryNotice(failureDetails(error).message);
+      if (!controller.signal.aborted && activeController.current === controller)
+        setRecoveryNotice(failureDetails(error).message);
     } finally {
-      if (activeController.current === controller) activeController.current = undefined;
-      setEnding(false);
+      if (activeController.current === controller) {
+        activeController.current = undefined;
+        setEnding(false);
+      }
     }
   }
 
@@ -393,6 +419,8 @@ export function OnlineCustomerService({
   const releaseWithdrawn =
     pending?.errorCode === 'RELEASE_WITHDRAWN' || recoveryCode === 'RELEASE_WITHDRAWN';
   const resultUnknown = pending?.errorCode === 'MODEL_RESULT_UNKNOWN';
+  const executionPaused =
+    (executionState === 'paused' || executionState === 'draining') && !releaseWithdrawn;
   const elapsedSeconds = progress.id === pending?.clientMessageId ? progress.seconds : 0;
   const earlierVersion =
     conversation.session !== undefined && activeSnapshot.releaseRef !== snapshot.releaseRef;
@@ -487,6 +515,22 @@ export function OnlineCustomerService({
         </div>
 
         <footer className="composer-area">
+          {executionPaused ? (
+            <aside className="execution-pause-notice" role="status">
+              <strong>AI 回复暂时暂停</strong>
+              <p>
+                {executionState === 'draining'
+                  ? '已收到的问题仍在核对回复结果，请勿重复发送。'
+                  : '当前问题、咨询记录和已输入内容会保留，请稍后再查看。'}
+              </p>
+              <p>
+                可以通过上方“联系商家 / 人工服务”获取帮助。刷新会恢复已有咨询，不会自动重发新问题。
+              </p>
+              <button type="button" onClick={() => window.location.reload()}>
+                刷新并核对原咨询
+              </button>
+            </aside>
+          ) : null}
           {pending && pending.phase !== 'failed' ? (
             <div className="reply-progress">
               <p role="status">{replyProgress(pending.phase, elapsedSeconds)}</p>

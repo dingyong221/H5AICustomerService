@@ -22,6 +22,7 @@ import { IndustryTemplateForm } from './industry-template-form';
 import { managementBaseUrl, merchantWorkspaceUrl } from './management-url';
 import { ProvisionForm } from './provision-form';
 import { ReissueInvitationForm } from './reissue-invitation-form';
+import { RuntimePanel } from './runtime-panel';
 
 export const dynamic = 'force-dynamic';
 
@@ -477,6 +478,7 @@ export default async function OperationsDashboardPage({
             {jobs ? `${jobs.failed} 项失败` : '暂不可用'}
           </StatusBadge>
         </div>
+        <RuntimePanel params={await searchParams} />
         {!jobs ? (
           <p role="alert">任务状态查询失败，不能据此判断没有异常。</p>
         ) : jobs.recentFailed.length === 0 ? (

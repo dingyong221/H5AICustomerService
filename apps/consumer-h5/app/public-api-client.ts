@@ -1,6 +1,19 @@
 export type PublicAssistantUnavailableReason =
   'not_available' | 'paused' | 'api_unavailable' | 'invalid_response' | 'unsafe_configuration';
 
+export type PublicExecutionState =
+  'runnable' | 'paused' | 'draining' | 'not-applicable' | 'unavailable';
+export function publicExecutionState(response: Response): PublicExecutionState | null {
+  const value = response.headers.get('X-H5CS-Execution-State');
+  return value === 'runnable' ||
+    value === 'paused' ||
+    value === 'draining' ||
+    value === 'not-applicable' ||
+    value === 'unavailable'
+    ? value
+    : null;
+}
+
 export type OnlinePublicAssistantSnapshot = Readonly<{
   aiDisclosure: true;
   assistantDisplayName: string;
@@ -115,6 +128,7 @@ interface PublicApiClientOptions {
   apiBaseUrl?: string | undefined;
   fetchImpl?: typeof fetch | undefined;
   origin?: string | undefined;
+  onExecutionState?: ((state: PublicExecutionState | null) => void) | undefined;
 }
 
 export interface PublicAssistantApiClient {
@@ -946,18 +960,21 @@ export function createPublicAssistantApiClient(
         });
       }
       if (response.status !== 202) {
-        const options = await readFailureOptions(
+        options.onExecutionState?.(publicExecutionState(response));
+        const failure = await readFailureOptions(
           response,
           response.status >= 500 || response.status === 408 || response.status === 429,
         );
         throw new PublicApiClientError('request_failed', '服务端未确认消息发送。', {
-          ...options,
+          ...failure,
         });
       }
       const accepted = decodeAcceptedTurn(await readJson(response), origin);
       if (accepted === undefined) {
         throw new PublicApiClientError('invalid_response', '服务端返回了无效的消息状态。');
       }
+      signal?.throwIfAborted();
+      options.onExecutionState?.(publicExecutionState(response));
       return accepted;
     },
 
@@ -995,12 +1012,22 @@ export function createPublicAssistantApiClient(
       ) {
         throw new PublicApiClientError('unavailable', '实时更新暂不可用。', { retryable: true });
       }
+      // This is the initial authenticated stream response only. SSE frames keep
+      // their original strict format; a later result GET provides a newer state.
+      signal?.throwIfAborted();
+      const initialState = publicExecutionState(response);
+      if (initialState !== null) options.onExecutionState?.(initialState);
       const reader = response.body.getReader();
+      const abort = () => {
+        void reader.cancel().catch(() => undefined);
+      };
+      signal?.addEventListener('abort', abort, { once: true });
       const decoder = new TextDecoder();
       let buffer = '';
       try {
         while (true) {
           const chunk = await reader.read();
+          signal?.throwIfAborted();
           if (chunk.done) break;
           buffer = (buffer + decoder.decode(chunk.value, { stream: true })).replaceAll(
             '\r\n',
@@ -1015,6 +1042,9 @@ export function createPublicAssistantApiClient(
             buffer = buffer.slice(end + 2);
             const result = decodeTurnEvent(frame, { clientMessageId, sessionHandle, turnId });
             if (result) {
+              signal?.throwIfAborted();
+              if (result.state === 'completed' || result.state === 'failed')
+                options.onExecutionState?.(null);
               yield result;
               if (result.state === 'completed' || result.state === 'failed') return;
             }
@@ -1022,7 +1052,9 @@ export function createPublicAssistantApiClient(
           }
         }
       } finally {
+        signal?.removeEventListener('abort', abort);
         await reader.cancel().catch(() => undefined);
+        reader.releaseLock();
       }
       throw new PublicApiClientError('unavailable', '实时更新已中断。', { retryable: true });
     },
@@ -1073,6 +1105,12 @@ export function createPublicAssistantApiClient(
       ) {
         throw new PublicApiClientError('invalid_response', '服务端返回了不匹配的消息结果。');
       }
+      signal?.throwIfAborted();
+      options.onExecutionState?.(
+        result.state === 'completed' || result.state === 'failed'
+          ? null
+          : publicExecutionState(response),
+      );
       return result;
     },
   };

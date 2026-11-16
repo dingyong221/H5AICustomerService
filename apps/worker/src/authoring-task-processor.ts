@@ -6,7 +6,12 @@ import {
 } from '@h5cs/database';
 import type { ConversationTurnGenerator } from './conversation-turn-processor.js';
 import { generateDraftExpansion, generatePreviewReply } from './authoring-generation.js';
-import { ModelCapacityError, ModelUnknownOutcomeError, type ModelPermit } from './model-runtime.js';
+import {
+  ModelCapacityError,
+  ModelRuntimePausedError,
+  ModelUnknownOutcomeError,
+  type ModelPermit,
+} from './model-runtime.js';
 export type AuthoringTaskStore = Pick<
   MySqlAuthoringTaskRepository,
   | 'claimNext'
@@ -72,7 +77,13 @@ export class AuthoringTaskProcessor {
     } catch (e) {
       if (e instanceof ModelCapacityError || signal.aborted) {
         try {
-          if ((await this.store.releaseBeforeDispatch(claim, new Date())) === 'applied')
+          if (
+            (await this.store.releaseBeforeDispatch(
+              claim,
+              new Date(),
+              e instanceof ModelRuntimePausedError ? { reason: 'runtime_paused' } : undefined,
+            )) === 'applied'
+          )
             return true;
         } catch {}
       }

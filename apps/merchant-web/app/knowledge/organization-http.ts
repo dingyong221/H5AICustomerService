@@ -5,17 +5,21 @@ import {
   knowledgeOrganizationRequestSchema,
   knowledgeOrganizationRetrySchema,
   knowledgeOrganizationTaskSchema,
+  EXECUTION_STATE_HEADER,
 } from '@h5cs/contracts';
 import {
   KnowledgeOrganizationError,
   loadDatabaseConfig,
   MySqlAssistantLifecycleRepository,
   MySqlKnowledgeOrganizationRepository,
+  MySqlRuntimeExecutionControlRepository,
+  RuntimeExecutionBlockedError,
 } from '@h5cs/database';
 import { toAssistantId, toMerchantId, toMerchantUserId } from '@h5cs/domain';
 import { revalidatePath } from 'next/cache';
 import { currentMerchant } from '../account/merchant-actions';
 import { materialAccess, materialResponse, readMaterialBody } from './material-http';
+import { withExecutionState } from '../tasks/execution-response';
 
 type Scope = { merchantId: string; assistantId: string; taskId?: string };
 type Operation = 'create' | 'get' | 'find' | 'cancel' | 'retry' | 'apply';
@@ -56,9 +60,20 @@ export async function organizationRoute(request: Request, scope: Scope, operatio
       assistantId: scope.assistantId,
       userId: session.merchantUserId,
     };
+    const respond = (
+      status: number,
+      task: ReturnType<typeof knowledgeOrganizationTaskSchema.parse> | null,
+    ) =>
+      withExecutionState(materialResponse(status, task), () =>
+        task
+          ? repository.getExecutionState(authorized, task.taskId)
+          : new MySqlRuntimeExecutionControlRepository(database).readEffective({
+              merchantId: authorized.merchantId,
+            }),
+      );
     if (reading) {
       if (operation === 'get')
-        return materialResponse(
+        return respond(
           200,
           knowledgeOrganizationTaskSchema.parse(await repository.get(authorized, scope.taskId!)),
         );
@@ -67,7 +82,7 @@ export async function organizationRoute(request: Request, scope: Scope, operatio
       );
       if (!requestId.success) throw new KnowledgeOrganizationError('INVALID_REQUEST');
       const task = await repository.findByRequest(authorized, requestId.data);
-      return materialResponse(200, task ? knowledgeOrganizationTaskSchema.parse(task) : null);
+      return respond(200, task ? knowledgeOrganizationTaskSchema.parse(task) : null);
     }
     let body: unknown;
     try {
@@ -99,7 +114,9 @@ export async function organizationRoute(request: Request, scope: Scope, operatio
         revalidatePath(`/${scope.merchantId}/${section}/${scope.assistantId}`);
       }
       revalidatePath(`/${scope.merchantId}`);
-      return materialResponse(200, saved);
+      return withExecutionState(materialResponse(200, saved), () =>
+        repository.getExecutionState(authorized, scope.taskId!),
+      );
     }
     let task;
     if (operation === 'create') {
@@ -115,11 +132,16 @@ export async function organizationRoute(request: Request, scope: Scope, operatio
         throw new KnowledgeOrganizationError('INVALID_REQUEST');
       task = await repository.cancel(authorized, scope.taskId!, now);
     }
-    return materialResponse(
-      operation === 'cancel' ? 200 : 202,
-      knowledgeOrganizationTaskSchema.parse(task),
-    );
+    return respond(operation === 'cancel' ? 200 : 202, knowledgeOrganizationTaskSchema.parse(task));
   } catch (error) {
+    if (error instanceof RuntimeExecutionBlockedError) {
+      const response = materialResponse(503, {
+        code: 'UNAVAILABLE',
+        error: '整理服务已暂停，原任务与材料已保留。请稍后查询原任务。',
+      });
+      response.headers.set(EXECUTION_STATE_HEADER, 'paused');
+      return response;
+    }
     const code =
       error instanceof KnowledgeOrganizationError
         ? error.code

@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   binary,
+  check,
   bigint,
   datetime,
   foreignKey,
@@ -1066,6 +1067,33 @@ export const outboxEvents = mysqlTable(
     primaryKey({ columns: [table.id], name: 'pk_outbox_event' }),
     index('idx_outbox_claim').on(table.state, table.availableAt, table.leaseUntil, table.id),
     index('idx_outbox_aggregate').on(table.aggregateType, table.aggregateId, table.id),
+  ],
+);
+
+export const runtimeExecutionControls = mysqlTable(
+  'runtime_execution_control',
+  {
+    scopeKey: varchar('scope_key', { length: 64 }).notNull(),
+    scopeType: varchar('scope_type', { length: 16 }).notNull(),
+    merchantId: id('merchant_id'),
+    jobId: id('job_id'),
+    state: varchar('state', { length: 32 }).notNull().default('active'),
+    revision: bigint('revision', { mode: 'bigint', unsigned: true })
+      .notNull()
+      .default(sql`0`),
+    changedAt: utcDateTime('changed_at'),
+    actorId: varchar('actor_id', { length: 128 }),
+    reason: varchar('reason', { length: 512 }),
+    lastRequestId: varchar('last_request_id', { length: 64 }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.scopeKey], name: 'pk_runtime_execution_control' }),
+    index('idx_runtime_control_merchant').on(t.merchantId, t.state),
+    check('chk_runtime_control_state', sql`${t.state} IN ('active','manually_stopped')`),
+    check(
+      'chk_runtime_control_scope',
+      sql`(${t.scopeType}='global' AND ${t.scopeKey}='global' AND ${t.merchantId} IS NULL AND ${t.jobId} IS NULL) OR (${t.scopeType}='merchant' AND ${t.scopeKey}=CONCAT('merchant:',LOWER(HEX(${t.merchantId}))) AND ${t.merchantId} IS NOT NULL AND ${t.jobId} IS NULL) OR (${t.scopeType}='job' AND ${t.scopeKey}=CONCAT('job:',LOWER(HEX(${t.jobId}))) AND ${t.merchantId} IS NOT NULL AND ${t.jobId} IS NOT NULL)`,
+    ),
   ],
 );
 

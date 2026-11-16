@@ -33,6 +33,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  runtime-stage3-mysql:
+    name: Verify scoped execution control before packaging evidence
+    uses: ./.github/workflows/runtime-stage3.yml
+
   material-parser-isolation:
     name: Verify parser isolation before packaging evidence
     uses: ./.github/workflows/material-parser.yml
@@ -47,7 +51,13 @@ jobs:
 
   evidence:
     name: Verify and package repository evidence
-    needs: [runtime-stage1-mysql, knowledge-stage2-mysql, material-parser-isolation]
+    needs:
+      [
+        runtime-stage1-mysql,
+        knowledge-stage2-mysql,
+        material-parser-isolation,
+        runtime-stage3-mysql,
+      ]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:

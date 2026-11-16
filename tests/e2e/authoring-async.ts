@@ -18,6 +18,11 @@ type Session = {
   task: AuthoringTask;
 };
 const previews = new WeakMap<Page, Session>();
+export function lastPreviewSession(page: Page): Readonly<Session> {
+  const session = previews.get(page);
+  if (!session) throw new Error('Runtime acceptance requires the genuine prior preview task');
+  return session;
+}
 const sha256 = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
 export async function currentDraftRevision(page: Page) {
   const text = await page.getByText(/^草稿修订 \d+$/u).textContent();

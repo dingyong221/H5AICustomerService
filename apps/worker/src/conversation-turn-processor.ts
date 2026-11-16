@@ -7,7 +7,12 @@ import type {
 } from '@h5cs/database';
 
 import { buildConversationPrompt, type ConversationPrompt } from './conversation-prompt.js';
-import { ModelCapacityError, ModelUnknownOutcomeError, type ModelPermit } from './model-runtime.js';
+import {
+  ModelCapacityError,
+  ModelRuntimePausedError,
+  ModelUnknownOutcomeError,
+  type ModelPermit,
+} from './model-runtime.js';
 
 export type ConversationTurnStore = Readonly<{
   claimNext: (
@@ -29,7 +34,11 @@ export type ConversationTurnStore = Readonly<{
     errorCode: string,
     now: Date,
   ) => Promise<ClaimMutationResult>;
-  releaseBeforeDispatch: (claim: ConversationTurnClaim, now: Date) => Promise<ClaimMutationResult>;
+  releaseBeforeDispatch: (
+    claim: ConversationTurnClaim,
+    now: Date,
+    options?: { reason: 'runtime_paused' },
+  ) => Promise<ClaimMutationResult>;
   reconcile: (claim: ConversationTurnClaim) => Promise<{
     state: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'missing';
     currentGeneration: string | null;
@@ -110,7 +119,11 @@ export class ConversationTurnProcessor {
       if (error instanceof ModelCapacityError) {
         // A final admission race is a temporary capacity shortage, not a model
         // failure. The runtime risk gate/backoff prevents immediate re-claim.
-        await this.store.releaseBeforeDispatch(claim, new Date());
+        await this.store.releaseBeforeDispatch(
+          claim,
+          new Date(),
+          error instanceof ModelRuntimePausedError ? { reason: 'runtime_paused' } : undefined,
+        );
         return true;
       }
       if (error instanceof ModelUnknownOutcomeError) {

@@ -6,7 +6,9 @@ import {
   saveTaskReference,
   taskRequestId,
   unresolvedTaskOutcome,
+  taskExecutionState,
 } from './persistent-task-client';
+import type { ExecutionState } from '@h5cs/contracts';
 
 export type PersistentTaskView = {
   taskId: string;
@@ -46,6 +48,7 @@ export function usePersistentTask<T extends PersistentTaskView>(options: Options
   const [error, setError] = useState(''),
     [verified, setVerified] = useState(false);
   const [missing, setMissing] = useState(false);
+  const [executionState, setExecutionState] = useState<ExecutionState | null>(null);
   const pointer = useRef<Reference | null>(null),
     writing = useRef(false),
     reading = useRef(false);
@@ -92,6 +95,7 @@ export function usePersistentTask<T extends PersistentTaskView>(options: Options
       const response = await fetchTask(options.endpoint + suffix);
       const value: unknown = await response.json();
       if (version !== epoch.current) return null;
+      setExecutionState(taskExecutionState(response));
       if (!response.ok) throw new Error('Read denied');
       if (value === null) {
         setVerified(false);
@@ -166,6 +170,9 @@ export function usePersistentTask<T extends PersistentTaskView>(options: Options
     !!task &&
     verified &&
     options.enabled &&
+    executionState !== 'paused' &&
+    executionState !== 'draining' &&
+    executionState !== 'unavailable' &&
     task.canRetry &&
     !task.stale &&
     task.inputRevision === options.revision &&
@@ -182,6 +189,8 @@ export function usePersistentTask<T extends PersistentTaskView>(options: Options
       (kind === 'create' && (!options.enabled || pointer.current)) ||
       (kind === 'retry' && !canRetry) ||
       (kind === 'resume' && (!options.enabled || !missing || !pointer.current?.submission)) ||
+      (['create', 'retry', 'resume'].includes(kind) &&
+        ['paused', 'draining', 'unavailable'].includes(executionState ?? '')) ||
       (kind === 'cancel' && (!task || !['queued', 'processing'].includes(task.state)))
     )
       return null;
@@ -219,6 +228,7 @@ export function usePersistentTask<T extends PersistentTaskView>(options: Options
       });
       const value: unknown = await response.json();
       if (version !== epoch.current) return null;
+      setExecutionState(taskExecutionState(response));
       if (!response.ok) {
         const failure = value as { code?: string; error?: string } | null;
         if (
@@ -273,6 +283,8 @@ export function usePersistentTask<T extends PersistentTaskView>(options: Options
   }
   return {
     task,
+    executionState,
+    executionBlocked: ['paused', 'draining', 'unavailable'].includes(executionState ?? ''),
     bound: !!reference,
     busy,
     loaded,
@@ -280,7 +292,11 @@ export function usePersistentTask<T extends PersistentTaskView>(options: Options
     verified,
     canRetry,
     canClose,
-    canResume: missing && !!reference?.submission && options.enabled,
+    canResume:
+      missing &&
+      !!reference?.submission &&
+      options.enabled &&
+      !['paused', 'draining', 'unavailable'].includes(executionState ?? ''),
     reference,
     refresh,
     write,

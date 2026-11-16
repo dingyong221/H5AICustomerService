@@ -1,0 +1,32 @@
+# Optional overlay. Loading this file is NOT a rollout or an enablement receipt.
+# Apply reviewed migrations and deploy all new binaries before enabling control.
+services:
+  api:
+    environment:
+      RUNTIME_EXECUTION_CONTROL_ENABLED: ${H5CS_RUNTIME_CONTROL_ENABLED:-false}
+  worker:
+    environment:
+      RUNTIME_EXECUTION_CONTROL_ENABLED: ${H5CS_RUNTIME_CONTROL_ENABLED:-false}
+      WORKER_OBSERVATION_TOKEN_FILE: /run/secrets/h5cs-worker-observation-token
+    volumes:
+      - type: bind
+        source: ${H5CS_WORKER_OBSERVATION_TOKEN_FILE:?set the host path to the independent observation token}
+        target: /run/secrets/h5cs-worker-observation-token
+        read_only: true
+        bind:
+          create_host_path: false
+  merchant-web:
+    environment:
+      RUNTIME_EXECUTION_CONTROL_ENABLED: ${H5CS_RUNTIME_CONTROL_ENABLED:-false}
+  ops-web:
+    environment:
+      RUNTIME_EXECUTION_CONTROL_ENABLED: ${H5CS_RUNTIME_CONTROL_ENABLED:-false}
+      WORKER_OBSERVATION_TOKEN_FILE: /run/secrets/h5cs-worker-observation-token
+      WORKER_OBSERVATION_URL: http://worker:3011/internal/runtime-snapshot
+    volumes:
+      - type: bind
+        source: ${H5CS_WORKER_OBSERVATION_TOKEN_FILE:?set the host path to the independent observation token}
+        target: /run/secrets/h5cs-worker-observation-token
+        read_only: true
+        bind:
+          create_host_path: false

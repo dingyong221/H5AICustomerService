@@ -1,4 +1,16 @@
-import { Body, Controller, Get, Headers, HttpCode, Param, Post, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpCode,
+  Param,
+  Post,
+  Res,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { RuntimeExecutionBlockedError } from '@h5cs/database';
+import { EXECUTION_STATE_HEADER } from '@h5cs/contracts';
 
 import type { EventStreamResponseLike, ResponseLike } from '../http-types.js';
 import { PublicSessionService } from './public-session.service.js';
@@ -46,12 +58,26 @@ export class PublicTurnController {
     @Res({ passthrough: true }) response: ResponseLike,
   ) {
     response.setHeader('Cache-Control', 'no-store');
-    return this.turns.send({
-      sessionHandle,
-      visitorNonce: this.sessions.visitorNonce(cookieHeader),
-      idempotencyKey,
-      body,
-    });
+    const visitorNonce = this.sessions.visitorNonce(cookieHeader);
+    try {
+      const accepted = await this.turns.send({
+        sessionHandle,
+        visitorNonce,
+        idempotencyKey,
+        body,
+      });
+      response.setHeader(
+        EXECUTION_STATE_HEADER,
+        await this.turns.executionState(sessionHandle, visitorNonce, accepted.turnId),
+      );
+      return accepted;
+    } catch (error) {
+      if (error instanceof RuntimeExecutionBlockedError) {
+        response.setHeader(EXECUTION_STATE_HEADER, 'paused');
+        throw new ServiceUnavailableException('Conversation service unavailable');
+      }
+      throw error;
+    }
   }
 
   @Get('/:sessionHandle/turns/:turnId')
@@ -62,7 +88,13 @@ export class PublicTurnController {
     @Res({ passthrough: true }) response: ResponseLike,
   ) {
     response.setHeader('Cache-Control', 'no-store');
-    return this.turns.read(sessionHandle, this.sessions.visitorNonce(cookieHeader), turnId);
+    const nonce = this.sessions.visitorNonce(cookieHeader);
+    const result = await this.turns.read(sessionHandle, nonce, turnId);
+    response.setHeader(
+      EXECUTION_STATE_HEADER,
+      await this.turns.executionState(sessionHandle, nonce, turnId),
+    );
+    return result;
   }
 
   @Get('/:sessionHandle/turns/:turnId/events')
@@ -75,6 +107,10 @@ export class PublicTurnController {
     response.setHeader('Cache-Control', 'no-store');
     const visitorNonce = this.sessions.visitorNonce(cookieHeader);
     const first = await this.turns.read(sessionHandle, visitorNonce, turnId);
+    response.setHeader(
+      EXECUTION_STATE_HEADER,
+      await this.turns.executionState(sessionHandle, visitorNonce, turnId),
+    );
     const disconnected = new AbortController();
     response.on('close', () => disconnected.abort());
     response.setHeader('Content-Type', 'text/event-stream; charset=utf-8');

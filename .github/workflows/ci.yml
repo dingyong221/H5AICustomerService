@@ -15,6 +15,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  runtime-stage3-mysql:
+    name: Real MySQL runtime control and observation
+    uses: ./.github/workflows/runtime-stage3.yml
+
   material-parser-isolation:
     name: Material parser operating-system isolation
     uses: ./.github/workflows/material-parser.yml
@@ -291,12 +295,25 @@ jobs:
           NEXT_PUBLIC_OPS_BASE_PATH: /ops
         run: pnpm test:e2e
 
+      - name: Verify scoped runtime pause and recovery through the real operator and consumer UI
+        env:
+          H5CS_E2E_PATH_MODE: single_domain
+          H5CS_E2E_KNOWLEDGE_ASYNC: 'true'
+          H5CS_E2E_AUTHORING_ASYNC: 'true'
+          H5CS_E2E_RUNTIME_CONTROL: 'true'
+          NEXT_PUBLIC_MERCHANT_BASE_PATH: /console
+          NEXT_PUBLIC_OPS_BASE_PATH: /ops
+        run: pnpm test:e2e
+
       - name: Upload isolated operator reporting screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ops-reporting-browser-${{ github.sha }}
-          path: artifacts/ops-enhancement
+          path: |
+            artifacts/ops-enhancement
+            test-results/**/error-context.md
+            test-results/**/*.png
           if-no-files-found: ignore
           retention-days: 7
 

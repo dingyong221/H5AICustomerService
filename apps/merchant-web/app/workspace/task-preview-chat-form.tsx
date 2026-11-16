@@ -82,6 +82,7 @@ export function TaskPreviewChatForm({
           type="submit"
           disabled={
             !flow.loaded ||
+            flow.executionBlocked ||
             !asyncPreviewEnabled ||
             !available ||
             flow.bound ||

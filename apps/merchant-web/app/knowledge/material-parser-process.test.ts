@@ -25,6 +25,7 @@ beforeEach(() => {
   vi.stubEnv('H5CS_MATERIAL_PARSER_MODE', 'local');
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllEnvs();
 });
@@ -211,6 +212,45 @@ describe('isolated parser transport fails closed', () => {
     await vi.advanceTimersByTimeAsync(100);
     await rejected2;
     expect(req2.destroy).toHaveBeenCalledOnce();
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+  it('classifies disconnect as timeout only after the monotonic deadline, before timer delivery', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('H5CS_MATERIAL_PARSER_MODE', 'isolated');
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
+    const { parseMaterial } = await import('./material-parser');
+    for (const [elapsed, expected] of [
+      [99, /暂不可用/u],
+      [100, /超时/u],
+      [101, /超时/u],
+    ] as const) {
+      clock.mockReturnValue(0);
+      const req = fakeRequest();
+      const result = parseMaterial('one.txt', Buffer.from('one'), { timeoutMs: 100 });
+      const rejected = expect(result).rejects.toThrow(expected);
+      clock.mockReturnValue(elapsed);
+      req.emit('error', new Error('synthetic socket hang up'));
+      await rejected;
+      expect(req.destroy).toHaveBeenCalledOnce();
+    }
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+  it('does not restart the budget after request creation consumes time', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('H5CS_MATERIAL_PARSER_MODE', 'isolated');
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
+    const req = fakeRequest();
+    mocks.request.mockReset();
+    mocks.request.mockImplementationOnce(() => {
+      clock.mockReturnValue(75);
+      return req;
+    });
+    const { parseMaterial } = await import('./material-parser');
+    const result = parseMaterial('one.txt', Buffer.from('one'), { timeoutMs: 100 });
+    const rejected = expect(result).rejects.toThrow(/超时/u);
+    await vi.advanceTimersByTimeAsync(25);
+    await rejected;
+    expect(req.destroy).toHaveBeenCalledOnce();
     expect(mocks.spawn).not.toHaveBeenCalled();
   });
 });

@@ -9,3 +9,4 @@ export * from './writing.js';
 export * from './knowledge-material.js';
 export * from './knowledge-organization.js';
 export * from './authoring-task.js';
+export * from './runtime-execution.js';

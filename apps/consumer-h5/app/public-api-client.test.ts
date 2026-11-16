@@ -9,6 +9,7 @@ import {
   decodePublicSessionHistory,
   decodeTurnResult,
   type OnlinePublicAssistantSnapshot,
+  publicExecutionState,
 } from './public-api-client';
 
 const origin = 'https://h5.example.com';
@@ -288,6 +289,194 @@ describe('public API response decoders', () => {
       ),
     ).toBeUndefined();
   });
+});
+
+describe('authenticated execution response headers preserve original public protocol', () => {
+  const clientMessageId = 'message_original_123456';
+  const turnId = 'turn_original_123456';
+  const visitor = {
+    clientMessageId,
+    content: '原始问题',
+    createdAt: '2026-11-17T00:00:00Z',
+    messageId: 'message_public_1234',
+    role: 'visitor',
+    sequence: 1,
+  };
+  const result = {
+    sessionHandle,
+    turnId,
+    traceId: 'trace_original_123456',
+    state: 'accepted',
+    messages: [visitor],
+  };
+  const resultUrl = `${origin}/api/v1/public/sessions/${sessionHandle}/turns/${turnId}`;
+  it.each(['runnable', 'paused', 'draining', 'not-applicable', 'unavailable'] as const)(
+    'accepts only enum value %s',
+    (value) => {
+      expect(
+        publicExecutionState(new Response('', { headers: { 'X-H5CS-Execution-State': value } })),
+      ).toBe(value);
+    },
+  );
+  it('ignores arbitrary or missing header text, without adding fields to strict JSON', () => {
+    expect(
+      publicExecutionState(
+        new Response('', { headers: { 'X-H5CS-Execution-State': 'operator private reason' } }),
+      ),
+    ).toBeNull();
+    expect(publicExecutionState(new Response())).toBeNull();
+    expect(decodeTurnResult(envelope({ ...result, executionState: 'paused' }))).toBeUndefined();
+  });
+  it('polls exactly the original result URL and updates state from each authenticated response, never caches a pause', async () => {
+    const onExecutionState = vi.fn();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(envelope(result)), {
+          headers: { 'Content-Type': 'application/json', 'X-H5CS-Execution-State': 'paused' },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(envelope(result)))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(envelope({ ...result, state: 'completed' })), {
+          headers: { 'Content-Type': 'application/json', 'X-H5CS-Execution-State': 'paused' },
+        }),
+      );
+    const client = createPublicAssistantApiClient({
+      apiBaseUrl: '/api/v1/public',
+      origin,
+      fetchImpl,
+      onExecutionState,
+    });
+    const input = { clientMessageId, resultUrl, sessionHandle, turnId };
+    expect((await client.readTurn(input)).state).toBe('accepted');
+    expect((await client.readTurn(input)).state).toBe('accepted');
+    expect((await client.readTurn(input)).state).toBe('completed');
+    expect(onExecutionState.mock.calls.map((call) => call[0])).toEqual(['paused', null, null]);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    for (const call of fetchImpl.mock.calls) {
+      expect(call[0]).toBe(resultUrl);
+      expect(call[1].method).toBe('GET');
+    }
+  });
+  it('reads only the initial SSE header and leaves all event frames unchanged, with terminal result taking priority', async () => {
+    const onExecutionState = vi.fn();
+    const completed = { ...result, state: 'completed' };
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        `event: accepted\ndata: ${JSON.stringify(result)}\n\nevent: completed\ndata: ${JSON.stringify(completed)}\n\n`,
+        {
+          headers: { 'Content-Type': 'text/event-stream', 'X-H5CS-Execution-State': 'draining' },
+        },
+      ),
+    );
+    const client = createPublicAssistantApiClient({
+      apiBaseUrl: '/api/v1/public',
+      origin,
+      fetchImpl,
+      onExecutionState,
+    });
+    const states: string[] = [];
+    for await (const event of client.streamTurn({
+      clientMessageId,
+      eventsUrl: `${resultUrl}/events`,
+      sessionHandle,
+      turnId,
+    }))
+      states.push(event.state);
+    expect(states).toEqual(['accepted', 'completed']);
+    expect(onExecutionState.mock.calls.map((call) => call[0])).toEqual(['draining', null]);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+  it('paused send keeps the original request IDs and never forwards operator diagnostics', async () => {
+    const onExecutionState = vi.fn();
+    const response = jsonResponse(
+      {
+        request_id: 'request_paused_12345',
+        error: {
+          code: 'SERVICE_UNAVAILABLE',
+          message: 'internal operator reason',
+          retryable: true,
+        },
+      },
+      503,
+    );
+    response.headers.set('X-H5CS-Execution-State', 'paused');
+    const fetchImpl = vi.fn().mockResolvedValue(response);
+    const client = createPublicAssistantApiClient({
+      apiBaseUrl: '/api/v1/public',
+      origin,
+      fetchImpl,
+      onExecutionState,
+    });
+    await expect(
+      client.sendMessage({ clientMessageId, content: '原始问题', sessionHandle }),
+    ).rejects.not.toThrow('operator');
+    expect(onExecutionState).toHaveBeenCalledExactlyOnceWith('paused');
+    expect(JSON.parse(fetchImpl.mock.calls[0]![1].body)).toEqual({
+      clientMessageId,
+      content: '原始问题',
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+  it.each([null, 'unrecognized'])(
+    'initial live SSE header %s does not erase the trusted draining send state',
+    async (header) => {
+      const onExecutionState = vi.fn();
+      const cancel = vi.fn();
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode(`event: accepted\ndata: ${JSON.stringify(result)}\n\n`),
+          );
+        },
+        cancel,
+      });
+      const headers = new Headers({ 'Content-Type': 'text/event-stream' });
+      if (header !== null) headers.set('X-H5CS-Execution-State', header);
+      const fetchImpl = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify(
+              envelope({
+                state: 'accepted',
+                turnId,
+                traceId: result.traceId,
+                eventsUrl: `${resultUrl}/events`,
+                resultUrl,
+              }),
+            ),
+            {
+              status: 202,
+              headers: { 'Content-Type': 'application/json', 'X-H5CS-Execution-State': 'draining' },
+            },
+          ),
+        )
+        .mockResolvedValueOnce(new Response(body, { headers }));
+      const client = createPublicAssistantApiClient({
+        apiBaseUrl: '/api/v1/public',
+        origin,
+        fetchImpl,
+        onExecutionState,
+      });
+      await client.sendMessage({ clientMessageId, content: visitor.content, sessionHandle });
+      const controller = new AbortController();
+      const iterator = client.streamTurn({
+        clientMessageId,
+        eventsUrl: `${resultUrl}/events`,
+        sessionHandle,
+        turnId,
+        signal: controller.signal,
+      });
+      expect((await iterator.next()).value?.state).toBe('accepted');
+      expect(onExecutionState.mock.calls.map((call) => call[0])).toEqual(['draining']);
+      controller.abort();
+      await expect(iterator.next()).rejects.toMatchObject({ name: 'AbortError' });
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(onExecutionState.mock.calls.map((call) => call[0])).toEqual(['draining']);
+    },
+  );
 });
 
 describe('public assistant API client', () => {

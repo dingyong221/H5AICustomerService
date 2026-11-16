@@ -16,6 +16,7 @@ export async function startWorkerApplication(options: {
   port: number;
   probeIntervalMs?: number;
   drainMs?: number;
+  observation?: RuntimeObservationService | null;
   finalizationMs?: number;
   httpTimeoutMs?: number;
 }) {
@@ -43,7 +44,12 @@ export async function startWorkerApplication(options: {
           },
         )
       : null;
-  const server = createHealthServer(health, options.preview, options.httpTimeoutMs);
+  const server = createHealthServer(
+    health,
+    options.preview,
+    options.httpTimeoutMs,
+    options.observation ?? null,
+  );
   const authoringScheduler =
     dispatch.configured && dispatch.authoringProcessor
       ? new AuthoringTaskScheduler(dispatch.authoringProcessor, dispatch.runtime, (ready) => {
@@ -103,3 +109,4 @@ export async function startWorkerApplication(options: {
     },
   };
 }
+import type { RuntimeObservationService } from './runtime-observation.js';

@@ -5,6 +5,7 @@ import type { KnowledgeMaterial } from '@h5cs/database';
 import { merchantPath } from '../tenant-paths';
 import { useUnsavedForm } from '../workspace/use-unsaved-form';
 import { organizationMessage, useOrganizationTask } from './use-organization-task';
+import { executionNotice } from '../tasks/persistent-task-client';
 import {
   filterMaterials,
   knowledgeTemplates,
@@ -288,6 +289,10 @@ export function MaterialManager({
       ) : null}
       {organization.bound ? (
         <section className="knowledge-task-status" aria-label="AI 整理任务">
+          {executionNotice(organization.executionState) &&
+          (!organization.task || ['queued', 'processing'].includes(organization.task.state)) ? (
+            <p role="status">{executionNotice(organization.executionState)}</p>
+          ) : null}
           <p role="status" aria-live="polite">
             {organization.task && organization.reference?.taskId
               ? organizationMessage(organization.task, revision)
@@ -576,7 +581,13 @@ export function MaterialManager({
             </p>
             <button
               data-usage="knowledge.organize"
-              disabled={materialDisabled || !consent || !selected.length || selected.length > 5}
+              disabled={
+                materialDisabled ||
+                organization.executionBlocked ||
+                !consent ||
+                !selected.length ||
+                selected.length > 5
+              }
               type="button"
               onClick={() => void request('organize', { sourceIds: selected, consent })}
             >

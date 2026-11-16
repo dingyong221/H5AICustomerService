@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { lockRuntimeGate, assertRuntimeAllowed } from './runtime-control-contract.js';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import type { DatabaseConnectionConfig } from './config.js';
 import type { ConversationTurnClaim } from './conversation-turn-job-repository.js';
@@ -62,6 +63,13 @@ export class MySqlModelCallAttemptRepository {
     let committing = false;
     try {
       await connection.beginTransaction();
+      await lockRuntimeGate(connection);
+      await assertRuntimeAllowed(connection, {
+        merchantId: input.merchantId,
+        ...(input.claim || input.knowledgeClaim || input.authoringClaim
+          ? { jobId: (input.claim ?? input.knowledgeClaim ?? input.authoringClaim)!.jobId }
+          : {}),
+      });
       let jobId: Buffer | null = null;
       if (input.claim) {
         const locked = await lockValidConversationClaim(connection, input.claim, now);

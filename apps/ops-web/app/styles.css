@@ -1241,3 +1241,108 @@ a {
     max-height: calc(100dvh - 4.5rem);
   }
 }
+/* Runtime metadata and controls use the existing operations workspace. */
+.runtime-panel {
+  margin-block: 1.5rem;
+  min-width: 0;
+}
+.runtime-control {
+  margin-block: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border, #dbe3ee);
+  border-radius: 0.75rem;
+  min-width: 0;
+}
+.runtime-control p,
+.runtime-control code,
+.runtime-source-grid p,
+.runtime-job-list code {
+  overflow-wrap: anywhere;
+}
+.runtime-control fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+.runtime-control label,
+.runtime-filter label {
+  display: grid;
+  gap: 0.4rem;
+}
+.runtime-control textarea,
+.runtime-filter input,
+.runtime-filter select {
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  font: inherit;
+  padding: 0.6rem;
+  border: 1px solid #adb9c9;
+  border-radius: 0.4rem;
+}
+.runtime-control .runtime-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.runtime-control button,
+.runtime-filter button {
+  min-height: 44px;
+  padding: 0.6rem 0.9rem;
+}
+.runtime-control button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.runtime-filter {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+  gap: 1rem;
+  align-items: end;
+  margin-block: 1rem;
+}
+.runtime-source-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+.runtime-source-grid article {
+  padding: 1rem;
+  border: 1px solid #dbe3ee;
+  border-radius: 0.75rem;
+  min-width: 0;
+}
+.runtime-counts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+.runtime-counts dt {
+  overflow-wrap: anywhere;
+}
+.runtime-counts dd {
+  margin: 0;
+  font-weight: 600;
+}
+.runtime-job-list > li {
+  display: block;
+}
+.runtime-control :focus-visible,
+.runtime-filter :focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 3px;
+}
+@media (max-width: 720px) {
+  .runtime-source-grid {
+    grid-template-columns: 1fr;
+  }
+  .runtime-control {
+    padding: 0.75rem;
+  }
+  .runtime-control button {
+    width: 100%;
+    margin-block: 0.25rem;
+  }
+}

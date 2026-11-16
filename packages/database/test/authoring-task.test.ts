@@ -1,6 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { MySqlAuthoringTaskRepository } from '../src/authoring-task-repository.js';
-import { decodeAuthoringPayload } from '../src/authoring-task-contract.js';
+import { authorizeAuthoringScope, decodeAuthoringPayload } from '../src/authoring-task-contract.js';
+import { parseAssistantDraft } from '../src/assistant-lifecycle-repository.js';
+import { governanceFactsHash } from '../src/publication-governance.js';
+import type { Connection } from 'mysql2/promise';
 import { knowledgeHash } from '../src/knowledge-organization-contract.js';
 const scope = { merchantId: 'a'.repeat(32), assistantId: 'b'.repeat(32), userId: 'c'.repeat(32) },
   input = {
@@ -12,6 +15,51 @@ const scope = { merchantId: 'a'.repeat(32), assistantId: 'b'.repeat(32), userId:
     consent: true as const,
   };
 describe('persistent authoring fail closed', () => {
+  const draft = {
+    industry: '合成零售',
+    businessScope: '合成商品',
+    materialsSummary: '毛巾29元',
+    pricingSummary: '毛巾29元，运费待确认',
+    promotionSummary: '无优惠',
+    welcomeMessage: '您好',
+    insufficientInfoMessage: '请联系商家',
+    humanContact: '合成人工',
+  };
+  const connection = (config: unknown) =>
+    ({
+      execute: vi.fn(async (sql: string) => [
+        sql.startsWith('SELECT d.revision')
+          ? [{ revision: 1 }]
+          : [{ display_name: '合成客服', config }],
+      ]),
+    }) as unknown as Connection;
+  it('uses the same facts hash as publication for reordered MySQL JSON keys', async () => {
+    const reordered = Object.fromEntries(Object.entries(draft).reverse()) as typeof draft;
+    const actual = await authorizeAuthoringScope(connection(reordered), scope);
+    expect(actual.factsHash).toBe(
+      governanceFactsHash('合成客服', parseAssistantDraft(draft)).toString('hex'),
+    );
+    expect(actual.draft).toEqual(parseAssistantDraft(draft));
+    expect(actual.factsHash).not.toBe(governanceFactsHash('合成客服', reordered).toString('hex'));
+  });
+  it('keeps the legacy empty contact normalization and detects changed business facts', async () => {
+    const empty = { ...draft, humanContact: '' };
+    const actual = await authorizeAuthoringScope(connection(empty), scope);
+    expect(actual.factsHash).toBe(
+      governanceFactsHash('合成客服', parseAssistantDraft(empty)).toString('hex'),
+    );
+    expect(actual.draft).not.toHaveProperty('humanContact');
+    const changed = await authorizeAuthoringScope(
+      connection({ ...empty, pricingSummary: '毛巾39元' }),
+      scope,
+    );
+    expect(changed.factsHash).not.toBe(actual.factsHash);
+  });
+  it('fails closed for malformed stored business facts rather than hashing an unchecked object', async () => {
+    await expect(
+      authorizeAuthoringScope(connection({ ...draft, pricingSummary: null }), scope),
+    ).rejects.toThrow();
+  });
   it('disabled admissions and claims do not touch SQL', async () => {
     const openConnection = vi.fn(),
       summary = { host: 'fixture', database: 'fixture', tlsRequested: false },

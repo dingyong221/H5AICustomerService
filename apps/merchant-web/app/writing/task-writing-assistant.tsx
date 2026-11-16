@@ -151,6 +151,7 @@ export function TaskWritingAssistant({
         data-usage="writing.generate"
         disabled={
           !flow.loaded ||
+          flow.executionBlocked ||
           !scope.enabled ||
           flow.bound ||
           flow.busy ||

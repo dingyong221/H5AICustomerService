@@ -1,5 +1,12 @@
 import { merchantJobTransaction, recoverMerchantJobs } from './persistent-merchant-job.js';
 import { randomBytes } from 'node:crypto';
+import {
+  lockRuntimeGate,
+  assertRuntimeAllowed,
+  probeRuntimeSchema,
+  runtimeEligibleSql,
+} from './runtime-control-contract.js';
+import { MySqlRuntimeExecutionControlRepository } from './runtime-control-repository.js';
 import { KnowledgeOrganizationError, safeKnowledgeRetry } from '@h5cs/domain';
 import type { KnowledgeOrganizationResult, KnowledgeOrganizationTask } from '@h5cs/domain';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
@@ -163,6 +170,15 @@ export class MySqlKnowledgeOrganizationRepository {
       await c.end();
     }
   }
+  async getExecutionState(scope: KnowledgeScope, taskId: string) {
+    const task = await this.get(scope, taskId);
+    return new MySqlRuntimeExecutionControlRepository(this.database).readEffective({
+      merchantId: scope.merchantId,
+      jobId: taskId,
+      state: task.state,
+      modelOutcome: task.modelOutcome,
+    });
+  }
   async enqueue(input: EnqueueKnowledgeOrganization): Promise<KnowledgeOrganizationTask> {
     return this.#enqueue(input);
   }
@@ -193,6 +209,7 @@ export class MySqlKnowledgeOrganizationRepository {
       }),
     );
     const taskId = await this.#transaction(async (c) => {
+      await lockRuntimeGate(c);
       const revision = await authorizeKnowledgeScope(c, input, true);
       await this.#assertSchema(c);
       const [existing] = await c.execute<KnowledgeJobRow[]>(
@@ -206,6 +223,7 @@ export class MySqlKnowledgeOrganizationRepository {
         return existing[0].id.toString('hex');
       }
       if (revision !== input.revision) throw new KnowledgeOrganizationError('INPUT_CHANGED');
+      await assertRuntimeAllowed(c, { merchantId: input.merchantId });
       let retrySources: KnowledgeTaskPayload['sources'] | undefined;
       if (retryOf) {
         const previous = await lockKnowledgeJob(c, input, retryOf),
@@ -298,6 +316,7 @@ export class MySqlKnowledgeOrganizationRepository {
     const probe = await this.database.openConnection();
     try {
       await this.#assertSchema(probe);
+      await probeRuntimeSchema(probe);
     } finally {
       await probe.end();
     }
@@ -310,7 +329,7 @@ export class MySqlKnowledgeOrganizationRepository {
       const params: (Date | Buffer)[] = [now];
       if (options.afterMerchantId) params.push(knowledgeBytes(options.afterMerchantId));
       const [rows] = await c.execute<(RowDataPacket & { merchant_id: Buffer; oldest: Date })[]>(
-        `SELECT merchant_id,MIN(run_after) oldest FROM job WHERE type='knowledge.organize' AND state='pending' AND run_after<=? ${options.afterMerchantId ? 'AND merchant_id>?' : ''} GROUP BY merchant_id ORDER BY merchant_id LIMIT ${limit}`,
+        `SELECT merchant_id,MIN(run_after) oldest FROM job WHERE type='knowledge.organize' AND state='pending' AND run_after<=? ${options.afterMerchantId ? 'AND merchant_id>?' : ''} ${runtimeEligibleSql()} GROUP BY merchant_id ORDER BY merchant_id LIMIT ${limit}`,
         params,
       );
       return rows.map((r) => ({
@@ -331,15 +350,21 @@ export class MySqlKnowledgeOrganizationRepository {
     if (!/^[A-Za-z0-9_-]{8,128}$/u.test(leaseOwner))
       throw new KnowledgeOrganizationError('INVALID_REQUEST');
     return this.#transaction(async (c) => {
+      await lockRuntimeGate(c);
       await this.#assertSchema(c);
       const params: (Date | Buffer)[] = [now];
       if (options.merchantId) params.push(knowledgeBytes(options.merchantId));
       const [candidates] = await c.execute<KnowledgeJobRow[]>(
-        `SELECT *,CAST(claim_generation AS CHAR) claim_generation FROM job WHERE type='knowledge.organize' AND state='pending' AND run_after<=? ${options.merchantId ? 'AND merchant_id=?' : ''} ORDER BY run_after,id LIMIT 1`,
+        `SELECT *,CAST(claim_generation AS CHAR) claim_generation FROM job WHERE type='knowledge.organize' AND state='pending' AND run_after<=? ${options.merchantId ? 'AND merchant_id=?' : ''} ${runtimeEligibleSql()} ORDER BY run_after,id LIMIT 1`,
         params,
       );
       const candidate = candidates[0];
       if (!candidate) return null;
+      if (!candidate.merchant_id) throw new KnowledgeOrganizationError('INVALID_REQUEST');
+      await assertRuntimeAllowed(c, {
+        merchantId: candidate.merchant_id.toString('hex'),
+        jobId: candidate.id.toString('hex'),
+      });
       let payload: KnowledgeTaskPayload;
       try {
         payload = decodeKnowledgePayload(candidate.payload);
@@ -476,11 +501,12 @@ export class MySqlKnowledgeOrganizationRepository {
   async releaseBeforeDispatch(
     claim: KnowledgeOrganizationClaim,
     now: Date,
+    options?: { reason: 'runtime_paused' },
   ): Promise<ClaimMutationResult> {
     return this.#mutate(claim, now, async (c, { job }) => {
       if (job.model_outcome !== 'none') throw new KnowledgeOrganizationError('STALE_CLAIM');
       await c.execute(
-        "UPDATE job SET state='pending',lease_owner=NULL,lease_until=NULL,run_after=?,updated_at=? WHERE id=?",
+        `UPDATE job SET state='pending',lease_owner=NULL,lease_until=NULL,run_after=?,updated_at=?${options?.reason === 'runtime_paused' ? ',attempt=GREATEST(attempt,1)-1' : ''} WHERE id=?`,
         [now, now, job.id],
       );
     });

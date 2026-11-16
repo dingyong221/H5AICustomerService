@@ -242,6 +242,9 @@ importers:
 
   apps/ops-web:
     dependencies:
+      '@h5cs/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@h5cs/database':
         specifier: workspace:*
         version: link:../../packages/database

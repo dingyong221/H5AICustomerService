@@ -325,4 +325,57 @@ describe('shared persistent authoring lifecycle (mock HTTP/storage)', () => {
     expect(render().canRetry).toBe(false);
     expect(render().canClose).toBe(false);
   });
+  it('paused POST retains the same durable request and blocks new keys until a later original GET reports runnable', async () => {
+    render();
+    state.fetch.mockResolvedValueOnce(
+      Response.json(
+        { code: 'UNAVAILABLE', error: '暂停' },
+        { status: 503, headers: { 'X-H5CS-Execution-State': 'paused' } },
+      ),
+    );
+    await render().write('create', input);
+    const original = JSON.parse(storage.get(key)!);
+    expect(render().executionState).toBe('paused');
+    expect(render().bound).toBe(true);
+    await render().write('create', input);
+    expect(state.fetch).toHaveBeenCalledOnce();
+    state.fetch.mockResolvedValueOnce(
+      Response.json(null, { headers: { 'X-H5CS-Execution-State': 'paused' } }),
+    );
+    await render().refresh();
+    expect(render().canResume).toBe(false);
+    await render().write('resume');
+    expect(state.fetch).toHaveBeenCalledTimes(2);
+    state.fetch.mockResolvedValueOnce(
+      Response.json(null, { headers: { 'X-H5CS-Execution-State': 'runnable' } }),
+    );
+    await render().refresh();
+    expect(render().canResume).toBe(true);
+    state.fetch.mockResolvedValueOnce(Response.json(task));
+    await render().write('resume');
+    expect(JSON.parse(state.fetch.mock.calls[3]![1].body)).toEqual(original.submission.body);
+    expect(storage.get(key)).not.toContain('private-csrf');
+  });
+  it('terminal successful task remains usable and closeable even when a pause header arrives', async () => {
+    saved();
+    const onResult = vi.fn();
+    state.fetch.mockResolvedValueOnce(
+      Response.json(
+        {
+          ...task,
+          state: 'completed',
+          modelOutcome: 'succeeded',
+          canUse: true,
+          result: { options: ['零售店铺', '商品销售门店'], reminders: [] },
+        },
+        { headers: { 'X-H5CS-Execution-State': 'paused' } },
+      ),
+    );
+    render({ ...options, onResult } as typeof options);
+    await flush();
+    expect(render().task?.state).toBe('completed');
+    expect(render().verified).toBe(true);
+    expect(render().canClose).toBe(true);
+    expect(onResult).toHaveBeenCalledOnce();
+  });
 });

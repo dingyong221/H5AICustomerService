@@ -734,3 +734,20 @@ textarea:focus-visible {
     scroll-behavior: auto;
   }
 }
+.execution-pause-notice {
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid #b6cbe7;
+  border-radius: 0.75rem;
+  background: #f1f6ff;
+  overflow-wrap: anywhere;
+}
+.execution-pause-notice button {
+  min-height: 44px;
+  max-width: 100%;
+  padding: 0.5rem 0.75rem;
+}
+.execution-pause-notice button:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 3px;
+}

@@ -1,4 +1,7 @@
 import { createHash, randomBytes, scryptSync } from 'node:crypto';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { defineConfig } from '@playwright/test';
 
@@ -34,6 +37,17 @@ const operatorSalt = randomBytes(16);
 const externalServices = process.env['H5CS_E2E_EXTERNAL_SERVICES'] === 'true';
 const knowledgeAsync = process.env['H5CS_E2E_KNOWLEDGE_ASYNC'] === 'true';
 const authoringAsync = process.env['H5CS_E2E_AUTHORING_ASYNC'] === 'true';
+const runtimeControl = process.env['H5CS_E2E_RUNTIME_CONTROL'] === 'true';
+if (runtimeControl && (!authoringAsync || !knowledgeAsync || pathMode !== 'single_domain')) {
+  throw new Error(
+    'Runtime control acceptance requires asynchronous authoring, knowledge and single_domain',
+  );
+}
+if (runtimeControl && externalServices) {
+  throw new Error(
+    'Runtime control acceptance requires Playwright-managed Next and Worker services',
+  );
+}
 if (authoringAsync && !knowledgeAsync) {
   throw new Error('Asynchronous authoring acceptance also requires H5CS_E2E_KNOWLEDGE_ASYNC=true');
 }
@@ -51,9 +65,18 @@ const modelKey = externalServices
   : randomBytes(32).toString('base64url');
 const previewToken = randomBytes(32).toString('base64url');
 process.env['H5CS_E2E_OPERATOR_PASSWORD'] = operatorPassword;
+// Disposable synthetic token; only Worker/Ops receive its local file path.
+// This is not an OS sandbox. No real credential or browser token is used.
+const observationFile = runtimeControl
+  ? join(mkdtempSync(join(tmpdir(), 'h5cs-e2e-runtime-')), 'observation.token')
+  : null;
+if (observationFile)
+  writeFileSync(observationFile, randomBytes(32).toString('base64url'), { mode: 0o600 });
+const observation = observationFile ? { WORKER_OBSERVATION_TOKEN_FILE: observationFile } : {};
 const common = {
   MYSQL_DATABASE_URL: databaseUrl,
   H5CS_INTEGRATION_MYSQL_URL: databaseUrl,
+  RUNTIME_EXECUTION_CONTROL_ENABLED: String(runtimeControl),
 };
 
 export default defineConfig({
@@ -105,6 +128,7 @@ export default defineConfig({
               ...common,
               NODE_ENV: 'test',
               WORKER_HEALTH_HOST: '127.0.0.1',
+              ...observation,
               WORKER_POLL_INTERVAL_MS: '1000',
               CONVERSATION_WORKER_ENABLED: 'true',
               KNOWLEDGE_ASYNC_ENABLED: String(knowledgeAsync),
@@ -133,6 +157,10 @@ export default defineConfig({
               OPS_ADMIN_PASSWORD_HASH: `scrypt:${operatorSalt.toString('base64url')}:${scryptSync(operatorPassword, operatorSalt, 64).toString('base64url')}`,
               OPS_SESSION_SIGNING_KEY: randomBytes(32).toString('base64url'),
               OPS_PUBLIC_ORIGIN: opsOrigin,
+              ...observation,
+              ...(runtimeControl
+                ? { WORKER_OBSERVATION_URL: 'http://127.0.0.1:3011/internal/runtime-snapshot' }
+                : {}),
               MANAGEMENT_CONSOLE_URL: `${merchantOrigin}${merchantBasePath}`,
             },
             reuseExistingServer: false,

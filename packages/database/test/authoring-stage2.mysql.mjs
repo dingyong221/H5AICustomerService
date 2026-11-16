@@ -282,6 +282,57 @@ test('authoring SQL: preview uses persisted facts and saves one pending check wi
   assert.equal((await repo.enqueuePreviewReply(input)).taskId, t.taskId);
   assert.equal((await repo.cancel(s, t.taskId, now())).state, 'completed');
 });
+test('authoring SQL: canonical and reordered JSON both reach human judgement and publication through lifecycle', async () => {
+  for (const reverse of [false, true]) {
+    const s = await seed();
+    const updated = { ...draft, businessScope: '跨层异步试聊与发布回归' };
+    await lifecycle.saveDraft({ ...s, expectedRevision: 1, draft: updated, now: now() });
+    await lifecycle.confirmDraftKnowledge({ ...s, expectedDraftRevision: 2, now: now() });
+    const stored = reverse ? Object.fromEntries(Object.entries(updated).reverse()) : updated;
+    await sql(
+      'UPDATE assistant_draft SET config=? WHERE merchant_id=UNHEX(?) AND assistant_id=UNHEX(?)',
+      [JSON.stringify(stored), s.merchantId, s.assistantId],
+    );
+    const task = await repo.enqueuePreviewReply(preview(s, { revision: 2 }));
+    const c = await claim(s, 'preview.reply');
+    await successful(c);
+    assert.equal(await repo.complete(c, { answer: '毛巾29元，运费需确认。' }, now()), 'applied');
+    const done = await repo.get(s, task.taskId);
+    const governance = await lifecycle.getPublicationGovernance({ ...s, now: now() });
+    assert.equal(done.canJudge, true);
+    assert.equal(governance.quality.state, 'needs_review');
+    assert.equal(governance.quality.checkId, done.result.checkId);
+    await lifecycle.judgePreviewCheck({
+      ...s,
+      expectedDraftRevision: 2,
+      checkId: done.result.checkId,
+      verdict: 'pass',
+      now: now(),
+    });
+    assert.equal(
+      (await lifecycle.getPublicationGovernance({ ...s, now: now() })).quality.state,
+      'passed',
+    );
+    await lifecycle.publish({
+      ...s,
+      expectedDraftRevision: 2,
+      promptTemplateVersion: 'conversation-v1',
+      retrievalPolicyVersion: 'confirmed-text-v1',
+      modelPolicyVersion: 'local-no-model-v1',
+      idempotency: {
+        actorScopeDigest: Buffer.from(fresh() + fresh(), 'hex'),
+        keyDigest: Buffer.from(fresh() + fresh(), 'hex'),
+        requestHash: Buffer.from(fresh() + fresh(), 'hex'),
+        expiresAt: new Date(Date.now() + 3600000),
+      },
+      now: now(),
+    });
+    const published = await snapshot(s);
+    assert.equal(published.publicSlug, s.publicSlug);
+    assert.notEqual(published.activeReleaseId, s.releaseId);
+  }
+});
+
 test('authoring SQL: reversed async preview completion admits only one original-preview CAS winner', async () => {
   const s = await seed(),
     a = await repo.enqueuePreviewReply(preview(s, { question: '先发问题' })),

@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   retry: vi.fn(),
   apply: vi.fn(),
   revalidate: vi.fn(),
+  execution: vi.fn(),
+  effective: vi.fn(),
   AccessError: class extends Error {},
 }));
 vi.mock('../account/merchant-actions', () => ({
@@ -20,12 +22,14 @@ vi.mock('../account/merchant-actions', () => ({
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidate }));
 vi.mock('@h5cs/database', async () => ({
   KnowledgeOrganizationError: (await import('@h5cs/domain')).KnowledgeOrganizationError,
+  RuntimeExecutionBlockedError: (await import('@h5cs/domain')).RuntimeExecutionBlockedError,
   KnowledgeMaterialAccessError: mocks.AccessError,
   loadDatabaseConfig: mocks.config,
   MySqlKnowledgeMaterialRepository: class {
     list = mocks.list;
   },
   MySqlKnowledgeOrganizationRepository: class {
+    getExecutionState = mocks.execution;
     enqueue = mocks.enqueue;
     get = mocks.get;
     findByRequest = mocks.find;
@@ -35,8 +39,11 @@ vi.mock('@h5cs/database', async () => ({
   MySqlAssistantLifecycleRepository: class {
     applyKnowledgeOrganization = mocks.apply;
   },
+  MySqlRuntimeExecutionControlRepository: class {
+    readEffective = mocks.effective;
+  },
 }));
-import { KnowledgeOrganizationError } from '@h5cs/domain';
+import { KnowledgeOrganizationError, RuntimeExecutionBlockedError } from '@h5cs/domain';
 import {
   GET as find,
   POST as create,
@@ -234,5 +241,38 @@ describe('asynchronous knowledge task HTTP contract (mock persistence)', () => {
     ).toBe(404);
     expect(mocks.enqueue).not.toHaveBeenCalled();
     expect(mocks.get).not.toHaveBeenCalled();
+  });
+  it('reads original task with enum header and unchanged JSON; GET needs neither Origin nor CSRF', async () => {
+    mocks.execution.mockResolvedValue('draining');
+    const response = await get(new Request(url), params);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('X-H5CS-Execution-State')).toBe('draining');
+    expect(await response.json()).toEqual(task);
+  });
+  it('paused admission returns old UNAVAILABLE envelope and paused header without fallback', async () => {
+    mocks.enqueue.mockRejectedValue(new RuntimeExecutionBlockedError());
+    const response = await create(post(body), params);
+    expect(response.status).toBe(503);
+    expect(response.headers.get('X-H5CS-Execution-State')).toBe('paused');
+    expect(await response.json()).toMatchObject({ code: 'UNAVAILABLE' });
+    expect(mocks.enqueue).toHaveBeenCalledOnce();
+  });
+  it('keeps adoption available while runtime paused and protects execution metadata on unauthorized reads', async () => {
+    mocks.execution.mockResolvedValue('not-applicable');
+    const response = await apply(
+      post({ revision: 3, summary: '人工核对后内容', mode: 'replace', confirmed: true }),
+      params,
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('X-H5CS-Execution-State')).toBe('not-applicable');
+    mocks.current.mockResolvedValue(null);
+    expect((await get(new Request(url), params)).headers.has('X-H5CS-Execution-State')).toBe(false);
+  });
+  it('failed control probe never destroys an existing result', async () => {
+    mocks.execution.mockRejectedValue(new Error('private diagnostic'));
+    const response = await get(new Request(url), params);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('X-H5CS-Execution-State')).toBe('unavailable');
+    expect(await response.json()).toEqual(task);
   });
 });

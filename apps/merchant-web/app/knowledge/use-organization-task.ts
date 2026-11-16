@@ -6,6 +6,7 @@ import {
   saveTaskReference,
   taskRequestId,
   unresolvedTaskOutcome,
+  taskExecutionState,
 } from '../tasks/persistent-task-client';
 import {
   knowledgeOrganizationApplySchema,
@@ -16,6 +17,7 @@ import {
   type KnowledgeOrganizationApply,
   type KnowledgeOrganizationTask,
   type KnowledgeOrganizationRequest,
+  type ExecutionState,
 } from '@h5cs/contracts';
 
 type Reference = {
@@ -54,6 +56,7 @@ export function useOrganizationTask(options: {
   const [verified, setVerified] = useState(false);
   const [submissionMissing, setSubmissionMissing] = useState(false);
   const [confirmedStale, setConfirmedStale] = useState(false);
+  const [executionState, setExecutionState] = useState<ExecutionState | null>(null);
   const current = useRef<Reference | null>(null),
     lock = useRef(false),
     reading = useRef(false);
@@ -110,6 +113,7 @@ export function useOrganizationTask(options: {
       const response = await fetchTask(`${options.endpoint}/organize-tasks${url}`);
       const value: unknown = await response.json();
       if (version !== epoch.current) return;
+      setExecutionState(taskExecutionState(response));
       if (!response.ok) throw new Error('任务暂不可读，请确认登录及管理权限后再刷新。');
       if (value === null) {
         setVerified(false);
@@ -180,6 +184,11 @@ export function useOrganizationTask(options: {
     body: Record<string, unknown>,
   ) {
     if (lock.current) return false;
+    if (
+      ['create', 'retry', 'resume'].includes(kind) &&
+      ['paused', 'draining', 'unavailable'].includes(executionState ?? '')
+    )
+      return false;
     lock.current = true;
     setConfirmedStale(false);
     epoch.current++;
@@ -245,6 +254,7 @@ export function useOrganizationTask(options: {
         saved?: boolean;
         revision?: number;
       };
+      setExecutionState(taskExecutionState(response));
       if (!response.ok) {
         if (
           response.status >= 400 &&
@@ -321,6 +331,8 @@ export function useOrganizationTask(options: {
   }
   return {
     task,
+    executionState,
+    executionBlocked: ['paused', 'draining', 'unavailable'].includes(executionState ?? ''),
     busy,
     error,
     loaded,
@@ -331,7 +343,11 @@ export function useOrganizationTask(options: {
     canDiscardPending,
     discardPending: () => close(true),
     bound: !!reference,
-    canResume: submissionMissing && !!reference?.submission && options.enabled,
+    canResume:
+      submissionMissing &&
+      !!reference?.submission &&
+      options.enabled &&
+      !['paused', 'draining', 'unavailable'].includes(executionState ?? ''),
     pendingApply: !!reference?.pendingApply,
     canApply:
       !!task?.canApply &&
@@ -350,6 +366,7 @@ export function useOrganizationTask(options: {
       !task.stale &&
       task.inputRevision === options.revision &&
       !unresolved(task) &&
+      !['paused', 'draining', 'unavailable'].includes(executionState ?? '') &&
       options.enabled,
     canClose:
       !!task &&
