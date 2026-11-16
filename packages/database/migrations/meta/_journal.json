@@ -134,6 +134,13 @@
       "when": 1794459177559,
       "tag": "0018_runtime_claim_receipts",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1794817795869,
+      "tag": "0019_knowledge_organization_result",
+      "breakpoints": true
     }
   ]
 }

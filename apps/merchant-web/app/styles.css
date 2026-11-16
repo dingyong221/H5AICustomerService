@@ -3290,3 +3290,24 @@ a {
     overflow-wrap: anywhere;
   }
 }
+.knowledge-task-status {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  overflow-wrap: anywhere;
+}
+.knowledge-task-status p {
+  margin: 0 0 0.5rem;
+}
+.knowledge-task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.knowledge-task-actions button {
+  min-height: 44px;
+}

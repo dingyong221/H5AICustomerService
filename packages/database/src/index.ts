@@ -9,6 +9,7 @@ export * from './industry-template-repository.js';
 export * from './merchant-access-repository.js';
 export * from './merchant-account-admin-repository.js';
 export * from './knowledge-material-repository.js';
+export * from './knowledge-organization-repository.js';
 export * from './merchant-conversation-repository.js';
 export * from './onboarding-repository.js';
 export * from './operator-login-throttle-repository.js';

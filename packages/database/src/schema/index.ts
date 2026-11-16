@@ -1077,6 +1077,7 @@ export const jobs = mysqlTable(
     type: varchar('type', { length: 128 }).notNull(),
     dedupKey: digest('dedup_key').notNull(),
     payload: json('payload').$type<Record<string, unknown>>().notNull(),
+    result: json('result').$type<Record<string, unknown>>(),
     state: varchar('state', { length: 32 }).notNull().default('pending'),
     priority: int('priority').notNull().default(0),
     attempt: int('attempt', { unsigned: true }).notNull().default(0),

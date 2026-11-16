@@ -7,3 +7,4 @@ export * from './tenant.js';
 export * from './workbuddy-authorization.js';
 export * from './writing.js';
 export * from './knowledge-material.js';
+export * from './knowledge-organization.js';

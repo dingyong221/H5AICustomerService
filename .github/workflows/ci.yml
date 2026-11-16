@@ -15,6 +15,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  knowledge-stage2-mysql:
+    name: Real MySQL knowledge organization and recovery
+    uses: ./.github/workflows/knowledge-stage2.yml
+
   quality:
     name: Quality and build
     runs-on: ubuntu-latest
@@ -259,6 +263,14 @@ jobs:
       - name: Verify full browser workflow on one origin
         env:
           H5CS_E2E_PATH_MODE: single_domain
+          NEXT_PUBLIC_MERCHANT_BASE_PATH: /console
+          NEXT_PUBLIC_OPS_BASE_PATH: /ops
+        run: pnpm test:e2e
+
+      - name: Verify asynchronous knowledge with real Next sessions and MySQL
+        env:
+          H5CS_E2E_PATH_MODE: single_domain
+          H5CS_E2E_KNOWLEDGE_ASYNC: 'true'
           NEXT_PUBLIC_MERCHANT_BASE_PATH: /console
           NEXT_PUBLIC_OPS_BASE_PATH: /ops
         run: pnpm test:e2e

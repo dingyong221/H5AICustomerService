@@ -20,7 +20,7 @@ const tempPrefix = 'h5cs-ci-upgrade-';
 const expectedDatabase = 'h5cs_integration_ci';
 const expectedUser = 'h5cs_ci';
 const expectedBaselineCount = 12;
-const expectedFullCount = 19;
+const expectedFullCount = 20;
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
 export class UpgradeProbeError extends Error {
@@ -151,10 +151,11 @@ export async function reviewedUpgradePlan(folder = sourceFolder) {
     journal.entries.length !== expectedFullCount ||
     !/^0012_/u.test(journal.entries[12]?.tag ?? '') ||
     journal.entries[14]?.tag !== '0014_flimsy_swarm' ||
-    journal.entries[15]?.tag !== '0015_clumsy_prowler'
+    journal.entries[15]?.tag !== '0015_clumsy_prowler' ||
+    journal.entries[19]?.tag !== '0019_knowledge_organization_result'
   ) {
     throw new UpgradeProbeError(
-      'Probe requires the reviewed twelve-to-sixteen migration plan; review the probe when the plan changes',
+      'Probe requires the reviewed twelve-to-twenty migration plan; review the probe when the plan changes',
     );
   }
   const entries = inventory.entries.map((entry, index) => {
@@ -326,11 +327,14 @@ export async function snapshotTables(connection, tables, options = {}) {
       // Only these three additive runtime columns are excluded. All pre-existing
       // values and the rest of the legacy schema remain byte-for-byte checked.
       for (const row of rows)
-        for (const field of ['claim_generation', 'model_outcome', 'model_attempt_id'])
+        for (const field of ['claim_generation', 'model_outcome', 'model_attempt_id', 'result'])
           delete row[field];
       definitionSql = definitionSql
         .split('\n')
-        .filter((line) => !/^\s*`(?:claim_generation|model_outcome|model_attempt_id)` /u.test(line))
+        .filter(
+          (line) =>
+            !/^\s*`(?:claim_generation|model_outcome|model_attempt_id|result)` /u.test(line),
+        )
         .join('\n');
     }
     output.push({

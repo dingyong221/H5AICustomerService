@@ -82,7 +82,7 @@ jobs:
       - name: Start dedicated loopback-only disposable MySQL
         run: docker compose --env-file .env.example --file infra/compose/docker-compose.dev.yml up -d --wait mysql
 
-      - name: Apply nineteen reviewed migrations to the empty runtime database
+      - name: Apply reviewed migrations to the empty runtime database
         if: matrix.probe == 'fresh-runtime'
         shell: bash
         run: |
@@ -90,7 +90,7 @@ jobs:
           mkdir -p "${{ runner.temp }}/runtime-stage1-evidence"
           pnpm --filter @h5cs/database exec drizzle-kit migrate --config drizzle.config.ts 2>&1 | tee "${{ runner.temp }}/runtime-stage1-evidence/migrations.log"
 
-      - name: Verify empty-database eighteen-to-nineteen upgrade and baseline reader
+      - name: Verify deployed-schema upgrade and baseline reader
         if: matrix.probe == 'deployed-upgrade'
         shell: bash
         env:

@@ -28,6 +28,17 @@ import {
 import type { Connection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
 import type { DatabaseConnectionConfig } from './config.js';
+import { KnowledgeOrganizationError } from '@h5cs/domain';
+import {
+  authorizeKnowledgeScope,
+  decodeKnowledgePayload,
+  knowledgeHash,
+  knowledgeObject,
+  loadKnowledgeSources,
+  lockKnowledgeJob,
+  sameKnowledgeSources,
+} from './knowledge-organization-contract.js';
+import { parseKnowledgeResult } from './knowledge-organization-repository.js';
 import { probeDatabase } from './config.js';
 import { bindVerifiedImprovementsToRelease } from './assistant-improvement-release.js';
 import {
@@ -754,6 +765,90 @@ export class MySqlAssistantLifecycleRepository implements AssistantLifecycleRepo
       );
       if (current === null) throw new AssistantRevisionConflictError();
       return this.#persistDraft(connection, current, input, draft);
+    });
+  }
+
+  /** Candidate adoption is one transaction with the existing draft CAS. */
+  public async applyKnowledgeOrganization(input: {
+    merchantUserId: MerchantUserId;
+    merchantId: MerchantId;
+    assistantId: AssistantId;
+    taskId: string;
+    expectedRevision: number;
+    summary: string;
+    mode: 'append' | 'replace';
+    confirmed: true;
+    now: Date;
+  }): Promise<{ saved: true; revision: number }> {
+    validDate(input.now, 'now');
+    if (
+      input.confirmed !== true ||
+      !Number.isSafeInteger(input.expectedRevision) ||
+      input.expectedRevision < 1 ||
+      !['append', 'replace'].includes(input.mode)
+    )
+      throw new KnowledgeOrganizationError('INVALID_REQUEST');
+    const summary = parseKnowledgeResult({ summary: input.summary, warnings: [] }).summary;
+    const applyHash = knowledgeHash(
+      JSON.stringify({ summary, mode: input.mode, revision: input.expectedRevision }),
+    );
+    return this.#withTransaction(async (connection) => {
+      const current = await this.#lockManagement(
+        connection,
+        idBuffer(input.merchantUserId, 'merchantUserId'),
+        idBuffer(input.merchantId, 'merchantId'),
+        idBuffer(input.assistantId, 'assistantId'),
+      );
+      if (!current) throw new KnowledgeOrganizationError('NOT_FOUND');
+      const scope = {
+        merchantId: input.merchantId,
+        assistantId: input.assistantId,
+        userId: input.merchantUserId,
+      };
+      await authorizeKnowledgeScope(connection, scope, true);
+      const job = await lockKnowledgeJob(connection, scope, input.taskId),
+        payload = decodeKnowledgePayload(job.payload);
+      const result = job.result === null ? null : knowledgeObject(job.result);
+      if (result?.['appliedRevision'] !== undefined) {
+        if (result['applyHash'] !== applyHash || !Number.isSafeInteger(result['appliedRevision']))
+          throw new KnowledgeOrganizationError('IDEMPOTENCY_CONFLICT');
+        return { saved: true as const, revision: Number(result['appliedRevision']) };
+      }
+      if (job.state !== 'completed' || job.model_outcome !== 'succeeded' || !result)
+        throw new KnowledgeOrganizationError('TASK_NOT_READY');
+      parseKnowledgeResult(result);
+      if (
+        current.draft_revision !== input.expectedRevision ||
+        payload.inputRevision !== input.expectedRevision
+      )
+        throw new KnowledgeOrganizationError('INPUT_CHANGED');
+      const source = await loadKnowledgeSources(
+        connection,
+        scope,
+        payload.sources.map((s) => s.id),
+        true,
+      );
+      if (!sameKnowledgeSources(source.sources, payload.sources))
+        throw new KnowledgeOrganizationError('INPUT_CHANGED');
+      const draft = this.#managementFromRow(current).draft;
+      const combined =
+        input.mode === 'append'
+          ? `${draft.materialsSummary}\n\n【上传材料整理稿】\n${summary}`
+          : summary;
+      if (combined.length > 4000) throw new KnowledgeOrganizationError('INVALID_REQUEST');
+      const updated = validateDraft({ ...draft, materialsSummary: combined });
+      const saved = await this.#persistDraft(
+        connection,
+        current,
+        { ...input, draft: updated },
+        updated,
+      );
+      await connection.execute('UPDATE job SET result=?,updated_at=? WHERE id=?', [
+        JSON.stringify({ ...result, appliedRevision: saved.draftRevision, applyHash }),
+        input.now,
+        job.id,
+      ]);
+      return { saved: true as const, revision: saved.draftRevision };
     });
   }
 

@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import type { KnowledgeMaterial } from '@h5cs/database';
 import { merchantPath } from '../tenant-paths';
 import { useUnsavedForm } from '../workspace/use-unsaved-form';
+import { organizationMessage, useOrganizationTask } from './use-organization-task';
 import {
   filterMaterials,
   knowledgeTemplates,
@@ -19,6 +20,8 @@ export function MaterialManager({
   materials,
   effectiveCharacters = 0,
   hasPublishedVersion = false,
+  asyncOrganization = false,
+  recoveryScope,
 }: {
   merchantId: string;
   assistantId: string;
@@ -27,6 +30,8 @@ export function MaterialManager({
   materials: readonly KnowledgeMaterial[] | null;
   effectiveCharacters?: number;
   hasPublishedVersion?: boolean;
+  asyncOrganization?: boolean;
+  recoveryScope?: string;
 }) {
   const router = useRouter(),
     fileInput = useRef<HTMLInputElement>(null);
@@ -50,7 +55,31 @@ export function MaterialManager({
   const advanceAfterSave = useRef(false);
   const shownMaterials = filterMaterials(visibleMaterials ?? [], query, kind);
   const reminders = reviewMaterials(visibleMaterials ?? []);
-  const disabled = !!busy || pendingDelete !== null || materials === null;
+  const endpoint = `${merchantPath(merchantId, 'knowledge', assistantId)}/materials`;
+  const organization = useOrganizationTask({
+    endpoint,
+    csrfToken,
+    enabled: asyncOrganization,
+    revision,
+    ...(recoveryScope
+      ? { recoveryKey: `h5cs:organization:${recoveryScope}:${merchantId}:${assistantId}` }
+      : {}),
+    onCandidate: (task, pendingApply) => {
+      setSummary(pendingApply?.summary ?? task.result!.summary);
+      setWarnings(task.result!.warnings);
+      setMode(pendingApply?.mode ?? 'append');
+      setConfirmed(false);
+      setStage('review');
+    },
+  });
+  const disabled =
+    !!busy ||
+    organization.busy ||
+    !organization.loaded ||
+    pendingDelete !== null ||
+    materials === null;
+  const materialDisabled = disabled || organization.bound;
+  const saveDisabled = disabled || (organization.bound && !organization.canApply);
   const permitNavigation = useUnsavedForm(!!summary.trim() || busy !== null);
   function clearOrganization() {
     setSummary('');
@@ -80,7 +109,6 @@ export function MaterialManager({
     }
     if (materials !== null) previousMaterials.current = materials;
   }, [materials, deletedIds]);
-  const endpoint = `${merchantPath(merchantId, 'knowledge', assistantId)}/materials`;
   async function request(kind: string, body: FormData | Record<string, unknown>) {
     if (
       kind === 'organize' &&
@@ -88,6 +116,38 @@ export function MaterialManager({
       !window.confirm('重新整理将替换当前未保存的整理稿。确认继续？')
     )
       return;
+    if (kind === 'organize' && (asyncOrganization || organization.bound)) {
+      if (organization.bound) return;
+      setError('');
+      setNotice('');
+      if (await organization.write('create', { sourceIds: selected, consent, revision })) {
+        clearOrganization();
+        setNotice('整理任务已提交，稍后可在本页核对结果。');
+      }
+      return;
+    }
+    if (kind === 'apply' && organization.bound) {
+      if (!confirmed || !organization.canApply) return;
+      setError('');
+      setNotice('');
+      if (
+        await organization.write('apply', {
+          summary,
+          revision: organization.task!.inputRevision,
+          mode,
+          confirmed,
+        })
+      ) {
+        clearOrganization();
+        setNotice('知识已保存到草稿。试聊并发布后才会更新消费者回答。');
+        if (advanceAfterSave.current) {
+          permitNavigation();
+          router.push(merchantPath(merchantId, 'preview', assistantId));
+        } else router.refresh();
+      }
+      advanceAfterSave.current = false;
+      return;
+    }
     setBusy(kind);
     setError('');
     setNotice('');
@@ -221,6 +281,107 @@ export function MaterialManager({
           {error}
         </p>
       ) : null}
+      {organization.error ? (
+        <p role="alert" className="knowledge-error">
+          {organization.error}
+        </p>
+      ) : null}
+      {organization.bound ? (
+        <section className="knowledge-task-status" aria-label="AI 整理任务">
+          <p role="status" aria-live="polite">
+            {organization.task && organization.reference?.taskId
+              ? organizationMessage(organization.task, revision)
+              : '正在确认提交结果…'}
+          </p>
+          {organization.task ? (
+            <small>
+              来源草稿修订 {organization.task.inputRevision} ·{' '}
+              {organization.task.sources.map((source) => source.name).join('、')}
+            </small>
+          ) : null}
+          {organization.pendingApply ? (
+            <p>保存结果待核对。刷新任务可查询；再次确认保存将使用同一份已提交内容。</p>
+          ) : null}
+          <div className="knowledge-task-actions">
+            {organization.canDiscardPending ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (
+                    !window.confirm(
+                      '将清空本标签页的待确认整理稿。服务端任务和已保存草稿不会修改，请先复制需要保留的内容。确认放弃并关闭？',
+                    )
+                  )
+                    return;
+                  if (organization.discardPending()) {
+                    clearOrganization();
+                    setNotice('已放弃本标签页的待确认整理稿，服务端任务和草稿未改变。');
+                    router.refresh();
+                  }
+                }}
+              >
+                放弃待确认采纳并关闭
+              </button>
+            ) : null}
+            {organization.canResume ? (
+              <button
+                type="button"
+                disabled={organization.busy}
+                onClick={() => void organization.write('resume', {})}
+              >
+                确认提交原任务
+              </button>
+            ) : null}
+            <button
+              type="button"
+              disabled={organization.busy}
+              onClick={() => void organization.refresh()}
+            >
+              刷新任务
+            </button>
+            {organization.task && ['queued', 'processing'].includes(organization.task.state) ? (
+              <button
+                type="button"
+                disabled={organization.busy}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      '取消后不再采纳此任务结果；已发出的模型请求仍可能计费。确认取消？',
+                    )
+                  )
+                    void organization.write('cancel', {});
+                }}
+              >
+                取消整理
+              </button>
+            ) : null}
+            {organization.canRetry ? (
+              <button
+                type="button"
+                disabled={organization.busy}
+                onClick={() => void organization.write('retry', {})}
+              >
+                重试整理
+              </button>
+            ) : null}
+            {organization.canClose ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (
+                    summary.trim() &&
+                    !window.confirm('关闭任务将清空当前未保存的整理稿。确认继续？')
+                  )
+                    return;
+                  if (organization.close()) clearOrganization();
+                }}
+              >
+                关闭已结束任务
+              </button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
       <div hidden={stage !== 'materials'}>
         <form
           data-usage="knowledge.upload"
@@ -240,10 +401,10 @@ export function MaterialManager({
               multiple
               required
               accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.csv,.md"
-              disabled={disabled}
+              disabled={materialDisabled}
             />
           </label>
-          <button type="submit" disabled={disabled || materials === null}>
+          <button type="submit" disabled={materialDisabled || materials === null}>
             {busy === 'upload' ? '正在解析并保存…' : '上传并提取文字'}
           </button>
         </form>
@@ -285,7 +446,7 @@ export function MaterialManager({
               </p>
               <button
                 type="button"
-                disabled={disabled || !shownMaterials.length}
+                disabled={materialDisabled || !shownMaterials.length}
                 onClick={() => {
                   setSelected(shownMaterials.slice(0, 5).map((item) => item.id));
                   setConfirmed(false);
@@ -297,7 +458,7 @@ export function MaterialManager({
               </button>
               <button
                 type="button"
-                disabled={disabled || !selected.length}
+                disabled={materialDisabled || !selected.length}
                 onClick={() => {
                   setSelected([]);
                   setConfirmed(false);
@@ -338,7 +499,7 @@ export function MaterialManager({
                     <input
                       type="checkbox"
                       checked={selected.includes(item.id)}
-                      disabled={disabled}
+                      disabled={materialDisabled}
                       onChange={(event) => {
                         setSelected((previous) =>
                           event.target.checked
@@ -365,7 +526,7 @@ export function MaterialManager({
                   <button
                     type="button"
                     aria-label={`删除材料：${item.name}`}
-                    disabled={disabled}
+                    disabled={materialDisabled}
                     onClick={() => setPendingDelete(item.id)}
                   >
                     删除材料
@@ -404,7 +565,7 @@ export function MaterialManager({
               <input
                 type="checkbox"
                 checked={consent}
-                disabled={disabled}
+                disabled={materialDisabled}
                 onChange={(event) => setConsent(event.target.checked)}
               />
               我同意将所选材料的文字发送至阿里云千问整理，已检查其中不含不应发送的个人或机密资料。
@@ -415,14 +576,14 @@ export function MaterialManager({
             </p>
             <button
               data-usage="knowledge.organize"
-              disabled={disabled || !consent || !selected.length || selected.length > 5}
+              disabled={materialDisabled || !consent || !selected.length || selected.length > 5}
               type="button"
               onClick={() => void request('organize', { sourceIds: selected, consent })}
             >
               {busy === 'organize' ? '正在整理…' : 'AI 整理所选材料'}
             </button>
             <button
-              disabled={disabled || !selected.length}
+              disabled={materialDisabled || !selected.length}
               type="button"
               onClick={() => {
                 const text = visibleMaterials
@@ -460,7 +621,7 @@ export function MaterialManager({
             选择业务模板
             <select
               value={templateId}
-              disabled={disabled}
+              disabled={materialDisabled}
               onChange={(event) => setTemplateId(event.target.value)}
             >
               {knowledgeTemplates.map((item) => (
@@ -472,7 +633,7 @@ export function MaterialManager({
           </label>
           <button
             type="button"
-            disabled={disabled}
+            disabled={materialDisabled}
             onClick={() => {
               const template = knowledgeTemplates.find((item) => item.id === templateId);
               if (!template) return;
@@ -518,7 +679,9 @@ export function MaterialManager({
                 value={summary}
                 maxLength={4000}
                 required
-                disabled={disabled}
+                disabled={
+                  disabled || organization.pendingApply || !!organization.task?.appliedRevision
+                }
                 onChange={(event) => {
                   setSummary(event.target.value);
                   setConfirmed(false);
@@ -539,7 +702,7 @@ export function MaterialManager({
               保存方式
               <select
                 value={mode}
-                disabled={disabled}
+                disabled={disabled || organization.pendingApply}
                 onChange={(event) => {
                   setMode(event.target.value);
                   setConfirmed(false);
@@ -554,17 +717,17 @@ export function MaterialManager({
                 type="checkbox"
                 checked={confirmed}
                 required
-                disabled={disabled}
+                disabled={saveDisabled}
                 onChange={(event) => setConfirmed(event.target.checked)}
               />
               我已核对整理稿与现有价格、优惠及适用条件，确认按所选方式保存；不会自动发布
             </label>
-            <button type="submit" disabled={disabled || !confirmed || !summary.trim()}>
-              {busy === 'apply' ? '正在保存…' : '保存整理稿到客服草稿'}
+            <button type="submit" disabled={saveDisabled || !confirmed || !summary.trim()}>
+              {busy === 'apply' || organization.busy ? '正在保存…' : '保存整理稿到客服草稿'}
             </button>
             <button
               type="submit"
-              disabled={disabled || !confirmed || !summary.trim()}
+              disabled={saveDisabled || !confirmed || !summary.trim()}
               onClick={() => {
                 advanceAfterSave.current = true;
               }}

@@ -1,5 +1,15 @@
 # Worker 阶段 1 运行边界
 
+## 阶段 2 知识整理候选
+
+`KNOWLEDGE_ASYNC_ENABLED=true` 才创建持久知识调度器，默认关闭；商家端也需要同名开关。旧同步整理入口继续使用同一个模型执行器。仅启用开关不等于已迁移或部署；先应用增量迁移 `0019_knowledge_organization_result.sql`，它只为原 job 表增加 nullable JSON result，保留所有原业务行、固定链接和发布快照。
+
+知识任务按商家队首进入共享 ModelRuntime，获得许可后才领取 120 秒租约，执行预算 75 秒。管理任务仍合计最多一槽，消费者可使用另一槽。任务输入固定当前草稿修订与材料版本/文字哈希；领取、派发、完成和采纳均重新检查。原文件哈希与文字哈希含义不同，读取沿用旧材料仓库的文字哈希口径。
+
+所有知识写操作锁序为 management→job→sources；供应商回执结算只锁 job→attempt，不回头等待 management。取消后不接受业务结果，但迟到供应商成功/失败仍更新原调用收据与风险。派发后重启或结果未知不自动重发；显式重试只对明确安全且输入未变化的失败任务建立新任务，原任务保留。采纳与草稿 CAS、应用哈希/修订收据在同一事务，重复提交返回原修订，不重复覆盖人工改稿。
+
+仓库内可重放用例：`packages/database/test/knowledge-stage2.mysql.mjs`（真实 SQL），`apps/worker/test/knowledge-runtime.test.ts` / `knowledge-scheduler.test.ts`（共享容量及本地夹具）。CI 入口 `node packages/database/scripts/run-knowledge-stage2-ci.mjs` 要求全新空库 `h5cs_stage2_ci`、专用用户 `h5cs_stage2` 和 loopback `H5CS_STAGE2_MYSQL_URL`；不得复用已有业务库。新 SQL 套件不由普通 Vitest 自动收集，需 CI 单独执行。真实千问、浏览器端到端、私有切换及生产激活不由这些本地结果证明。
+
 本目录是本地候选，尚未生产部署。回归使用合成数据和本地模型夹具；真实 Qwen 的 3/6/9 路时延、语义及私有环境切换验收尚未完成。
 
 ## 容量与启动

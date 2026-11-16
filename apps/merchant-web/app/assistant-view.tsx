@@ -296,6 +296,7 @@ export async function AssistantView({
               有文件就上传整理；没有文件，可直接使用已保存的文字资料进入试聊。上传本身不会自动写入知识或发布。
             </p>
             <MaterialManager
+              key={`${merchantId}:${assistantId}:${session.merchantUserId}`}
               merchantId={merchantId}
               assistantId={assistantId}
               csrfToken={csrfToken}
@@ -303,6 +304,8 @@ export async function AssistantView({
               materials={materials}
               effectiveCharacters={assistant.draft.materialsSummary.length}
               hasPublishedVersion={!!assistant.activeReleaseId}
+              asyncOrganization={process.env['KNOWLEDGE_ASYNC_ENABLED'] === 'true'}
+              recoveryScope={session.merchantUserId}
             />
             <details className="workflow-disclosure">
               <summary>查看已保存的商品与服务资料</summary>

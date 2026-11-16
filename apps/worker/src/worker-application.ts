@@ -5,6 +5,7 @@ import type { ConversationDispatchResult } from './conversation-dispatch.js';
 import type { PreviewService } from './preview-service.js';
 import { ConversationScheduler } from './conversation-scheduler.js';
 import { settlesWithin } from './shutdown-budget.js';
+import { KnowledgeOrganizationScheduler } from './knowledge-organization-scheduler.js';
 
 export async function startWorkerApplication(options: {
   health: WorkerHealth;
@@ -19,11 +20,27 @@ export async function startWorkerApplication(options: {
 }) {
   const { health, dispatch } = options;
   let stopping = false;
+  let conversationReady = false,
+    knowledgeReady = !(dispatch.configured && dispatch.knowledgeProcessor);
+  const readiness = () =>
+    health.setConversationReady(conversationReady && knowledgeReady && !stopping);
   const scheduler = dispatch.configured
     ? new ConversationScheduler(dispatch.processor, dispatch.runtime, (ready) => {
-        health.setConversationReady(ready && !stopping);
+        conversationReady = ready;
+        readiness();
       })
     : null;
+  const knowledgeScheduler =
+    dispatch.configured && dispatch.knowledgeProcessor
+      ? new KnowledgeOrganizationScheduler(
+          dispatch.knowledgeProcessor,
+          dispatch.runtime,
+          (ready) => {
+            knowledgeReady = ready;
+            readiness();
+          },
+        )
+      : null;
   const server = createHealthServer(health, options.preview, options.httpTimeoutMs);
   // Liveness responds while the first DB probe or model request is still pending.
   await new Promise<void>((resolve, reject) => {
@@ -37,6 +54,7 @@ export async function startWorkerApplication(options: {
       return;
     }
     scheduler?.start();
+    knowledgeScheduler?.start();
   });
   void probes.runOnce().catch(() => health.setConversationReady(false));
   probes.start();
@@ -58,6 +76,7 @@ export async function startWorkerApplication(options: {
         // postpone the model abort deadline or hold HTTP sockets forever.
         const cleanup = Promise.allSettled([
           scheduler?.stop(),
+          knowledgeScheduler?.stop(),
           dispatch.configured ? dispatch.runtime.drain(drainMs, finalizationMs) : undefined,
           probes.stop(),
           close,

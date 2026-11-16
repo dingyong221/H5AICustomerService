@@ -2,6 +2,11 @@ import { randomBytes, randomInt } from 'node:crypto';
 import { mkdir, readFile } from 'node:fs/promises';
 
 import { expect, test, type Page } from '@playwright/test';
+import {
+  applyKnowledgeAsync,
+  organizeKnowledgeAsync,
+  type AsyncKnowledgeSession,
+} from './knowledge-async';
 
 type PublishedReleaseReadback = { status: number; releaseRef: string | null };
 
@@ -155,6 +160,7 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   const referenceNotes = '参考提示：请核实上门范围，不得把测试价格当成商家报价。';
   const merchantPassword = randomBytes(24).toString('base64url');
   const pathMode = process.env['H5CS_E2E_PATH_MODE'];
+  const knowledgeAsync = process.env['H5CS_E2E_KNOWLEDGE_ASYNC'] === 'true';
   const prefixed = pathMode !== undefined && pathMode !== 'root';
   const sameOrigin = pathMode === 'single_domain';
   const merchantOrigin = `http://127.0.0.1:${sameOrigin ? '3001' : '3000'}`;
@@ -440,23 +446,33 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
   ).toBeDisabled();
   await materialPanel.getByRole('checkbox', { name: /我同意将所选材料的文字/u }).check();
   await waitForMerchantModelSlot(merchantPage);
-  const organizationRequest = merchantPage.waitForRequest(
-    (request) =>
-      request.method() === 'POST' &&
-      new URL(request.url()).pathname.endsWith(`/knowledge/${assistantId}/materials/organize`),
-  );
-  await materialPanel.getByRole('button', { name: 'AI 整理所选材料', exact: true }).click();
-  const organization = (await organizationRequest).postDataJSON() as { sourceIds: string[] };
-  expect(organization.sourceIds).toHaveLength(1);
-  expect(organization.sourceIds).not.toContain(deletedSource.sourceId);
-  await expect(materialPanel.getByLabel('知识整理稿', { exact: true })).toHaveValue(
-    /预约需提前1天/u,
-    { timeout: 30000 },
-  );
+  let asyncKnowledge: AsyncKnowledgeSession | null = null;
+  if (knowledgeAsync) {
+    asyncKnowledge = await organizeKnowledgeAsync(
+      merchantPage,
+      materialPanel,
+      assistantId,
+      deletedSource.sourceId,
+    );
+  } else {
+    const organizationRequest = merchantPage.waitForRequest(
+      (request) =>
+        request.method() === 'POST' &&
+        new URL(request.url()).pathname.endsWith(`/knowledge/${assistantId}/materials/organize`),
+    );
+    await materialPanel.getByRole('button', { name: 'AI 整理所选材料', exact: true }).click();
+    const organization = (await organizationRequest).postDataJSON() as { sourceIds: string[] };
+    expect(organization.sourceIds).toHaveLength(1);
+    expect(organization.sourceIds).not.toContain(deletedSource.sourceId);
+    await expect(materialPanel.getByLabel('知识整理稿', { exact: true })).toHaveValue(
+      /预约需提前1天/u,
+      { timeout: 30000 },
+    );
+  }
   recordMerchantModelRequest(merchantPage);
   await mkdir('artifacts/ops-enhancement', { recursive: true });
   await materialPanel.screenshot({
-    path: `artifacts/ops-enhancement/materials-desktop-${pathMode ?? 'root'}.png`,
+    path: `artifacts/ops-enhancement/materials-desktop-${pathMode ?? 'root'}${knowledgeAsync ? '-async' : ''}.png`,
   });
   const materialViewport = merchantPage.viewportSize();
   await merchantPage.setViewportSize({ width: 390, height: 844 });
@@ -466,12 +482,16 @@ test('operator provisions a merchant, merchant previews and publishes, consumer 
     ),
   ).toBe(true);
   await materialPanel.screenshot({
-    path: `artifacts/ops-enhancement/materials-mobile-${pathMode ?? 'root'}.png`,
+    path: `artifacts/ops-enhancement/materials-mobile-${pathMode ?? 'root'}${knowledgeAsync ? '-async' : ''}.png`,
   });
   await merchantPage.setViewportSize(materialViewport ?? { width: 1280, height: 720 });
-  await materialPanel.getByRole('checkbox', { name: /我已核对整理稿/u }).check();
-  await materialPanel.getByRole('button', { name: '保存整理稿到客服草稿', exact: true }).click();
-  await expect(materialPanel.getByRole('status')).toContainText('知识已保存到草稿');
+  if (asyncKnowledge) {
+    await applyKnowledgeAsync(merchantPage, materialPanel, asyncKnowledge);
+  } else {
+    await materialPanel.getByRole('checkbox', { name: /我已核对整理稿/u }).check();
+    await materialPanel.getByRole('button', { name: '保存整理稿到客服草稿', exact: true }).click();
+    await expect(materialPanel.getByRole('status')).toContainText('知识已保存到草稿');
+  }
   await openMerchantDetails(merchantPage, '查看已保存的商品与服务资料');
   await expect(merchantPage.locator('.workflow-saved-text')).toContainText('预约需提前1天');
   await expect(

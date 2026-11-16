@@ -219,7 +219,7 @@ try {
       {
         kind: 'stage1-deployed-schema-upgrade',
         fromMigrations: 18,
-        toMigrations: 19,
+        toMigrations: plan.entries.length,
         legacyTables: oldTables.length,
         oldDataDigestBefore: before.sha256,
         oldDataDigestAfter: after.sha256,

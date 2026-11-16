@@ -1,4 +1,4 @@
-import type { ConversationTurnClaim } from '@h5cs/database';
+import type { ConversationTurnClaim, KnowledgeOrganizationClaim } from '@h5cs/database';
 import { settlesWithin } from './shutdown-budget.js';
 import { abortable } from './abortable.js';
 
@@ -7,6 +7,7 @@ export type ModelContext = Readonly<{
   merchantId: string;
   operation: ModelOperation;
   claim?: ConversationTurnClaim;
+  knowledgeClaim?: KnowledgeOrganizationClaim;
   permit?: ModelPermit;
 }>;
 export type ModelAttemptStore = Readonly<{
@@ -115,6 +116,27 @@ export class ModelRuntime {
     return this.#enqueue(merchantId, 'consumer', signal, run);
   }
 
+  public bindKnowledgeClaim(permit: ModelPermit, claim: KnowledgeOrganizationClaim): void {
+    const scope = this.#permits.get(permit);
+    if (
+      !scope ||
+      scope.operation !== 'organize' ||
+      scope.merchantId !== claim.merchantId ||
+      scope.used ||
+      scope.claimKey
+    )
+      throw new ModelCapacityError('Knowledge permit claim scope mismatch');
+    scope.claimKey = `knowledge:${claim.jobId}:${claim.claimGeneration}`;
+  }
+
+  public enqueueKnowledge<T>(
+    merchantId: string,
+    signal: AbortSignal,
+    run: (permit: ModelPermit) => Promise<T>,
+  ): Promise<T> {
+    return this.#enqueue(merchantId, 'organize', signal, run);
+  }
+
   public async dispatch<T>(
     context: ModelContext,
     signal: AbortSignal,
@@ -206,7 +228,14 @@ export class ModelRuntime {
         scope.operation !== context.operation ||
         (context.operation === 'consumer' &&
           (!context.claim ||
-            scope.claimKey !== `${context.claim.jobId}:${context.claim.claimGeneration}`))
+            scope.claimKey !== `${context.claim.jobId}:${context.claim.claimGeneration}`)) ||
+        (context.knowledgeClaim &&
+          (context.operation !== 'organize' ||
+            scope.claimKey !==
+              `knowledge:${context.knowledgeClaim.jobId}:${context.knowledgeClaim.claimGeneration}`)) ||
+        (context.operation === 'organize' &&
+          scope.claimKey !== undefined &&
+          !context.knowledgeClaim)
       )
         throw new ModelCapacityError('Invalid model permit scope or reuse');
       scope.used = true;

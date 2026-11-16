@@ -5,6 +5,7 @@ import {
   MySqlConversationTurnJobRepository,
   MySqlMarketplaceRepository,
   MySqlModelCallAttemptRepository,
+  MySqlKnowledgeOrganizationRepository,
   type DatabaseConnectionConfig,
 } from '@h5cs/database';
 
@@ -17,6 +18,10 @@ import {
   type ConversationTurnStore,
 } from './conversation-turn-processor.js';
 import { ModelRuntime, type ModelAttemptStore } from './model-runtime.js';
+import {
+  KnowledgeOrganizationProcessor,
+  type KnowledgeOrganizationStore,
+} from './knowledge-organization-processor.js';
 
 type DispatchDependencies = Readonly<{
   fetchImpl?: typeof fetch;
@@ -25,11 +30,17 @@ type DispatchDependencies = Readonly<{
   storeFactory?: (database: DatabaseConnectionConfig) => ConversationTurnStore;
   runtime?: ModelRuntime;
   attempts?: ModelAttemptStore;
+  knowledgeStoreFactory?: (database: DatabaseConnectionConfig) => KnowledgeOrganizationStore;
 }>;
 
 export type ConversationDispatchResult =
   | Readonly<{ configured: false; reason: string }>
-  | Readonly<{ configured: true; processor: ConversationTurnProcessor; runtime: ModelRuntime }>;
+  | Readonly<{
+      configured: true;
+      processor: ConversationTurnProcessor;
+      runtime: ModelRuntime;
+      knowledgeProcessor?: KnowledgeOrganizationProcessor;
+    }>;
 
 export function createConversationDispatch(
   environment: NodeJS.ProcessEnv = process.env,
@@ -66,5 +77,15 @@ export function createConversationDispatch(
       generator,
       `worker_${randomBytes(16).toString('hex')}`,
     ),
+    ...(environment['KNOWLEDGE_ASYNC_ENABLED'] === 'true'
+      ? {
+          knowledgeProcessor: new KnowledgeOrganizationProcessor(
+            dependencies.knowledgeStoreFactory?.(database.config) ??
+              new MySqlKnowledgeOrganizationRepository(database.config, true),
+            generator,
+            `knowledge_${randomBytes(16).toString('hex')}`,
+          ),
+        }
+      : {}),
   };
 }
